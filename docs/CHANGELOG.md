@@ -1,6 +1,6 @@
-﻿# Agent Runtime Evolution Log
+# Agent Runtime Evolution Log
 
-> 规则：按完成时间倒序排列。每条记录必须关联代码范围、测试和 Git commit；提交前 commit 可暂记为 `pending`，合并前必须补全。
+> 规则：按完成时间倒序排列。每条记录必须关联代码范围、测试和 Git commit；提交前 commit 可暂记为 `9e6c812`，合并前必须补全。
 
 ---
 
@@ -22,7 +22,7 @@
   - `scripts/check_docs.py`
   - `.github/workflows/quality.yml`
   - `.github/PULL_REQUEST_TEMPLATE.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`9e6c812`
 - **关联 ADR**：不需要；该变更建立治理流程，不改变 Runtime 公共接口、数据模型或安全边界。
 
 ### 变更摘要
@@ -50,7 +50,7 @@ Runtime 代码架构不变；新增围绕代码事实的文档治理层和 CI �
 
 ### 已知限制
 
-- 仓库尚无首次 Git commit，因此关联 commit 暂为 `pending`。
+- 仓库尚无首次 Git commit，因此关联 commit 暂为 `9e6c812`。
 - 自动检查只能识别文件级变更，是否需要 ADR 仍需开发者根据模板判断。
 
 ### 测试与验收
@@ -83,7 +83,7 @@ pytest
   - `tests/test_domain.py`
   - `tests/test_runtime.py`
   - `tests/test_tools.py`
-- **关联 commit**：`pending`
+- **关联 commit**：`9e6c812`
 - **关联 ADR**：[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
 
 ### 变更摘要
