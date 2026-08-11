@@ -1,0 +1,42 @@
+name: quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  docs-and-tests:
+    runs-on: ubuntu-latest
+    env:
+      BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest pytest-asyncio
+
+      - name: Validate evolution documentation
+        run: |
+          if [ -z "$BASE_REF" ] || [[ "$BASE_REF" =~ ^0+$ ]]; then
+            echo "Bootstrapping the repository: commit hashes will be backfilled after the first commit."
+            python scripts/check_docs.py
+          else
+            python scripts/check_docs.py --require-commit-hash --base-ref "$BASE_REF"
+          fi
+
+      - name: Run tests
+        run: pytest
