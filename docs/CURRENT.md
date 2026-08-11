@@ -1,10 +1,10 @@
-﻿# Agent Runtime 当前状态
+# Agent Runtime 当前状态
 
 - **当前版本**：`0.1.0`
 - **当前里程碑**：单 Agent Runtime MVP + 可追溯演进文档体系
 - **Runtime 构建完成时间**：2026-08-11（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`（仓库尚未创建首次提交）
+- **当前代码基线 commit**：`9e6c812`（仓库尚未创建首次提交）
 - **最近演进记录**：[E2026-08-11-002](./CHANGELOG.md#e2026-08-11-002)
 
 ## 状态定义
