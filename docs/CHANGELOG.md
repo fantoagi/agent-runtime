@@ -4,6 +4,80 @@
 
 ---
 
+<a id="e2026-08-13-002"></a>
+## E2026-08-13-002：增加 FastAPI Run API 与 SSE 事件接口
+
+- **完成时间**：2026-08-13
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `pyproject.toml`
+  - `src/agent_runtime/api/__init__.py`
+  - `src/agent_runtime/api/app.py`
+  - `tests/test_api.py`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0006-fastapi-sse-adapter.md`
+  - `README.md`
+- **关联 commit**：`f4fc22b`
+- **关联 ADR**：[ADR-0006](./adr/0006-fastapi-sse-adapter.md)
+
+### 变更摘要
+
+为 Runtime 增加独立 FastAPI HTTP Adapter 和基于持久化 Event Log 的 SSE 接口，使客户端可以创建、查询、控制 Run，并订阅可恢复的运行事件。
+
+### 系统架构
+
+- FastAPI 位于 Runtime Core 之外的 Application / Adapter Layer。
+- API 不直接操作 SQLite connection，而是复用 `Runtime`、`SQLiteStore` 和 `Runtime.stream()`。
+- SSE 使用 Event sequence 作为事件 id，并通过 `after_sequence` 支持断点续传。
+- API 依赖通过 optional extra 提供，核心包默认不依赖 FastAPI。
+
+### 实现方式
+
+- 新增 `agent_runtime.api.create_app()` 和 `create_demo_app()`。
+- `POST /runs` 使用 `Runtime.start()` 异步启动 Run，返回 `202 Accepted`。
+- 历史事件通过 `GET /runs/{run_id}/events` 读取；事件流通过 `StreamingResponse` 输出。
+- 暴露 pause、resume、cancel 和 approval resolve，保留 Runtime 原有状态机与审批语义。
+- 使用 Pydantic 请求模型校验创建 Run 和审批决策。
+
+### 当前功能
+
+- `GET /health`。
+- `POST /runs`、`GET /runs/{run_id}`。
+- `GET /runs/{run_id}/events`，支持 `after_sequence`。
+- `GET /runs/{run_id}/events/stream`，输出 `id`、`event`、`data` 三段 SSE。
+- Run pause / resume / cancel。
+- Pending approval 查询与审批决策提交。
+- 不存在的 Run 或 Approval 返回 404，非法生命周期操作返回 409。
+
+### 已知限制
+
+- SSE 当前通过 SQLite polling，不是跨进程消息总线。
+- SSE 输出 Runtime Event，不是模型 token 原生流。
+- API 内异步任务属于当前进程，尚无 Worker lease、鉴权、限流和多租户隔离。
+- `create_demo_app()` 只注册确定性的 Demo Agent。
+
+### 测试与验收
+
+2026-08-13 验证结果：`19 passed`。
+
+```powershell
+cd D:\AICoding\Agent
+python -m pytest -p no:cacheprovider
+python scripts/check_docs.py
+```
+
+测试覆盖健康检查、创建和查询 Run、历史事件顺序、SSE 编码、断点续传、生命周期接口和 404 行为。
+
+### 后续计划
+
+进入 v0.4：增加真实模型 Provider 的 token streaming，并保持 Runtime Event 与 Model Token Stream 的协议边界。
+
+---
+
 <a id="e2026-08-13-001"></a>
 ## E2026-08-13-001：完成可靠单 Agent 执行 v0.2
 

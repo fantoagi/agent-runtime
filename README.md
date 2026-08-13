@@ -9,13 +9,30 @@ checkpoints, approval gates, cooperative cancellation, and a CLI.
 ```powershell
 cd D:\AICoding\Agent
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e .
+python -m pip install -e .[api]
 python -m pip install pytest pytest-asyncio
 agent-runtime demo "19 * 23"
 ```
 
 The demo uses a deterministic local provider. Set `OPENAI_API_KEY` and select the
 OpenAI-compatible provider in application code when connecting to a real model.
+
+## FastAPI / SSE
+
+启动本地 Demo API：
+
+```powershell
+uvicorn agent_runtime.api.app:app --reload
+```
+
+然后可以：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/runs -ContentType 'application/json' -Body '{"input":"19 * 23"}'
+```
+
+SSE 事件接口为 `GET /runs/{run_id}/events/stream?after_sequence=0`。这里的 SSE 是持久化 Runtime Event 流，不是模型 token streaming。
 
 ## Development checks
 

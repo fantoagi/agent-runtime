@@ -1,8 +1,8 @@
 # Agent Runtime 当前架构
 
 > 最近更新：2026-08-13
-> 关联记录：[E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001)
-> 关联决策：[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
+> 关联记录：[E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002)
+> 关联决策：[ADR-0006](./adr/0006-fastapi-sse-adapter.md)、[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
 
 ## 1. 系统目标和边界
 
@@ -15,6 +15,7 @@
 ```mermaid
 flowchart TD
     CLI["CLI / Python SDK"]
+    API["FastAPI / SSE Adapter"]
     Runtime["Runtime Kernel"]
     Model["Model Provider"]
     Tools["Tool Registry / Executor"]
@@ -24,6 +25,7 @@ flowchart TD
     Artifacts["Artifact Store"]
 
     CLI --> Runtime
+    API --> Runtime
     Runtime --> Model
     Runtime --> Tools
     Runtime --> State
@@ -134,7 +136,7 @@ step.completed
 
 `Runtime.stream()` 轮询 SQLite 中的新事件并按 sequence 输出。该接口为未来 SSE、WebSocket 或消息队列适配保留稳定消费边界。
 
-## 9. SDK 与 CLI
+## 9. API、SDK 与 CLI
 
 Python SDK 暴露 Runtime 和领域对象，并提供本地 Demo runtime 构造函数。
 
@@ -153,6 +155,19 @@ agent-runtime resolve-unknown
 ```
 
 核心 Runtime 不依赖 CLI 或 HTTP 框架。
+
+## 9.1 FastAPI Run API 与 SSE
+
+FastAPI 位于 Application / Adapter Layer，只调用 Runtime、SQLiteStore 和 Runtime.stream()，不直接实现模型循环、工具执行或 SQLite 连接操作。
+
+- `POST /runs` 创建并异步启动 Run，返回 `202 Accepted`。
+- `GET /runs/{run_id}` 查询持久化 Run 状态。
+- `GET /runs/{run_id}/events` 读取按 sequence 排序的历史事件。
+- `GET /runs/{run_id}/events/stream?after_sequence=N` 通过 SSE 轮询 `Runtime.stream()`，使用 Event sequence 作为 SSE id，支持断点续传。
+- `POST /runs/{run_id}/pause|resume|cancel` 复用 Runtime 生命周期控制。
+- `GET /runs/{run_id}/approvals/pending` 与 `POST /approvals/{approval_id}/resolve` 完成人工审批。
+
+v0.3 的 SSE 是持久化 Runtime Event 流，不是模型 token 原生流。
 
 ## 10. 安全边界
 
