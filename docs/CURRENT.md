@@ -4,7 +4,7 @@
 - **当前里程碑**：FastAPI Run API 与 SSE 持久化事件接口 v0.3
 - **Runtime 构建完成时间**：2026-08-13（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`（v0.3 变更尚未提交）
+- **当前代码基线 commit**：`f4fc22b`（v0.3 变更尚未提交）
 - **最近演进记录**：[E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002)
 
 ## 状态定义
