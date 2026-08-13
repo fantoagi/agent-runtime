@@ -24,7 +24,7 @@
   - `docs/CHANGELOG.md`
   - `docs/adr/README.md`
   - `docs/adr/0005-tool-execution-idempotency.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`a765fa6`
 - **关联 ADR**：[ADR-0005](./adr/0005-tool-execution-idempotency.md)
 
 ### 变更摘要
@@ -89,7 +89,6 @@ agent-runtime demo "19 * 23"
 ### 后续计划
 
 进入 v0.3：在保持 Runtime Core 无 HTTP 依赖的前提下增加 FastAPI Run API 和 SSE 持久化事件接口。
-
 ---
 
 <a id="e2026-08-11-002"></a>
