@@ -21,7 +21,7 @@
   - `docs/adr/README.md`
   - `docs/adr/0006-fastapi-sse-adapter.md`
   - `README.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`f4fc22b`
 - **关联 ADR**：[ADR-0006](./adr/0006-fastapi-sse-adapter.md)
 
 ### 变更摘要
