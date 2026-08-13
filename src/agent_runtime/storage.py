@@ -5,22 +5,122 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, Callable
 
 from .domain import (
     AgentRun,
     Approval,
     Checkpoint,
+    Message,
     RunNotFound,
-    RunStatus,
     RuntimeEvent,
+    Step,
+    StepStatus,
     ToolCall,
+    ToolExecution,
+    ToolExecutionStatus,
     utc_now,
+)
+
+Migration = tuple[int, str, str]
+
+MIGRATIONS: tuple[Migration, ...] = (
+    (
+        1,
+        "initial_runtime_schema",
+        """
+        CREATE TABLE IF NOT EXISTS runs (
+            id TEXT PRIMARY KEY,
+            agent_name TEXT NOT NULL,
+            input TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            result TEXT,
+            error TEXT,
+            step_count INTEGER NOT NULL,
+            tool_call_count INTEGER NOT NULL,
+            metadata_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS events (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES runs(id),
+            sequence INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            UNIQUE(run_id, sequence)
+        );
+        CREATE TABLE IF NOT EXISTS checkpoints (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES runs(id),
+            step INTEGER NOT NULL,
+            messages_json TEXT NOT NULL,
+            tool_call_count INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS approvals (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES runs(id),
+            tool_call_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            reason TEXT,
+            created_at TEXT NOT NULL,
+            resolved_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_events_run_sequence
+            ON events(run_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_checkpoints_run_step
+            ON checkpoints(run_id, step DESC);
+        CREATE INDEX IF NOT EXISTS idx_approvals_run_status
+            ON approvals(run_id, status);
+        """,
+    ),
+    (
+        2,
+        "durable_steps_and_tool_executions",
+        """
+        CREATE TABLE IF NOT EXISTS steps (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES runs(id),
+            step_index INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            assistant_message_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(run_id, step_index)
+        );
+        CREATE TABLE IF NOT EXISTS tool_executions (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES runs(id),
+            step_id TEXT NOT NULL REFERENCES steps(id),
+            position INTEGER NOT NULL,
+            tool_call_id TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            arguments_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            result_content TEXT,
+            result_data_json TEXT,
+            error TEXT,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            requires_approval INTEGER NOT NULL DEFAULT 0,
+            side_effecting INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            UNIQUE(run_id, tool_call_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_steps_run_index
+            ON steps(run_id, step_index);
+        CREATE INDEX IF NOT EXISTS idx_tool_executions_run_status
+            ON tool_executions(run_id, status, position);
+        """,
+    ),
 )
 
 
 class SQLiteStore:
-    """Small durable store. Each write is committed before returning to the runtime."""
+    """Durable SQLite store with explicit schema migrations and atomic write bundles."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -30,206 +130,649 @@ class SQLiteStore:
         self._lock = RLock()
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA foreign_keys=ON")
-        self._init_schema()
+        self._migrate()
+
+    @property
+    def schema_version(self) -> int:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
+            ).fetchone()
+        return int(row["version"])
 
     def close(self) -> None:
         with self._lock:
             self._connection.close()
 
-    def _init_schema(self) -> None:
-        with self._lock, self._connection:
-            self._connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS runs (
-                    id TEXT PRIMARY KEY,
-                    agent_name TEXT NOT NULL,
-                    input TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    result TEXT,
-                    error TEXT,
-                    step_count INTEGER NOT NULL,
-                    tool_call_count INTEGER NOT NULL,
-                    metadata_json TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS events (
-                    id TEXT PRIMARY KEY,
-                    run_id TEXT NOT NULL REFERENCES runs(id),
-                    sequence INTEGER NOT NULL,
-                    type TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    UNIQUE(run_id, sequence)
-                );
-                CREATE TABLE IF NOT EXISTS checkpoints (
-                    id TEXT PRIMARY KEY,
-                    run_id TEXT NOT NULL REFERENCES runs(id),
-                    step INTEGER NOT NULL,
-                    messages_json TEXT NOT NULL,
-                    tool_call_count INTEGER NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS approvals (
-                    id TEXT PRIMARY KEY,
-                    run_id TEXT NOT NULL REFERENCES runs(id),
-                    tool_call_json TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    reason TEXT,
-                    created_at TEXT NOT NULL,
-                    resolved_at TEXT
-                );
-                CREATE INDEX IF NOT EXISTS idx_events_run_sequence ON events(run_id, sequence);
-                CREATE INDEX IF NOT EXISTS idx_checkpoints_run_step ON checkpoints(run_id, step DESC);
-                CREATE INDEX IF NOT EXISTS idx_approvals_run_status ON approvals(run_id, status);
-                """
-            )
-
-    def create_run(self, run: AgentRun) -> None:
+    def _migrate(self) -> None:
         with self._lock, self._connection:
             self._connection.execute(
                 """
-                INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    run.id,
-                    run.agent_name,
-                    run.input,
-                    run.status.value,
-                    run.created_at.isoformat(),
-                    run.updated_at.isoformat(),
-                    run.result,
-                    run.error,
-                    run.step_count,
-                    run.tool_call_count,
-                    self._dump(run.metadata),
-                ),
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at TEXT NOT NULL
+                )
+                """
             )
+            applied = {
+                int(row["version"])
+                for row in self._connection.execute(
+                    "SELECT version FROM schema_migrations"
+                ).fetchall()
+            }
+            existing_tables = {
+                row["name"]
+                for row in self._connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "runs" in existing_tables and 1 not in applied:
+                self._connection.execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                    (1, "initial_runtime_schema", utc_now().isoformat()),
+                )
+                applied.add(1)
+            for version, name, sql in MIGRATIONS:
+                if version in applied:
+                    continue
+                self._connection.executescript(sql)
+                self._connection.execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                    (version, name, utc_now().isoformat()),
+                )
+
+        self._ensure_approval_columns()
+
+    def _ensure_approval_columns(self) -> None:
+        with self._lock, self._connection:
+            columns = {
+                row["name"]
+                for row in self._connection.execute("PRAGMA table_info(approvals)").fetchall()
+            }
+            if "tool_execution_id" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE approvals ADD COLUMN tool_execution_id TEXT"
+                )
+            if "kind" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE approvals ADD COLUMN kind TEXT NOT NULL DEFAULT 'tool'"
+                )
+            self._connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_approvals_execution ON approvals(tool_execution_id)"
+            )
+
+    def create_run_with_event(
+        self,
+        run: AgentRun,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        with self._lock, self._connection:
+            self._insert_run(run)
+            return self._append_event_locked(run.id, event_type, payload)
+
+    def create_run(self, run: AgentRun) -> None:
+        with self._lock, self._connection:
+            self._insert_run(run)
+
+    def _insert_run(self, run: AgentRun) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO runs (
+                id, agent_name, input, status, created_at, updated_at, result, error,
+                step_count, tool_call_count, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            self._run_values(run),
+        )
 
     def get_run(self, run_id: str) -> AgentRun:
         with self._lock:
-            row = self._connection.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+            row = self._connection.execute(
+                "SELECT * FROM runs WHERE id = ?", (run_id,)
+            ).fetchone()
         if row is None:
             raise RunNotFound(f"Run {run_id} was not found.")
-        return AgentRun.from_dict(
-            {
-                **dict(row),
-                "metadata": self._load(row["metadata_json"]),
-            }
-        )
+        return self._run_from_row(row)
 
     def list_runs(self, limit: int = 50) -> list[AgentRun]:
         with self._lock:
             rows = self._connection.execute(
                 "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
-        return [
-            AgentRun.from_dict({**dict(row), "metadata": self._load(row["metadata_json"])})
-            for row in rows
-        ]
+        return [self._run_from_row(row) for row in rows]
 
     def save_run(self, run: AgentRun) -> None:
         with self._lock, self._connection:
-            cursor = self._connection.execute(
-                """
-                UPDATE runs SET status=?, updated_at=?, result=?, error=?, step_count=?,
-                tool_call_count=?, metadata_json=? WHERE id=?
-                """,
-                (
-                    run.status.value,
-                    run.updated_at.isoformat(),
-                    run.result,
-                    run.error,
-                    run.step_count,
-                    run.tool_call_count,
-                    self._dump(run.metadata),
-                    run.id,
-                ),
-            )
+            self._update_run_locked(run)
+
+    def save_run_with_event(
+        self,
+        run: AgentRun,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        before_commit: Callable[[], None] | None = None,
+    ) -> RuntimeEvent:
+        with self._lock, self._connection:
+            self._update_run_locked(run)
+            if before_commit is not None:
+                before_commit()
+            return self._append_event_locked(run.id, event_type, payload)
+
+    def _update_run_locked(self, run: AgentRun) -> None:
+        cursor = self._connection.execute(
+            """
+            UPDATE runs SET status=?, updated_at=?, result=?, error=?, step_count=?,
+            tool_call_count=?, metadata_json=? WHERE id=?
+            """,
+            (
+                run.status.value,
+                run.updated_at.isoformat(),
+                run.result,
+                run.error,
+                run.step_count,
+                run.tool_call_count,
+                self._dump(run.metadata),
+                run.id,
+            ),
+        )
         if cursor.rowcount != 1:
             raise RunNotFound(f"Run {run.id} was not found.")
 
-    def append_event(self, run_id: str, event_type: str, payload: dict[str, Any] | None = None) -> RuntimeEvent:
+    def append_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
         with self._lock, self._connection:
-            row = self._connection.execute(
-                "SELECT COALESCE(MAX(sequence), 0) AS max_sequence FROM events WHERE run_id=?", (run_id,)
-            ).fetchone()
-            event = RuntimeEvent.create(run_id, int(row["max_sequence"]) + 1, event_type, payload)
-            self._connection.execute(
-                "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    event.id,
-                    event.run_id,
-                    event.sequence,
-                    event.type,
-                    event.timestamp.isoformat(),
-                    self._dump(event.payload),
-                ),
-            )
+            return self._append_event_locked(run_id, event_type, payload)
+
+    def _append_event_locked(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        row = self._connection.execute(
+            "SELECT COALESCE(MAX(sequence), 0) AS max_sequence FROM events WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        event = RuntimeEvent.create(run_id, int(row["max_sequence"]) + 1, event_type, payload)
+        self._connection.execute(
+            """
+            INSERT INTO events (id, run_id, sequence, type, timestamp, payload_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.id,
+                event.run_id,
+                event.sequence,
+                event.type,
+                event.timestamp.isoformat(),
+                self._dump(event.payload),
+            ),
+        )
         return event
 
     def events_since(self, run_id: str, after_sequence: int = 0) -> list[RuntimeEvent]:
         with self._lock:
             rows = self._connection.execute(
-                "SELECT * FROM events WHERE run_id=? AND sequence>? ORDER BY sequence", (run_id, after_sequence)
+                """
+                SELECT * FROM events
+                WHERE run_id=? AND sequence>?
+                ORDER BY sequence
+                """,
+                (run_id, after_sequence),
             ).fetchall()
         return [
-            RuntimeEvent.from_dict({**dict(row), "payload": self._load(row["payload_json"])})
+            RuntimeEvent.from_dict(
+                {**dict(row), "payload": self._load(row["payload_json"])}
+            )
             for row in rows
         ]
 
     def save_checkpoint(self, checkpoint: Checkpoint) -> None:
         with self._lock, self._connection:
-            self._connection.execute(
-                "INSERT INTO checkpoints VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    checkpoint.id,
-                    checkpoint.run_id,
-                    checkpoint.step,
-                    self._dump([message.to_dict() for message in checkpoint.messages]),
-                    checkpoint.tool_call_count,
-                    checkpoint.created_at.isoformat(),
-                ),
+            self._insert_checkpoint_locked(checkpoint)
+
+    def save_checkpoint_with_event(
+        self,
+        checkpoint: Checkpoint,
+        event_type: str = "checkpoint.created",
+        payload: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        with self._lock, self._connection:
+            self._insert_checkpoint_locked(checkpoint)
+            return self._append_event_locked(
+                checkpoint.run_id,
+                event_type,
+                payload
+                or {"checkpoint_id": checkpoint.id, "step": checkpoint.step},
             )
+
+    def _insert_checkpoint_locked(self, checkpoint: Checkpoint) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO checkpoints (
+                id, run_id, step, messages_json, tool_call_count, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                checkpoint.id,
+                checkpoint.run_id,
+                checkpoint.step,
+                self._dump([message.to_dict() for message in checkpoint.messages]),
+                checkpoint.tool_call_count,
+                checkpoint.created_at.isoformat(),
+            ),
+        )
 
     def latest_checkpoint(self, run_id: str) -> Checkpoint | None:
         with self._lock:
             row = self._connection.execute(
-                "SELECT * FROM checkpoints WHERE run_id=? ORDER BY step DESC, created_at DESC LIMIT 1", (run_id,)
+                """
+                SELECT * FROM checkpoints
+                WHERE run_id=?
+                ORDER BY step DESC, created_at DESC
+                LIMIT 1
+                """,
+                (run_id,),
             ).fetchone()
         if row is None:
             return None
         return Checkpoint.from_dict(
-            {
-                **dict(row),
-                "messages": self._load(row["messages_json"]),
-            }
+            {**dict(row), "messages": self._load(row["messages_json"])}
         )
+
+    def create_step_with_event(
+        self,
+        run: AgentRun,
+        step: Step,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        with self._lock, self._connection:
+            self._update_run_locked(run)
+            self._insert_step_locked(step)
+            return self._append_event_locked(run.id, event_type, payload)
+
+    def _insert_step_locked(self, step: Step) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO steps (
+                id, run_id, step_index, status, assistant_message_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                step.id,
+                step.run_id,
+                step.step_index,
+                step.status.value,
+                self._dump(step.assistant_message.to_dict())
+                if step.assistant_message
+                else None,
+                step.created_at.isoformat(),
+                step.updated_at.isoformat(),
+            ),
+        )
+
+    def save_model_tool_plan(
+        self,
+        step: Step,
+        executions: list[ToolExecution],
+        checkpoint: Checkpoint,
+        model_payload: dict[str, Any],
+        *,
+        delta_payload: dict[str, Any] | None = None,
+        before_commit: Callable[[], None] | None = None,
+    ) -> None:
+        with self._lock, self._connection:
+            self._update_step_locked(step)
+            for execution in executions:
+                self._insert_tool_execution_locked(execution)
+            self._insert_checkpoint_locked(checkpoint)
+            self._append_event_locked(step.run_id, "model.completed", model_payload)
+            if delta_payload is not None:
+                self._append_event_locked(step.run_id, "model.delta", delta_payload)
+            self._append_event_locked(
+                step.run_id,
+                "checkpoint.created",
+                {"checkpoint_id": checkpoint.id, "step": checkpoint.step},
+            )
+            if before_commit is not None:
+                before_commit()
+
+    def complete_run_from_model(
+        self,
+        run: AgentRun,
+        step: Step,
+        checkpoint: Checkpoint,
+        model_payload: dict[str, Any],
+        *,
+        delta_payload: dict[str, Any] | None = None,
+        before_commit: Callable[[], None] | None = None,
+    ) -> None:
+        with self._lock, self._connection:
+            self._update_step_locked(step)
+            self._update_run_locked(run)
+            self._insert_checkpoint_locked(checkpoint)
+            self._append_event_locked(run.id, "model.completed", model_payload)
+            if delta_payload is not None:
+                self._append_event_locked(run.id, "model.delta", delta_payload)
+            self._append_event_locked(
+                run.id, "step.completed", {"step": step.step_index}
+            )
+            self._append_event_locked(
+                run.id,
+                "checkpoint.created",
+                {"checkpoint_id": checkpoint.id, "step": checkpoint.step},
+            )
+            self._append_event_locked(run.id, "run.completed", {"result": run.result})
+            if before_commit is not None:
+                before_commit()
+
+    def complete_step_with_checkpoint(
+        self,
+        step: Step,
+        checkpoint: Checkpoint,
+    ) -> None:
+        with self._lock, self._connection:
+            self._update_step_locked(step)
+            self._insert_checkpoint_locked(checkpoint)
+            self._append_event_locked(
+                step.run_id, "step.completed", {"step": step.step_index}
+            )
+            self._append_event_locked(
+                step.run_id,
+                "checkpoint.created",
+                {"checkpoint_id": checkpoint.id, "step": checkpoint.step},
+            )
+
+    def save_step(self, step: Step) -> None:
+        with self._lock, self._connection:
+            self._update_step_locked(step)
+
+    def save_step_with_event(
+        self,
+        step: Step,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        with self._lock, self._connection:
+            self._update_step_locked(step)
+            return self._append_event_locked(step.run_id, event_type, payload)
+
+    def _update_step_locked(self, step: Step) -> None:
+        step.updated_at = utc_now()
+        cursor = self._connection.execute(
+            """
+            UPDATE steps SET status=?, assistant_message_json=?, updated_at=?
+            WHERE id=?
+            """,
+            (
+                step.status.value,
+                self._dump(step.assistant_message.to_dict())
+                if step.assistant_message
+                else None,
+                step.updated_at.isoformat(),
+                step.id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise KeyError(f"Step {step.id} was not found.")
+
+    def get_step(self, step_id: str) -> Step:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM steps WHERE id=?", (step_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"Step {step_id} was not found.")
+        return self._step_from_row(row)
+
+    def latest_incomplete_step(self, run_id: str) -> Step | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM steps
+                WHERE run_id=? AND status IN ('running', 'waiting_for_tools')
+                ORDER BY step_index DESC
+                LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+        return self._step_from_row(row) if row else None
+
+    def create_tool_executions(
+        self,
+        step: Step,
+        executions: list[ToolExecution],
+    ) -> None:
+        with self._lock, self._connection:
+            self._update_step_locked(step)
+            for execution in executions:
+                self._insert_tool_execution_locked(execution)
+
+    def _insert_tool_execution_locked(self, execution: ToolExecution) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO tool_executions (
+                id, run_id, step_id, position, tool_call_id, tool_name,
+                arguments_json, status, result_content, result_data_json, error,
+                idempotency_key, requires_approval, side_effecting,
+                created_at, started_at, completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                execution.id,
+                execution.run_id,
+                execution.step_id,
+                execution.position,
+                execution.tool_call.id,
+                execution.tool_call.name,
+                self._dump(execution.tool_call.arguments),
+                execution.status.value,
+                execution.result_content,
+                self._dump(execution.result_data)
+                if execution.result_data is not None
+                else None,
+                execution.error,
+                execution.idempotency_key,
+                int(execution.requires_approval),
+                int(execution.side_effecting),
+                execution.created_at.isoformat(),
+                execution.started_at.isoformat() if execution.started_at else None,
+                execution.completed_at.isoformat() if execution.completed_at else None,
+            ),
+        )
+
+    def get_tool_execution(self, execution_id: str) -> ToolExecution:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM tool_executions WHERE id=?", (execution_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"Tool execution {execution_id} was not found.")
+        return self._tool_execution_from_row(row)
+
+    def get_tool_execution_by_call(
+        self, run_id: str, tool_call_id: str
+    ) -> ToolExecution | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM tool_executions
+                WHERE run_id=? AND tool_call_id=?
+                """,
+                (run_id, tool_call_id),
+            ).fetchone()
+        return self._tool_execution_from_row(row) if row else None
+
+    def tool_executions_for_step(self, step_id: str) -> list[ToolExecution]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM tool_executions
+                WHERE step_id=?
+                ORDER BY position
+                """,
+                (step_id,),
+            ).fetchall()
+        return [self._tool_execution_from_row(row) for row in rows]
+
+    def save_tool_execution(self, execution: ToolExecution) -> None:
+        with self._lock, self._connection:
+            self._update_tool_execution_locked(execution)
+
+    def save_tool_execution_with_event(
+        self,
+        execution: ToolExecution,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        run: AgentRun | None = None,
+        checkpoint: Checkpoint | None = None,
+        before_commit: Callable[[], None] | None = None,
+    ) -> RuntimeEvent:
+        with self._lock, self._connection:
+            self._update_tool_execution_locked(execution)
+            if run is not None:
+                self._update_run_locked(run)
+            if checkpoint is not None:
+                self._insert_checkpoint_locked(checkpoint)
+            event = self._append_event_locked(execution.run_id, event_type, payload)
+            if checkpoint is not None:
+                self._append_event_locked(
+                    execution.run_id,
+                    "checkpoint.created",
+                    {"checkpoint_id": checkpoint.id, "step": checkpoint.step},
+                )
+            if before_commit is not None:
+                before_commit()
+            return event
+
+    def _update_tool_execution_locked(self, execution: ToolExecution) -> None:
+        cursor = self._connection.execute(
+            """
+            UPDATE tool_executions SET
+                status=?, result_content=?, result_data_json=?, error=?,
+                started_at=?, completed_at=?
+            WHERE id=?
+            """,
+            (
+                execution.status.value,
+                execution.result_content,
+                self._dump(execution.result_data)
+                if execution.result_data is not None
+                else None,
+                execution.error,
+                execution.started_at.isoformat() if execution.started_at else None,
+                execution.completed_at.isoformat() if execution.completed_at else None,
+                execution.id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise KeyError(f"Tool execution {execution.id} was not found.")
+
+    def mark_running_tool_executions_unknown(self, run_id: str) -> list[ToolExecution]:
+        with self._lock, self._connection:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM tool_executions
+                WHERE run_id=? AND status='running'
+                ORDER BY position
+                """,
+                (run_id,),
+            ).fetchall()
+            executions = [self._tool_execution_from_row(row) for row in rows]
+            for execution in executions:
+                if execution.side_effecting:
+                    execution.status = ToolExecutionStatus.UNKNOWN
+                    execution.error = (
+                        "Runtime restarted while a side-effecting tool was running; "
+                        "the external outcome must be reviewed."
+                    )
+                else:
+                    execution.status = ToolExecutionStatus.PENDING
+                    execution.started_at = None
+                self._update_tool_execution_locked(execution)
+            return executions
+
+    def resolve_unknown_execution(
+        self,
+        execution: ToolExecution,
+        run: AgentRun,
+        outcome: str,
+    ) -> RuntimeEvent:
+        with self._lock, self._connection:
+            self._update_tool_execution_locked(execution)
+            self._update_run_locked(run)
+            return self._append_event_locked(
+                execution.run_id,
+                "tool.unknown_resolved",
+                {
+                    "tool_execution_id": execution.id,
+                    "tool_call_id": execution.tool_call.id,
+                    "outcome": outcome,
+                    "result_content": execution.result_content,
+                    "error": execution.error,
+                },
+            )
 
     def create_approval(self, approval: Approval) -> None:
         with self._lock, self._connection:
-            self._connection.execute(
-                "INSERT INTO approvals VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    approval.id,
-                    approval.run_id,
-                    self._dump(
-                        {
-                            "id": approval.tool_call.id,
-                            "name": approval.tool_call.name,
-                            "arguments": approval.tool_call.arguments,
-                        }
-                    ),
-                    approval.status,
-                    approval.reason,
-                    approval.created_at.isoformat(),
-                    approval.resolved_at.isoformat() if approval.resolved_at else None,
+            self._insert_approval_locked(approval)
+
+    def create_approval_with_state(
+        self,
+        approval: Approval,
+        run: AgentRun,
+        execution: ToolExecution,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> RuntimeEvent:
+        with self._lock, self._connection:
+            self._insert_approval_locked(approval)
+            self._update_tool_execution_locked(execution)
+            self._update_run_locked(run)
+            return self._append_event_locked(run.id, event_type, payload)
+
+    def _insert_approval_locked(self, approval: Approval) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO approvals (
+                id, run_id, tool_call_json, status, reason, created_at,
+                resolved_at, tool_execution_id, kind
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                approval.id,
+                approval.run_id,
+                self._dump(
+                    {
+                        "id": approval.tool_call.id,
+                        "name": approval.tool_call.name,
+                        "arguments": approval.tool_call.arguments,
+                    }
                 ),
-            )
+                approval.status,
+                approval.reason,
+                approval.created_at.isoformat(),
+                approval.resolved_at.isoformat() if approval.resolved_at else None,
+                approval.tool_execution_id,
+                approval.kind,
+            ),
+        )
 
     def get_approval(self, approval_id: str) -> Approval:
         with self._lock:
-            row = self._connection.execute("SELECT * FROM approvals WHERE id=?", (approval_id,)).fetchone()
+            row = self._connection.execute(
+                "SELECT * FROM approvals WHERE id=?", (approval_id,)
+            ).fetchone()
         if row is None:
             raise KeyError(f"Approval {approval_id} was not found.")
         return self._approval_from_row(row)
@@ -237,11 +780,32 @@ class SQLiteStore:
     def pending_approval(self, run_id: str) -> Approval | None:
         with self._lock:
             row = self._connection.execute(
-                "SELECT * FROM approvals WHERE run_id=? AND status='pending' ORDER BY created_at LIMIT 1", (run_id,)
+                """
+                SELECT * FROM approvals
+                WHERE run_id=? AND status='pending'
+                ORDER BY created_at
+                LIMIT 1
+                """,
+                (run_id,),
             ).fetchone()
         return self._approval_from_row(row) if row else None
 
-    def resolve_approval(self, approval_id: str, approved: bool, reason: str | None = None) -> Approval:
+    def approval_for_execution(self, execution_id: str) -> Approval | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM approvals
+                WHERE tool_execution_id=?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (execution_id,),
+            ).fetchone()
+        return self._approval_from_row(row) if row else None
+
+    def resolve_approval(
+        self, approval_id: str, approved: bool, reason: str | None = None
+    ) -> Approval:
         approval = self.get_approval(approval_id)
         if approval.status != "pending":
             return approval
@@ -250,8 +814,17 @@ class SQLiteStore:
         approval.resolved_at = utc_now()
         with self._lock, self._connection:
             self._connection.execute(
-                "UPDATE approvals SET status=?, reason=?, resolved_at=? WHERE id=?",
-                (approval.status, approval.reason, approval.resolved_at.isoformat(), approval.id),
+                """
+                UPDATE approvals
+                SET status=?, reason=?, resolved_at=?
+                WHERE id=?
+                """,
+                (
+                    approval.status,
+                    approval.reason,
+                    approval.resolved_at.isoformat(),
+                    approval.id,
+                ),
             )
         return approval
 
@@ -263,8 +836,74 @@ class SQLiteStore:
     def _load(value: str) -> Any:
         return json.loads(value)
 
+    def _run_values(self, run: AgentRun) -> tuple[Any, ...]:
+        return (
+            run.id,
+            run.agent_name,
+            run.input,
+            run.status.value,
+            run.created_at.isoformat(),
+            run.updated_at.isoformat(),
+            run.result,
+            run.error,
+            run.step_count,
+            run.tool_call_count,
+            self._dump(run.metadata),
+        )
+
+    def _run_from_row(self, row: sqlite3.Row) -> AgentRun:
+        return AgentRun.from_dict(
+            {**dict(row), "metadata": self._load(row["metadata_json"])}
+        )
+
+    def _step_from_row(self, row: sqlite3.Row) -> Step:
+        assistant = (
+            Message.from_dict(self._load(row["assistant_message_json"]))
+            if row["assistant_message_json"]
+            else None
+        )
+        return Step(
+            id=row["id"],
+            run_id=row["run_id"],
+            step_index=row["step_index"],
+            status=StepStatus(row["status"]),
+            assistant_message=assistant,
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def _tool_execution_from_row(self, row: sqlite3.Row) -> ToolExecution:
+        return ToolExecution(
+            id=row["id"],
+            run_id=row["run_id"],
+            step_id=row["step_id"],
+            position=row["position"],
+            tool_call=ToolCall(
+                id=row["tool_call_id"],
+                name=row["tool_name"],
+                arguments=self._load(row["arguments_json"]),
+            ),
+            status=ToolExecutionStatus(row["status"]),
+            result_content=row["result_content"],
+            result_data=self._load(row["result_data_json"])
+            if row["result_data_json"]
+            else None,
+            error=row["error"],
+            idempotency_key=row["idempotency_key"],
+            requires_approval=bool(row["requires_approval"]),
+            side_effecting=bool(row["side_effecting"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            started_at=datetime.fromisoformat(row["started_at"])
+            if row["started_at"]
+            else None,
+            completed_at=datetime.fromisoformat(row["completed_at"])
+            if row["completed_at"]
+            else None,
+        )
+
     def _approval_from_row(self, row: sqlite3.Row) -> Approval:
         payload = self._load(row["tool_call_json"])
+        keys = set(row.keys())
         return Approval(
             id=row["id"],
             run_id=row["run_id"],
@@ -275,6 +914,10 @@ class SQLiteStore:
             resolved_at=datetime.fromisoformat(row["resolved_at"])
             if row["resolved_at"]
             else None,
+            tool_execution_id=row["tool_execution_id"]
+            if "tool_execution_id" in keys
+            else None,
+            kind=row["kind"] if "kind" in keys else "tool",
         )
 
 
@@ -292,4 +935,3 @@ class ArtifactStore:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return target
-

@@ -1,8 +1,8 @@
-﻿# Agent Runtime 当前架构
+# Agent Runtime 当前架构
 
-> 最近更新：2026-08-11  
-> 关联记录：[E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001)  
-> 关联决策：[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
+> 最近更新：2026-08-13
+> 关联记录：[E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001)
+> 关联决策：[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
 
 ## 1. 系统目标和边界
 
@@ -96,19 +96,26 @@ Provider 调用由 Runtime 统一处理超时和指数退避重试。当前尚�
 - 单工具超时。
 - 工具异常标准化并回传给模型。
 - `requires_approval` 人工审批标记。
+- `side_effecting` 副作用标记。
+- `CancellationToken` 协作式取消和稳定的 `idempotency_key`。
 
-## 7. SQLite、Checkpoint 和 Artifact Store
+## 7. SQLite、Step、ToolExecution、Checkpoint 和 Artifact Store
 
 `SQLiteStore` 当前保存：
 
 ```text
+schema_migrations
 runs
- events
- checkpoints
- approvals
+events
+checkpoints
+approvals
+steps
+tool_executions
 ```
 
-数据库启用 WAL 和 foreign keys。每次写入在返回 Runtime 前提交。
+数据库启用 WAL 和 foreign keys，并通过编号 migration 初始化和升级 schema。`Step` 表示一次模型决策，`ToolExecution` 表示该决策内有序的工具调用。
+
+ToolExecution 保存参数、状态、结果、错误、审批关系、side-effect 标记和 idempotency key。工具完成状态、Run 计数、Checkpoint 和对应 Event 可以在同一 SQLite 事务中提交，降低半状态风险。
 
 Checkpoint 保存恢复所需的消息历史、模型步骤和工具调用计数。`ArtifactStore` 将大文本产物写入按 Run 隔离的目录，但通用大结果自动转存尚未接入执行循环。
 
@@ -119,9 +126,10 @@ Checkpoint 保存恢复所需的消息历史、模型步骤和工具调用计数
 ```text
 run.created / started / recovered / paused / completed / failed / cancelled
 model.requested / completed / delta
-tool.requested / started / completed / failed / rejected
+tool.requested / started / completed / failed / rejected / cancelled / outcome_unknown / unknown_resolved
 checkpoint.created
 approval.requested / resolved
+step.completed
 ```
 
 `Runtime.stream()` 轮询 SQLite 中的新事件并按 sequence 输出。该接口为未来 SSE、WebSocket 或消息队列适配保留稳定消费边界。
@@ -141,6 +149,7 @@ agent-runtime runs pause
 agent-runtime runs resume
 agent-runtime runs cancel
 agent-runtime approve
+agent-runtime resolve-unknown
 ```
 
 核心 Runtime 不依赖 CLI 或 HTTP 框架。
@@ -166,7 +175,9 @@ agent-runtime approve
 - Run 超时：执行循环终止并进入 failed。
 - 暂停：保存最新 Checkpoint 后返回 paused。
 - 审批：保存工具调用和 Checkpoint，批准后执行，拒绝后将拒绝原因作为工具结果返回模型。
-- 恢复：加载最新 Checkpoint；当前尚未提供分布式租约和副作用幂等协议。
+- 恢复：加载最新 Checkpoint 和未完成 Step；已完成的 ToolExecution 复用持久化结果，不重复执行。
+- 未知副作用：进程在副作用工具运行中重启时标记为 `unknown`，Run 暂停并等待人工确认完成、重试或失败。
+- 取消：取消活动 asyncio Task，并通过 ToolContext 向 handler 发出协作式取消信号。
 
 ## 12. 当前扩展点
 

@@ -1,7 +1,8 @@
-﻿# Agent Runtime
+# Agent Runtime
 
 A small, durable single-agent runtime with model-provider abstraction, structured tool
-execution, SQLite persistence, event streaming, checkpoints, approval gates, and a CLI.
+execution, SQLite migrations, durable steps, idempotent recovery, event streaming,
+checkpoints, approval gates, cooperative cancellation, and a CLI.
 
 ## Quick start
 

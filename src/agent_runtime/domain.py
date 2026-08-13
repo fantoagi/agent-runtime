@@ -17,7 +17,31 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class StepStatus(StrEnum):
+    RUNNING = "running"
+    WAITING_FOR_TOOLS = "waiting_for_tools"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ToolExecutionStatus(StrEnum):
+    PENDING = "pending"
+    WAITING_FOR_APPROVAL = "waiting_for_approval"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    REJECTED = "rejected"
+    UNKNOWN = "unknown"
+    CANCELLED = "cancelled"
+
+
 TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
+TERMINAL_TOOL_EXECUTION_STATUSES = {
+    ToolExecutionStatus.COMPLETED,
+    ToolExecutionStatus.FAILED,
+    ToolExecutionStatus.REJECTED,
+    ToolExecutionStatus.CANCELLED,
+}
 
 _ALLOWED_TRANSITIONS: dict[RunStatus, set[RunStatus]] = {
     RunStatus.CREATED: {RunStatus.RUNNING, RunStatus.CANCELLED},
@@ -28,7 +52,11 @@ _ALLOWED_TRANSITIONS: dict[RunStatus, set[RunStatus]] = {
         RunStatus.FAILED,
         RunStatus.CANCELLED,
     },
-    RunStatus.WAITING_FOR_APPROVAL: {RunStatus.RUNNING, RunStatus.FAILED, RunStatus.CANCELLED},
+    RunStatus.WAITING_FOR_APPROVAL: {
+        RunStatus.RUNNING,
+        RunStatus.FAILED,
+        RunStatus.CANCELLED,
+    },
     RunStatus.PAUSED: {RunStatus.RUNNING, RunStatus.CANCELLED},
     RunStatus.COMPLETED: set(),
     RunStatus.FAILED: set(),
@@ -90,6 +118,7 @@ class ToolDefinition:
     description: str
     input_schema: dict[str, Any]
     requires_approval: bool = False
+    side_effecting: bool = False
 
 
 @dataclass(slots=True)
@@ -117,12 +146,21 @@ class AgentRun:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def create(cls, agent_name: str, input_text: str, metadata: dict[str, Any] | None = None) -> AgentRun:
-        return cls(id=new_id("run"), agent_name=agent_name, input=input_text, metadata=metadata or {})
+    def create(
+        cls, agent_name: str, input_text: str, metadata: dict[str, Any] | None = None
+    ) -> AgentRun:
+        return cls(
+            id=new_id("run"),
+            agent_name=agent_name,
+            input=input_text,
+            metadata=metadata or {},
+        )
 
     def transition_to(self, target: RunStatus) -> None:
         if target not in _ALLOWED_TRANSITIONS[self.status]:
-            raise InvalidStateTransition(f"Cannot transition run {self.id} from {self.status} to {target}.")
+            raise InvalidStateTransition(
+                f"Cannot transition run {self.id} from {self.status} to {target}."
+            )
         self.status = target
         self.updated_at = utc_now()
 
@@ -160,7 +198,13 @@ class RuntimeEvent:
     payload: dict[str, Any]
 
     @classmethod
-    def create(cls, run_id: str, sequence: int, event_type: str, payload: dict[str, Any] | None = None) -> RuntimeEvent:
+    def create(
+        cls,
+        run_id: str,
+        sequence: int,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
         return cls(
             id=new_id("evt"),
             run_id=run_id,
@@ -197,7 +241,9 @@ class Checkpoint:
     created_at: datetime = field(default_factory=utc_now)
 
     @classmethod
-    def create(cls, run_id: str, step: int, messages: list[Message], tool_call_count: int) -> Checkpoint:
+    def create(
+        cls, run_id: str, step: int, messages: list[Message], tool_call_count: int
+    ) -> Checkpoint:
         return cls(new_id("ckpt"), run_id, step, messages, tool_call_count)
 
     def to_dict(self) -> dict[str, Any]:
@@ -223,6 +269,63 @@ class Checkpoint:
 
 
 @dataclass(slots=True)
+class Step:
+    id: str
+    run_id: str
+    step_index: int
+    status: StepStatus = StepStatus.RUNNING
+    assistant_message: Message | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+    @classmethod
+    def create(cls, run_id: str, step_index: int) -> Step:
+        return cls(id=new_id("step"), run_id=run_id, step_index=step_index)
+
+
+@dataclass(slots=True)
+class ToolExecution:
+    id: str
+    run_id: str
+    step_id: str
+    position: int
+    tool_call: ToolCall
+    status: ToolExecutionStatus
+    idempotency_key: str
+    requires_approval: bool = False
+    side_effecting: bool = False
+    result_content: str | None = None
+    result_data: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    @classmethod
+    def create(
+        cls,
+        run_id: str,
+        step_id: str,
+        position: int,
+        tool_call: ToolCall,
+        *,
+        requires_approval: bool,
+        side_effecting: bool,
+    ) -> ToolExecution:
+        return cls(
+            id=new_id("tool_exec"),
+            run_id=run_id,
+            step_id=step_id,
+            position=position,
+            tool_call=tool_call,
+            status=ToolExecutionStatus.PENDING,
+            idempotency_key=f"{run_id}:{step_id}:{tool_call.id}",
+            requires_approval=requires_approval,
+            side_effecting=side_effecting,
+        )
+
+
+@dataclass(slots=True)
 class Approval:
     id: str
     run_id: str
@@ -231,10 +334,25 @@ class Approval:
     reason: str | None = None
     created_at: datetime = field(default_factory=utc_now)
     resolved_at: datetime | None = None
+    tool_execution_id: str | None = None
+    kind: str = "tool"
 
     @classmethod
-    def create(cls, run_id: str, tool_call: ToolCall) -> Approval:
-        return cls(id=new_id("approval"), run_id=run_id, tool_call=tool_call)
+    def create(
+        cls,
+        run_id: str,
+        tool_call: ToolCall,
+        *,
+        tool_execution_id: str | None = None,
+        kind: str = "tool",
+    ) -> Approval:
+        return cls(
+            id=new_id("approval"),
+            run_id=run_id,
+            tool_call=tool_call,
+            tool_execution_id=tool_execution_id,
+            kind=kind,
+        )
 
 
 class RuntimeErrorBase(Exception):
@@ -255,6 +373,10 @@ class ApprovalRequired(RuntimeErrorBase):
 
 class ToolExecutionError(RuntimeErrorBase):
     pass
+
+
+class ToolOutcomeUnknown(ToolExecutionError):
+    """The tool may have produced a side effect, but no durable result is known."""
 
 
 class ToolValidationError(ToolExecutionError):
