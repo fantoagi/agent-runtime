@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.2.0`
-- **当前里程碑**：可靠单 Agent 执行 v0.2 + 可追溯演进文档体系
+- **当前版本**：`0.3.0`
+- **当前里程碑**：FastAPI Run API 与 SSE 持久化事件接口 v0.3
 - **Runtime 构建完成时间**：2026-08-13（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`a765fa6`（v0.2 变更尚未提交）
-- **最近演进记录**：[E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001)
+- **当前代码基线 commit**：`pending`（v0.3 变更尚未提交）
+- **最近演进记录**：[E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002)
 
 ## 状态定义
 
@@ -49,7 +49,7 @@
 
 | 状态 | 能力 | 当前说明 | 追溯记录 |
 | --- | --- | --- | --- |
-| 📋 planned | FastAPI / SSE API | 对外创建 Run、控制生命周期并订阅事件 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
+| ✅ stable | FastAPI / SSE API | HTTP Run lifecycle and durable Runtime Event SSE; not token streaming | [E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002) |
 | 📋 planned | 多 Agent 编排 | 委派、并行执行和结果汇聚 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
 | 📋 planned | 分布式 Worker | 队列、租约、幂等和跨节点恢复 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
 | 📋 planned | 长期记忆 | 检索、记忆生命周期和数据治理 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
@@ -77,7 +77,7 @@
 ## 当前测试状态
 
 - **最近验证日期**：2026-08-13
-- **结果**：`15 passed`
+- **结果**：`19 passed`
 - **覆盖范围**：状态机、工具校验、workspace 安全、异步工具、审批、多工具恢复、幂等跳过、活动工具取消、未知副作用暂停/确认和迁移升级和事务回滚。
 - **文档检查**：使用 `python scripts/check_docs.py`。
 
@@ -91,3 +91,15 @@ agent-runtime demo "19 * 23"
 python scripts/check_docs.py
 pytest
 ```
+
+
+### FastAPI / SSE
+
+安装 API 可选依赖并启动本地 Demo API：
+
+```powershell
+python -m pip install -e .[api]
+uvicorn agent_runtime.api.app:app --reload
+```
+
+主要接口：`GET /health`、`POST /runs`、`GET /runs/{run_id}`、`GET /runs/{run_id}/events`、`GET /runs/{run_id}/events/stream`、Run 生命周期控制和审批处理。
