@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import asyncio
@@ -36,6 +36,14 @@ def build_parser() -> argparse.ArgumentParser:
     approve.add_argument("approval_id")
     approve.add_argument("--reject", action="store_true", help="Reject instead of approving")
     approve.add_argument("--reason", default=None)
+
+    unknown = subcommands.add_parser(
+        "resolve-unknown", help="Resolve a tool execution whose side effect is uncertain"
+    )
+    unknown.add_argument("execution_id")
+    unknown.add_argument("outcome", choices=("completed", "retry", "failed"))
+    unknown.add_argument("--result", default=None, help="Confirmed result for completed outcome")
+    unknown.add_argument("--error", default=None, help="Failure reason for failed outcome")
     return parser
 
 
@@ -58,6 +66,24 @@ async def async_main(arguments: argparse.Namespace) -> int:
     if arguments.command == "approve":
         approval = runtime.resolve_approval(arguments.approval_id, not arguments.reject, arguments.reason)
         _print({"id": approval.id, "run_id": approval.run_id, "status": approval.status})
+        return 0
+
+    if arguments.command == "resolve-unknown":
+        execution = runtime.resolve_unknown_tool(
+            arguments.execution_id,
+            arguments.outcome,
+            result_content=arguments.result,
+            error=arguments.error,
+        )
+        _print(
+            {
+                "id": execution.id,
+                "run_id": execution.run_id,
+                "status": execution.status,
+                "result": execution.result_content,
+                "error": execution.error,
+            }
+        )
         return 0
 
     if arguments.runs_command == "list":

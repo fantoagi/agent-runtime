@@ -1,7 +1,94 @@
 # Agent Runtime Evolution Log
 
-> 规则：按完成时间倒序排列。每条记录必须关联代码范围、测试和 Git commit；提交前 commit 可暂记为 `b4adc90`，合并前必须补全。
+> 规则：按完成时间倒序排列。每条记录必须关联代码范围、测试和 Git commit；提交前 commit 可暂记为 `pending`，合并前必须补全。
 
+---
+
+<a id="e2026-08-13-001"></a>
+## E2026-08-13-001：完成可靠单 Agent 执行 v0.2
+
+- **完成时间**：2026-08-13
+- **状态**：✅ stable
+- **类型**：milestone
+- **影响范围**：
+  - `README.md`
+  - `pyproject.toml`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/domain.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/tools.py`
+  - `tests/test_runtime.py`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0005-tool-execution-idempotency.md`
+- **关联 commit**：`a765fa6`
+- **关联 ADR**：[ADR-0005](./adr/0005-tool-execution-idempotency.md)
+
+### 变更摘要
+
+将 v0.1 的 Checkpoint 级恢复深化为可追踪的 Step / ToolExecution 执行模型，增加 SQLite schema migration、状态与事件原子提交、工具幂等恢复、多工具审批队列、活动任务取消和未知副作用人工处置。
+
+### 系统架构
+
+- Runtime Kernel 新增 `Step` 和 `ToolExecution` 两级持久化执行对象。
+- SQLite 新增 `schema_migrations`、`steps`、`tool_executions` 表。
+- 状态、工具结果、Checkpoint 和 Event 可以在同一事务中提交。
+- 恢复流程优先处理未完成 Step，再决定是否请求下一次模型响应。
+- 副作用工具的执行结果无法确认时进入 `unknown`，Run 自动暂停。
+
+### 实现方式
+
+- `ToolExecution` 使用 `run_id + step_id + tool_call_id` 生成稳定 idempotency key。
+- 已完成、失败或拒绝的工具执行恢复时直接重建 tool message，不再调用 handler。
+- 模型一次返回的全部工具调用先持久化为有序队列，审批后继续处理后续调用。
+- `CancellationToken` 注入 `ToolContext`，`Runtime.cancel()` 同时取消活动 asyncio Task。
+- SQLite 通过编号迁移兼容 v0.1 数据库，并为审批记录补充 ToolExecution 关联。
+
+### 当前功能
+
+- 支持 Step 和 ToolExecution 查询与恢复。
+- 支持工具结果幂等复用。
+- 支持多个工具调用逐项审批和继续执行。
+- 支持副作用结果未知时暂停并由 `resolve_unknown_tool()` 处置。
+- 支持 Run 状态与 Event、工具结果与 Checkpoint 的事务一致性。
+- 支持模型调用和异步工具的主动取消传播。
+
+### 已知限制
+
+- 外部系统的真正幂等仍需工具 handler 使用 `ToolContext.idempotency_key` 配合实现。
+- 同步阻塞 handler 无法被 Python 强制安全中断，只能在返回前后检查取消信号。
+- 未实现 Worker lease、heartbeat 和跨节点所有权。
+- ToolExecution 当前按顺序执行，尚未支持安全的并行工具调度。
+- `unknown` 副作用需要应用层或 CLI 提供更完整的人工处置界面。
+
+### 测试与验收
+
+2026-08-13 验证结果：`15 passed`。
+
+```powershell
+cd D:\AICoding\Agent
+python -m pytest -p no:cacheprovider
+python scripts/check_docs.py
+agent-runtime demo "19 * 23"
+```
+
+测试覆盖：
+
+- v0.1 SQLite schema 自动迁移到 v0.2。
+- 多工具审批后继续执行。
+- 已完成工具恢复时不重复执行。
+- 副作用工具运行中重启后标记 unknown 并暂停。
+- 状态与事件事务在故障注入时整体回滚。
+- 活动异步工具取消传播和 cancelled 状态持久化。
+- unknown 工具经人工确认后继续恢复。
+- 既有状态机、工具校验、workspace 安全和审批回归。
+
+### 后续计划
+
+进入 v0.3：在保持 Runtime Core 无 HTTP 依赖的前提下增加 FastAPI Run API 和 SSE 持久化事件接口。
 ---
 
 <a id="e2026-08-11-002"></a>
@@ -50,7 +137,6 @@ Runtime 代码架构不变；新增围绕代码事实的文档治理层和 CI �
 
 ### 已知限制
 
-- 仓库尚无首次 Git commit，因此关联 commit 暂为 `b4adc90`。
 - 自动检查只能识别文件级变更，是否需要 ADR 仍需开发者根据模板判断。
 
 ### 测试与验收
@@ -62,7 +148,7 @@ pytest
 
 ### 后续计划
 
-首次提交后回填 baseline commit；之后每项功能按 Change ID、实现、测试、文档和 ADR 流程演进。
+后续每项功能按 Change ID、实现、测试、文档和 ADR 流程演进。
 
 ---
 
@@ -136,4 +222,4 @@ agent-runtime demo "19 * 23"
 
 ### 后续计划
 
-增加 FastAPI 和 SSE 事件接口，并在进入实现前创建新的 Change ID。
+深化单 Agent 执行可靠性，再增加 FastAPI 和 SSE 事件接口。
