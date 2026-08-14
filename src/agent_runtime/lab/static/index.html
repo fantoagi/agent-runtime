@@ -12,7 +12,7 @@
       <div class="brand-mark">AR</div>
       <div>
         <strong>Agent Runtime</strong>
-        <span>Learning Console · v0.5.1</span>
+        <span>Learning Console · v0.5.2</span>
       </div>
     </div>
     <div class="topbar-actions">
@@ -75,19 +75,34 @@
             </select>
           </div>
         </div>
-        <div class="timeline-legend">
-          <span class="legend run">Run</span>
-          <span class="legend model">Model</span>
-          <span class="legend tool">Tool</span>
-          <span class="legend approval">Approval</span>
-          <span class="legend checkpoint">Checkpoint</span>
+        <div class="timeline-meta">
+          <div class="timeline-legend" aria-label="泳道颜色图例">
+            <span class="legend run">Run</span>
+            <span class="legend model">Model</span>
+            <span class="legend tool">Tool</span>
+            <span class="legend approval">Approval</span>
+            <span class="legend checkpoint">State</span>
+          </div>
+          <span id="swimlaneStatus" class="swimlane-status">0 / 0 事件</span>
         </div>
         <div id="timelineEmpty" class="empty-state">
           <div class="empty-orbit"><span></span></div>
-          <strong>运行一个场景，事件会在这里实时出现</strong>
-          <p>事件来自 SQLite 持久化记录，并通过 Runtime SSE 通知界面刷新。</p>
+          <strong>运行一个场景，事件会按执行角色进入泳道</strong>
+          <p>每个节点都来自 SQLite 持久化记录，SSE 会把新事件实时追加到右侧。</p>
         </div>
-        <ol id="eventTimeline" class="event-timeline" hidden></ol>
+        <div id="swimlaneBoard" class="swimlane-board" hidden>
+          <div class="swimlane-labels" aria-hidden="true">
+            <div class="swimlane-corner"><span>FLOW</span><small>时间 →</small></div>
+            <div class="swimlane-label run"><strong>Run</strong><small>运行生命周期</small></div>
+            <div class="swimlane-label model"><strong>Model</strong><small>推理与流式输出</small></div>
+            <div class="swimlane-label tool"><strong>Tool</strong><small>工具执行</small></div>
+            <div class="swimlane-label approval"><strong>Approval</strong><small>人工决策</small></div>
+            <div class="swimlane-label checkpoint"><strong>State</strong><small>Step / Checkpoint</small></div>
+          </div>
+          <div id="swimlaneViewport" class="swimlane-viewport">
+            <div id="eventTimeline" class="swimlane-canvas" role="group" aria-label="Runtime 事件泳道图"></div>
+          </div>
+        </div>
       </div>
     </section>
 

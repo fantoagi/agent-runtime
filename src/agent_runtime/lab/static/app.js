@@ -22,6 +22,19 @@ const sseEventTypes = [
   "approval.requested", "approval.resolved", "checkpoint.created", "step.completed",
 ];
 
+const swimlanes = [
+  { id: "run", label: "Run" },
+  { id: "model", label: "Model" },
+  { id: "tool", label: "Tool" },
+  { id: "approval", label: "Approval" },
+  { id: "checkpoint", label: "State" },
+];
+const swimlaneLayout = {
+  columnWidth: 156,
+  headerHeight: 48,
+  rowHeight: 92,
+};
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -35,13 +48,37 @@ function json(value) {
   return escapeHtml(JSON.stringify(value, null, 2));
 }
 
-function eventCategory(type) {
+function eventLane(type) {
   if (type.startsWith("run.")) return "run";
   if (type.startsWith("model.")) return "model";
-  if (type.startsWith("tool.")) return type.includes("failed") ? "error" : "tool";
+  if (type.startsWith("tool.")) return "tool";
   if (type.startsWith("approval.")) return "approval";
   if (type.startsWith("checkpoint.") || type.startsWith("step.")) return "checkpoint";
   return "run";
+}
+
+function eventCategory(type) {
+  if (type.startsWith("tool.") && (type.includes("failed") || type.includes("unknown"))) {
+    return "error";
+  }
+  return eventLane(type);
+}
+
+function relativeEventTime(events, index) {
+  if (!events.length || !events[index]?.timestamp) return "+0ms";
+  const start = Date.parse(events[0].timestamp);
+  const current = Date.parse(events[index].timestamp);
+  const elapsed = Math.max(0, current - start);
+  if (elapsed < 1000) return `+${elapsed}ms`;
+  return `+${(elapsed / 1000).toFixed(elapsed < 10000 ? 1 : 0)}s`;
+}
+
+function swimlanePoint(eventIndex, laneId) {
+  const laneIndex = Math.max(0, swimlanes.findIndex((lane) => lane.id === laneId));
+  return {
+    x: eventIndex * swimlaneLayout.columnWidth + swimlaneLayout.columnWidth / 2,
+    y: swimlaneLayout.headerHeight + laneIndex * swimlaneLayout.rowHeight + swimlaneLayout.rowHeight / 2,
+  };
 }
 
 function setConnection(mode, text) {
@@ -192,18 +229,64 @@ function renderAll() {
 
 function renderTimeline() {
   const events = state.snapshot?.events || [];
-  $("timelineEmpty").hidden = events.length > 0;
-  $("eventTimeline").hidden = events.length === 0;
-  $("eventTimeline").innerHTML = events.map((event, index) => `
-    <li class="event-item ${eventCategory(event.type)} ${index <= state.revealedEventIndex ? "revealed" : ""} ${index === state.selectedEventIndex ? "selected" : ""}" data-event-index="${index}">
-      <span class="event-dot"></span>
-      <button type="button" class="event-button">
-        <span class="event-type">${escapeHtml(event.type)}</span>
-        <span class="event-summary">${escapeHtml(event.teaching.summary)}</span>
-        <span class="event-sequence">#${event.sequence}</span>
-      </button>
-    </li>
+  const hasEvents = events.length > 0;
+  $("timelineEmpty").hidden = hasEvents;
+  $("swimlaneBoard").hidden = !hasEvents;
+  $("swimlaneStatus").textContent = `${Math.max(0, Math.min(events.length, state.revealedEventIndex + 1))} / ${events.length} 事件`;
+  if (!hasEvents) {
+    $("eventTimeline").innerHTML = "";
+    return;
+  }
+
+  const canvasWidth = Math.max(3, events.length) * swimlaneLayout.columnWidth;
+  const canvasHeight = swimlaneLayout.headerHeight + swimlanes.length * swimlaneLayout.rowHeight;
+  const tracks = swimlanes.map((lane, laneIndex) => `
+    <div class="swimlane-track ${lane.id}" style="top:${swimlaneLayout.headerHeight + laneIndex * swimlaneLayout.rowHeight}px;height:${swimlaneLayout.rowHeight}px"></div>
   `).join("");
+  const ticks = events.map((event, index) => `
+    <div class="swimlane-tick ${index <= state.revealedEventIndex ? "revealed" : ""} ${index === state.selectedEventIndex ? "selected" : ""}" style="left:${index * swimlaneLayout.columnWidth}px;width:${swimlaneLayout.columnWidth}px">
+      <strong>#${event.sequence}</strong><small>${relativeEventTime(events, index)}</small>
+    </div>
+  `).join("");
+  const links = events.slice(1).map((event, offset) => {
+    const index = offset + 1;
+    const previous = swimlanePoint(index - 1, eventLane(events[index - 1].type));
+    const current = swimlanePoint(index, eventLane(event.type));
+    const middle = (previous.x + current.x) / 2;
+    const path = `M ${previous.x} ${previous.y} C ${middle} ${previous.y}, ${middle} ${current.y}, ${current.x} ${current.y}`;
+    return `<path class="swimlane-link ${eventCategory(event.type)} ${index <= state.revealedEventIndex ? "revealed" : ""} ${index === state.selectedEventIndex ? "selected" : ""}" d="${path}" />`;
+  }).join("");
+  const nodes = events.map((event, index) => {
+    const lane = eventLane(event.type);
+    const laneIndex = swimlanes.findIndex((item) => item.id === lane);
+    const left = index * swimlaneLayout.columnWidth + 12;
+    const top = swimlaneLayout.headerHeight + laneIndex * swimlaneLayout.rowHeight + 17;
+    const classes = [
+      "swimlane-event",
+      eventCategory(event.type),
+      index <= state.revealedEventIndex ? "revealed" : "",
+      index === state.revealedEventIndex ? "arriving" : "",
+      index === state.selectedEventIndex ? "selected" : "",
+    ].filter(Boolean).join(" ");
+    return `
+      <button type="button" class="${classes}" style="left:${left}px;top:${top}px" data-event-index="${index}" title="${escapeHtml(event.teaching.summary)}" aria-label="#${event.sequence} ${escapeHtml(event.type)}">
+        <span class="swimlane-event-top"><span class="swimlane-event-dot"></span><span>#${event.sequence}</span><small>${relativeEventTime(events, index)}</small></span>
+        <strong>${escapeHtml(event.type)}</strong>
+        <span class="swimlane-event-title">${escapeHtml(event.teaching.title)}</span>
+      </button>
+    `;
+  }).join("");
+
+  const canvas = $("eventTimeline");
+  canvas.style.width = `${canvasWidth}px`;
+  canvas.style.height = `${canvasHeight}px`;
+  canvas.innerHTML = `
+    ${tracks}
+    <svg class="swimlane-links" width="${canvasWidth}" height="${canvasHeight}" viewBox="0 0 ${canvasWidth} ${canvasHeight}" aria-hidden="true">${links}</svg>
+    <div class="swimlane-axis">${ticks}</div>
+    ${nodes}
+  `;
+
   document.querySelectorAll("[data-event-index]").forEach((item) => {
     item.addEventListener("click", () => {
       stopAutoplay();
@@ -216,8 +299,13 @@ function renderTimeline() {
       renderInspector();
     });
   });
-  const selected = document.querySelector(".event-item.selected");
-  selected?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+
+  const selected = document.querySelector(".swimlane-event.selected");
+  const viewport = $("swimlaneViewport");
+  if (selected && viewport) {
+    const target = selected.offsetLeft - viewport.clientWidth / 2 + selected.offsetWidth / 2;
+    viewport.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
+  }
 }
 
 function renderApproval() {

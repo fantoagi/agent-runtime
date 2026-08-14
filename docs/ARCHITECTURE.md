@@ -1,7 +1,7 @@
 # Agent Runtime 当前架构
 
 > 最近更新：2026-08-14
-> 关联记录：[E2026-08-14-004](./CHANGELOG.md#e2026-08-14-004)
+> 关联记录：[E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005)
 > 关联决策：[ADR-0009](./adr/0009-learning-console.md)、[ADR-0008](./adr/0008-observability-evals.md)、[ADR-0007](./adr/0007-model-token-streaming.md)、[ADR-0006](./adr/0006-fastapi-sse-adapter.md)、[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
 
 ## 1. 系统目标和边界
@@ -223,16 +223,18 @@ Learning Console 是 `agent_runtime.lab` 中的教学 Adapter，通过 `create_a
 - 场景 Runtime：为纯文本、Tool Calling、Token Streaming 和 Human Approval 配置确定性 Provider、ToolRegistry 和 AgentDefinition。
 - `LearningConsole`：启动场景 Run，根据 `learning_scenario` metadata 定位恢复所需的 Runtime，并聚合 Snapshot。
 - Lab FastAPI Routes：提供场景目录、启动、Snapshot 和审批接口。
-- Static UI：展示 SSE 时间线、事件回放、状态 diff、Messages、ToolExecution、Trace、Metrics、SQLite 和验收结果。
+- Static UI：将事件按 Run / Model / Tool / Approval / State 泳道排布，用 sequence 列、相对时间和 SVG 曲线表达执行跳转，并展示回放、状态 diff、Messages、ToolExecution、Trace、Metrics、SQLite 和验收结果。
 
 所有场景 Runtime 共享现有 SQLiteStore，但不共享 Provider 行为。Run、Event、Step、ToolExecution、Approval 和 Checkpoint 仍是唯一执行事实；教学解释和状态投影只用于展示，不回写领域状态。
 
 Snapshot 使用 `SQLiteStore.steps_for_run()` 和 `tool_executions_for_run()` 读取持久化执行记录，并通过 `ObservabilityService` 派生 Trace/Metrics。事件实时通知复用既有 `/runs/{run_id}/events/stream`，没有新增第二套流协议。
 
+泳道图是纯前端投影：`eventLane()` 仅根据 Event type 选择泳道，`RuntimeEvent.sequence` 决定水平顺序，timestamp 只用于计算相对时间。SVG 连线、自动滚动和播放状态都不回写 Store。
+
 事件“回放”只移动浏览器展示游标。它不会暂停 Runtime asyncio Task，也不会改变 Run 状态机、Event sequence 或恢复语义。该边界保证 Learning Console 可以随功能演进扩展，而 Runtime Kernel 不依赖 UI。
 
 > 最近更新：2026-08-14
-> 关联记录：[E2026-08-14-004](./CHANGELOG.md#e2026-08-14-004)
+> 关联记录：[E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005)
 > 关联决策：[ADR-0009](./adr/0009-learning-console.md)
 
 ## 10. 安全边界

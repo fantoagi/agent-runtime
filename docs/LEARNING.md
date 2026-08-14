@@ -1,6 +1,6 @@
 ﻿# Agent Runtime Learning Console 使用指南
 
-Learning Console 是 v0.5.1 提供的本地可视化学习入口。它把原本需要多条 PowerShell 命令才能观察的 Run、Event、Step、ToolExecution、Checkpoint、Approval、Trace 和 Metrics 放到同一个浏览器页面中。
+Learning Console 是 v0.5.2 提供的本地可视化学习入口。它把原本需要多条 PowerShell 命令才能观察的 Run、Event、Step、ToolExecution、Checkpoint、Approval、Trace 和 Metrics 放到同一个浏览器页面中。
 
 > 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。
 
@@ -43,7 +43,7 @@ uvicorn agent_runtime.api.app:app --reload
 
 ### 左侧：Learning Path
 
-选择确定性学习场景。v0.5.1 首批包含：
+选择确定性学习场景。v0.5.2 继续提供以下 4 个场景：
 
 1. 纯文本响应。
 2. Tool Calling。
@@ -54,24 +54,32 @@ uvicorn agent_runtime.api.app:app --reload
 
 ### 中间：Durable Event Log
 
-时间线按 `RuntimeEvent.sequence` 展示持久化事件。事件颜色表示领域：
+持久化事件按 `RuntimeEvent.sequence` 从左向右进入动态泳道。纵向位置表示执行角色，曲线表示相邻事件之间的先后关系：
 
-| 颜色 | 领域 | 典型事件 |
+| 泳道 | 领域 | 典型事件 |
 | --- | --- | --- |
-| 蓝色 | Run | `run.created`、`run.started`、`run.completed` |
-| 紫色 | Model | `model.requested`、`model.delta`、`model.completed` |
-| 橙色 | Tool | `tool.requested`、`tool.started`、`tool.completed` |
-| 黄色 | Approval | `approval.requested`、`approval.resolved` |
-| 绿色 | Checkpoint / Step | `checkpoint.created`、`step.completed` |
+| Run | Run 生命周期 | `run.created`、`run.started`、`run.completed` |
+| Model | 模型请求与流式输出 | `model.requested`、`model.delta`、`model.completed` |
+| Tool | 工具执行 | `tool.requested`、`tool.started`、`tool.completed` |
+| Approval | 人工审批 | `approval.requested`、`approval.resolved` |
+| State | Step / Checkpoint | `checkpoint.created`、`step.completed` |
+
+泳道图会同时展示：
+
+- **sequence**：每个节点顶部的 `#N` 是持久化顺序。
+- **相对时间**：`+120ms` 表示该事件距首个事件的时间。
+- **执行跳转**：连线从上一个事件指向下一个事件，可直观看到 Run 如何转入 Model、Tool、Approval 或 State。
+- **实时追加**：SSE 收到新事件时，新节点追加到右侧并自动跟随。
+- **节点联动**：点击任意节点，右侧 Inspector 会显示解释、状态 diff、源码和 payload。
 
 可以使用：
 
-- **从头回放**：把已持久化的事件从 sequence 1 重新展示。
-- **上一步 / 下一步**：逐事件学习。
-- **自动播放**：按慢速、正常或快速播放。
-- **点击事件**：直接定位并查看解释。
+- **从头回放**：把已持久化的事件从 sequence 1 重新放入各泳道。
+- **上一步 / 下一步**：逐节点学习，画布会自动将当前节点滚动到可见区域。
+- **自动播放**：按慢速、正常或快速播放连线与节点。
+- **横向滚动**：事件较多时可拖动底部滚动条，左侧泳道标签始终保持可见。
 
-回放只控制界面展示，不会暂停或篡改 Runtime Kernel；因此不会影响真实执行、状态机和恢复语义。
+回放只控制泳道节点和连线的展示游标，不会暂停或篡改 Runtime Kernel；因此不会影响真实执行、状态机和恢复语义。
 
 ### 右侧：Runtime Inspector
 
@@ -215,7 +223,7 @@ flowchart LR
 
 ## 6. 当前限制
 
-- v0.5.1 只提供 4 个确定性场景。
+- v0.5.2 只提供 4 个确定性场景。
 - “逐步回放”是对已持久化事件的展示控制，不是单步暂停 Python 协程。
 - Learning Console 面向本地单用户学习，没有身份认证和多租户隔离。
 - 页面使用 Vanilla JavaScript，无前端构建工具；复杂 Workflow Designer 不在当前范围。

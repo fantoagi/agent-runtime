@@ -5,6 +5,83 @@
 ---
 
 
+<a id="e2026-08-14-005"></a>
+## E2026-08-14-005：Learning Console 改用动态事件泳道图
+
+- **完成时间**：2026-08-14
+- **状态**：✅ stable
+- **类型**：improvement
+- **影响范围**：
+  - `pyproject.toml`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/lab/static/app.js`
+  - `src/agent_runtime/lab/static/styles.css`
+  - `tests/test_api.py`
+  - `tests/test_lab_api.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/LEARNING.md`
+  - `docs/ROADMAP.md`
+  - `docs/CHANGELOG.md`
+  - `docs/adr/0009-learning-console.md`
+  - `docs/adr/README.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0009](./adr/0009-learning-console.md)
+
+### 变更摘要
+
+将 Learning Console 原有的单列纵向事件时间线升级为横向动态泳道图。用户现在可以同时看到事件顺序、执行角色、跨泳道跳转、相对时间和当前回放位置，减少从长列表中理解 Runtime 协作流程的认知成本。
+
+### 系统架构
+
+- Runtime Kernel、Event Envelope、SQLite schema、SSE API 和 Snapshot API 保持不变。
+- 泳道图仍是 `agent_runtime.lab` 的浏览器展示 Adapter，只消费已持久化 RuntimeEvent。
+- Run / Model / Tool / Approval / State 五条泳道由 Event type 前缀确定，`RuntimeEvent.sequence` 仍是唯一时序依据。
+- 事件节点和 Inspector 继续共享同一个选中游标。
+
+### 实现方式
+
+- Vanilla JavaScript 根据事件数量动态计算泳道画布宽度、节点坐标和泳道坐标。
+- SVG Bezier 曲线连接相邻 sequence，流动虚线用于表达从左向右的执行方向。
+- 每个节点展示 sequence、相对时间、Event type 和教学标题；详细 summary 通过 title 和 Inspector 提供。
+- SSE 刷新、从头回放、上一步、下一步和自动播放复用原有游标，并自动滚动到当前节点。
+- 泳道标签保持在左侧，事件画布可横向滚动，移动端缩减标签文案但保留领域名。
+
+### 当前功能
+
+- 事件按 Run、Model、Tool、Approval 和 State 五类动态分道。
+- 泳道节点通过曲线按 sequence 串联，选中节点和对应连线同步高亮。
+- 时间轴显示事件 sequence 与相对耗时。
+- 新 SSE 事件会追加到右侧，实时跟随时自动居中当前节点。
+- 原有回放速度、事件详情、状态 diff、审批和验收功能保持可用。
+- API 和项目版本更新为 `0.5.2`。
+
+### 已知限制
+
+- 当前泳道是五个固定领域，尚未支持用户自定义分组。
+- 长 Run 需要横向滚动，尚未增加缩放、鸟瞰图、事件折叠和类型过滤。
+- 连线表示持久化 sequence 关系，不是方法调用栈或分布式 Trace 因果图。
+- 回放仍是浏览器展示回放，不是 Runtime Kernel 协程单步调试。
+
+### 测试与验收
+
+```powershell
+cd D:\AICoding\Agent
+node --check src\agent_runtime\lab\static\app.js
+python -m pytest -p no:cacheprovider -q
+python scripts/check_docs.py
+agent-runtime lab --no-browser
+```
+
+当前测试：37 passed。验收覆盖泳道 DOM 骨架、CSS 领域样式、JavaScript 分道与坐标函数、API 版本、现有 4 个真实 Runtime 场景、SSE、回放、审批和 Snapshot 聚合数据。另使用无界面 Chrome 验收 1440px 桌面布局和 390px 移动布局：Tool Calling 场景生成 18 个节点、17 条连线和 5 条泳道，Token Streaming 场景的 `model.delta` 均落入 Model 泳道，移动端无 body 横向溢出。
+
+### 后续计划
+
+在泳道事件数较多时增加类型过滤、密度切换、鸟瞰图和按 Step 折叠；v0.6 引入 Parent/Child Run 后再扩展 Agent 与 Child Run 泳道。
+
+
 <a id="e2026-08-14-004"></a>
 ## E2026-08-14-004：增加可视化 Learning Console v0.5.1
 

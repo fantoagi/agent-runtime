@@ -26,7 +26,7 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
-| [ADR-0009](./0009-learning-console.md) | Accepted | 2026-08-14 | Learning Console 作为 Runtime 外部教学 Adapter | E2026-08-14-004 |
+| [ADR-0009](./0009-learning-console.md) | Accepted | 2026-08-14 | Learning Console 作为 Runtime 外部教学 Adapter | E2026-08-14-005、E2026-08-14-004 |
 | [ADR-0008](./0008-observability-evals.md) | Accepted | 2026-08-14 | Observability 和 Evals 基于持久化执行事实派生 | E2026-08-14-002 |
 | [ADR-0007](./0007-model-token-streaming.md) | Accepted | 2026-08-14 | Model Provider Token Streaming 与 Runtime Event 边界 | E2026-08-14-001 |
 | [ADR-0005](./0005-tool-execution-idempotency.md) | Accepted | 2026-08-13 | Step 与 ToolExecution 持久化和幂等恢复 | E2026-08-13-001 |

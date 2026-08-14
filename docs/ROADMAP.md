@@ -1,7 +1,7 @@
 # Agent Runtime 演进路线图
 
 - **最近更新**：2026-08-14
-- **当前版本**：v0.5.1
+- **当前版本**：v0.5.2
 - **当前阶段**：单 Agent Runtime 与可视化学习环境完成，下一阶段进入多 Agent 编排
 - **路线状态**：Living Document
 
@@ -27,6 +27,7 @@
 | v0.4 | ✅ completed | Model Token Streaming | [E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001) |
 | v0.5 | ✅ completed | Observability、Tracing、Metrics 与 Evals | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | v0.5.1 | ✅ completed | 可视化 Learning Console 与执行流程教学 | [E2026-08-14-004](./CHANGELOG.md#e2026-08-14-004) |
+| v0.5.2 | ✅ completed | Learning Console 动态事件泳道图 | [E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005) |
 | v0.6 | 📋 planned | 多 Agent 编排基础 | — |
 | v0.7 | 📋 planned | Context、Session 与长期记忆 | — |
 | v0.8 | 📋 planned | Sandbox、Tool Capability 与 Secret 安全 | — |
@@ -47,7 +48,7 @@
 ## v0.6：多 Agent 编排基础
 
 - **状态**：📋 planned
-- **前置版本**：v0.5.1
+- **前置版本**：v0.5.2
 - **目标**：让一个 Parent Agent 可以通过持久化 Child Run 委派任务，并支持顺序、并行和结果汇聚。
 
 ### 计划范围

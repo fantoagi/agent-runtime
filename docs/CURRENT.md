@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.5.1`
-- **当前里程碑**：可视化 Agent Runtime Learning Console v0.5.1
+- **当前版本**：`0.5.2`
+- **当前里程碑**：动态泳道 Learning Console v0.5.2
 - **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`19a0b20`
-- **最近演进记录**：[E2026-08-14-004](./CHANGELOG.md#e2026-08-14-004)
+- **当前代码基线 commit**：`pending`
+- **最近演进记录**：[E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005)
 
 ## 状态定义
 
@@ -32,7 +32,7 @@
 | ✅ stable | Event Log | 每个 Run 使用单调递增 sequence，并支持状态和事件原子提交 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | Model Token Streaming | Provider 可按增量输出文本和 Tool Call，Runtime 持久化 `model.delta` 并最终合并为完整响应 | [E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001) |
 | ✅ stable | FastAPI / SSE API | HTTP Run lifecycle、持久化 Runtime Event 和模型增量 SSE | [E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002) |
-| ✅ stable | Learning Console | 一条命令启动本地可视化学习环境，支持真实场景、SSE 时间线、事件回放、状态 diff、Inspector、审批和自动验收 | [E2026-08-14-004](./CHANGELOG.md#e2026-08-14-004) |
+| ✅ stable | Learning Console | 一条命令启动本地可视化学习环境；事件按 Run / Model / Tool / Approval / State 泳道实时展示，并支持回放、连线、相对时间、Inspector、审批和自动验收 | [E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005) |
 | ✅ stable | Run Trace | 每个 Run 自动生成 `trace_id`，并从持久化事件派生 Run、Model、Tool、Approval Span | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Metrics / Prometheus | 从 SQLite 历史派生 Run 状态、事件、延迟、模型/工具次数和 token 指标 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Eval Runner | 支持状态、精确匹配、包含判断、通过率和 JSON Artifact 报告 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
@@ -81,14 +81,14 @@
 - 本地 `.venv` 默认只安装 runtime 包，运行测试前需要安装 `pytest` 和 `pytest-asyncio`。
 - 当前 Trace 和 Metrics 从本地 SQLite 派生，尚未接入 OpenTelemetry Collector 或外部时序数据库。
 - 当前 Eval Runner 顺序执行用例，内置评估器只覆盖状态、精确匹配和字符串包含，尚无 LLM-as-a-Judge。
-- Learning Console 当前只有 4 个确定性场景；事件回放是展示层回放，不是 Runtime 内核级单步暂停。
+- Learning Console 当前只有 4 个确定性场景；泳道固定为 5 个领域，长 Run 需要横向滚动；事件回放是展示层回放，不是 Runtime 内核级单步暂停。
 - Learning Console 面向本地单用户学习，没有认证、授权和多租户隔离。
 
 ## 当前测试状态
 
 - **最近验证日期**：2026-08-14
 - **结果**：`37 passed`
-- **覆盖范围**：状态机、工具安全、审批、恢复与幂等、FastAPI / SSE、Token Streaming、Trace Span、JSON/Prometheus Metrics、Eval、Learning Console 页面、场景执行、事件教学数据、Snapshot 和自动验收。
+- **覆盖范围**：状态机、工具安全、审批、恢复与幂等、FastAPI / SSE、Token Streaming、Trace Span、JSON/Prometheus Metrics、Eval、Learning Console 页面、动态泳道静态资产、场景执行、事件教学数据、Snapshot 和自动验收。
 - **文档检查**：使用 `python scripts/check_docs.py`。
 
 ## 当前运行方式

@@ -18,6 +18,16 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         stylesheet = await client.get("/lab/static/styles.css")
         assert stylesheet.status_code == 200
         assert "--accent" in stylesheet.text
+        assert ".swimlane-board" in stylesheet.text
+        assert ".swimlane-link" in stylesheet.text
+
+        script = await client.get("/lab/static/app.js")
+        assert script.status_code == 200
+        assert "function eventLane" in script.text
+        assert "function swimlanePoint" in script.text
+        assert "swimlane-event" in script.text
+        assert 'id="swimlaneBoard"' in page.text
+        assert 'id="swimlaneViewport"' in page.text
 
         scenarios = await client.get("/lab/api/scenarios")
         assert scenarios.status_code == 200

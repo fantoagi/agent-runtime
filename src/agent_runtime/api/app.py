@@ -80,7 +80,7 @@ def create_app(
     """
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.5.1",
+        version="0.5.2",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
     )
     app.state.runtime = runtime
@@ -96,7 +96,7 @@ def create_app(
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "runtime": "agent-runtime", "version": "0.5.1"}
+        return {"status": "ok", "runtime": "agent-runtime", "version": "0.5.2"}
 
     @app.get("/observability/metrics")
     async def observability_metrics(limit: int = Query(1000, ge=1, le=10000)) -> dict[str, Any]:

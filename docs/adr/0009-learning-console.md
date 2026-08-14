@@ -3,7 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-08-14
 - **决策人**：Agent Runtime Maintainers
-- **关联变更**：[E2026-08-14-004](../CHANGELOG.md#e2026-08-14-004)
+- **关联变更**：[E2026-08-14-005](../CHANGELOG.md#e2026-08-14-005)、[E2026-08-14-004](../CHANGELOG.md#e2026-08-14-004)
 
 ## 背景
 
@@ -15,7 +15,7 @@ v0.5 已具备 Run、Event、Step、ToolExecution、Checkpoint、Approval、SSE�
 2. 每个学习场景必须通过真实 `Runtime.start()`、Provider、ToolRegistry 和 SQLiteStore 执行；禁止用前端定时器伪造 Runtime Event。
 3. 场景可以使用不同的确定性 Provider 和 AgentDefinition，但共享同一个持久化 Store，使 Run、Event、Trace 和 Metrics 保持统一事实来源。
 4. 页面通过已有 `/runs/{run_id}/events/stream` 感知事件，并通过 Lab Snapshot API 读取 Run、Checkpoint、Step、ToolExecution、Approval、Trace 和 Metrics。
-5. 事件回放只改变浏览器的展示游标，不改变 Runtime 状态机，也不提供内核级单步暂停。
+5. 事件回放只改变浏览器的展示游标，不改变 Runtime 状态机，也不提供内核级单步暂停。泳道、sequence 列、相对时间和连线都是 RuntimeEvent 的纯展示投影。
 6. 教学解释、颜色、源码映射、场景预期和自动验收属于 Lab 模块，不进入 Runtime Kernel 和领域模型。
 7. 前端使用静态 HTML、CSS 和 Vanilla JavaScript，不引入 Node.js 构建链或 SPA 框架。
 
