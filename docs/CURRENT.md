@@ -4,7 +4,7 @@
 - **当前里程碑**：Observability、Tracing、Metrics 与 Evals v0.5
 - **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`（路线图治理变更提交后回填）
+- **当前代码基线 commit**：`80d90c2`
 - **最近演进记录**：[E2026-08-14-003](./CHANGELOG.md#e2026-08-14-003)
 
 ## 状态定义

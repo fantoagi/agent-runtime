@@ -17,7 +17,7 @@
   - `docs/CHANGELOG.md`
   - `README.md`
   - `scripts/check_docs.py`
-- **关联 commit**：`pending`
+- **关联 commit**：`80d90c2`
 - **关联 ADR**：不需要；本次只建立规划与文档治理规则，不改变 Runtime 架构和执行协议
 
 ### 变更摘要
