@@ -27,7 +27,7 @@
   - `docs/adr/README.md`
   - `docs/adr/0008-observability-evals.md`
   - `README.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`b5ddc61`
 - **关联 ADR**：[ADR-0008](./adr/0008-observability-evals.md)
 
 ### 变更摘要
