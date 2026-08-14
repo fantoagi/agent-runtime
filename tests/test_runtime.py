@@ -20,7 +20,13 @@ from agent_runtime.domain import (
     ToolExecutionStatus,
     utc_now,
 )
-from agent_runtime.providers import MockProvider, ModelResponse
+from agent_runtime.providers import (
+    ModelResponse,
+    ModelTokenDelta,
+    MockProvider,
+    MockStreamingProvider,
+    ToolCallDelta,
+)
 from agent_runtime.runtime import Runtime, RuntimeConfig
 from agent_runtime.storage import SQLiteStore
 from agent_runtime.tools import ToolRegistry
@@ -447,3 +453,82 @@ def test_atomic_run_event_write_rolls_back(workspace: Path) -> None:
     assert store.get_run(run.id).status.value == "created"
     assert store.events_since(run.id) == []
     store.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_persists_each_stream_delta_and_final_message(workspace: Path) -> None:
+    runtime = Runtime(
+        RuntimeConfig(
+            workspace_path=workspace,
+            database_path=workspace / "runtime.sqlite3",
+            event_poll_interval_seconds=0.01,
+        ),
+        provider=MockStreamingProvider(
+            [
+                ModelTokenDelta(content="stream "),
+                ModelTokenDelta(content="answer", finish_reason="stop"),
+            ]
+        ),
+        tools=ToolRegistry(),
+    )
+    agent = AgentDefinition(
+        name="stream-agent",
+        system_prompt="stream",
+        tools=[],
+        model=ModelConfig(provider="mock", model="stream-test"),
+    )
+
+    run = await runtime.run(agent, "hello")
+
+    assert run.status is RunStatus.COMPLETED
+    assert run.result == "stream answer"
+    events = runtime.store.events_since(run.id)
+    assert [event.type for event in events].count("model.delta") == 2
+    assert [event.type for event in events].count("model.stream.started") == 1
+    assert [event.type for event in events].count("model.stream.completed") == 1
+    delta_contents = [event.payload["content"] for event in events if event.type == "model.delta"]
+    assert delta_contents == ["stream ", "answer"]
+    checkpoint = runtime.store.latest_checkpoint(run.id)
+    assert checkpoint is not None
+    assert checkpoint.messages[-1].content == "stream answer"
+
+
+@pytest.mark.asyncio
+async def test_runtime_reassembles_streamed_tool_call_before_execution(workspace: Path) -> None:
+    class ToolStreamingProvider:
+        async def stream(self, messages, tools, config):
+            del tools, config
+            if messages[-1].role == "tool":
+                yield ModelTokenDelta(content=f"done {messages[-1].content}", finish_reason="stop")
+                return
+            yield ModelTokenDelta(
+                tool_call_deltas=[
+                    ToolCallDelta(
+                        index=0,
+                        id="stream_call",
+                        name="echo",
+                        arguments='{"value":"',
+                    )
+                ]
+            )
+            yield ModelTokenDelta(
+                tool_call_deltas=[ToolCallDelta(index=0, arguments='hello"}')],
+                finish_reason="tool_calls",
+            )
+
+    agent = make_agent()
+    tools = ToolRegistry()
+    tools.register(agent.tools[0], lambda arguments, context: f"echo:{arguments['value']}")
+    runtime = Runtime(
+        RuntimeConfig(workspace_path=workspace, database_path=workspace / "runtime.sqlite3"),
+        provider=ToolStreamingProvider(),
+        tools=tools,
+    )
+
+    run = await runtime.run(agent, "say hello")
+
+    assert run.status is RunStatus.COMPLETED
+    assert run.result == "done echo:hello"
+    execution = runtime.store.get_tool_execution_by_call(run.id, "stream_call")
+    assert execution is not None
+    assert execution.tool_call.arguments == {"value": "hello"}

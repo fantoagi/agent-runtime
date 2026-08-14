@@ -1,8 +1,8 @@
 # Agent Runtime 当前架构
 
-> 最近更新：2026-08-13
-> 关联记录：[E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002)
-> 关联决策：[ADR-0006](./adr/0006-fastapi-sse-adapter.md)、[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
+> 最近更新：2026-08-14
+> 关联记录：[E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001)
+> 关联决策：[ADR-0007](./adr/0007-model-token-streaming.md)、[ADR-0006](./adr/0006-fastapi-sse-adapter.md)、[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
 
 ## 1. 系统目标和边界
 
@@ -85,7 +85,7 @@ stateDiagram-v2
 - `MockProvider`：确定性测试和本地 Demo。
 - `OpenAICompatibleProvider`：通过标准库 HTTP 客户端调用 Chat Completions 兼容端点。
 
-Provider 调用由 Runtime 统一处理超时和指数退避重试。当前尚未实现模型 token 原生流式协议。
+Provider 调用由 Runtime 统一处理超时和指数退避重试。实现 `StreamingModelProvider` 的 Provider 可以输出 `ModelTokenDelta`；Runtime 在不改变既有 Run / Step / ToolExecution / Checkpoint 语义的前提下，将增量写入 `model.delta` 事件，并在模型步骤结束时合并为完整 `ModelResponse`。不支持 `stream()` 的 Provider 自动回退到 `complete()`。
 
 ## 6. Tool Executor
 
@@ -127,14 +127,14 @@ Checkpoint 保存恢复所需的消息历史、模型步骤和工具调用计数
 
 ```text
 run.created / started / recovered / paused / completed / failed / cancelled
-model.requested / completed / delta
+model.requested / stream.started / delta / stream.completed / stream.failed / completed
 tool.requested / started / completed / failed / rejected / cancelled / outcome_unknown / unknown_resolved
 checkpoint.created
 approval.requested / resolved
 step.completed
 ```
 
-`Runtime.stream()` 轮询 SQLite 中的新事件并按 sequence 输出。该接口为未来 SSE、WebSocket 或消息队列适配保留稳定消费边界。
+`Runtime.stream()` 轮询 SQLite 中的新事件并按 sequence 输出。Provider 层的 `ModelTokenDelta` 是短生命周期增量；Runtime 将它映射为可审计的 `model.delta` 事件。最终 assistant message、Tool Call 和工具结果仍通过 Step / Checkpoint 持久化。该接口为 SSE、WebSocket 或消息队列适配保留稳定消费边界。
 
 ## 9. API、SDK 与 CLI
 
@@ -167,7 +167,7 @@ FastAPI 位于 Application / Adapter Layer，只调用 Runtime、SQLiteStore 和
 - `POST /runs/{run_id}/pause|resume|cancel` 复用 Runtime 生命周期控制。
 - `GET /runs/{run_id}/approvals/pending` 与 `POST /approvals/{approval_id}/resolve` 完成人工审批。
 
-v0.3 的 SSE 是持久化 Runtime Event 流，不是模型 token 原生流。
+v0.4 起，SSE 仍然只有一个事件流协议；客户端根据 `type` 区分 `model.delta`、`tool.completed` 等事件。`model.delta` 是持久化 Runtime Event，因此支持 `after_sequence` 断点续传；Provider 不支持 streaming 时，Runtime 会回退为一次性的完整响应事件。
 
 ## 10. 安全边界
 

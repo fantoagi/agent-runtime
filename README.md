@@ -1,7 +1,7 @@
 # Agent Runtime
 
 A small, durable single-agent runtime with model-provider abstraction, structured tool
-execution, SQLite migrations, durable steps, idempotent recovery, event streaming,
+execution, SQLite migrations, durable steps, idempotent recovery, event streaming, token streaming,
 checkpoints, approval gates, cooperative cancellation, and a CLI.
 
 ## Quick start
@@ -32,7 +32,7 @@ Invoke-RestMethod http://127.0.0.1:8000/health
 Invoke-RestMethod -Method Post http://127.0.0.1:8000/runs -ContentType 'application/json' -Body '{"input":"19 * 23"}'
 ```
 
-SSE 事件接口为 `GET /runs/{run_id}/events/stream?after_sequence=0`。这里的 SSE 是持久化 Runtime Event 流，不是模型 token streaming。
+SSE 事件接口为 `GET /runs/{run_id}/events/stream?after_sequence=0`。v0.4 起，模型 token 增量以 `model.delta` Runtime Event 进入同一条 SSE 流，客户端无需维护第二套 token 协议。
 
 ## Development checks
 
@@ -65,7 +65,7 @@ boundaries must also add or update an ADR.
 ## Design
 
 - **Runtime kernel**: bounded agent loop with cancellation, retry-safe checkpoints, and approvals.
-- **Providers**: normalized text/tool-call responses with a Mock and OpenAI-compatible implementation.
+- **Providers**: normalized text/tool-call responses, optional token streaming, a deterministic Mock, and an OpenAI-compatible implementation.
 - **Tools**: JSON-schema-inspired argument validation, timeout handling, and workspace confinement.
 - **Storage**: SQLite event log plus file-backed artifacts.
 - **Interfaces**: Python SDK and CLI; the core has no HTTP dependency.

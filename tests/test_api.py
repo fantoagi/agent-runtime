@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import json
@@ -9,7 +9,12 @@ import pytest
 
 from agent_runtime.api import create_app, encode_sse
 from agent_runtime.domain import RuntimeEvent
-from agent_runtime.providers import MockProvider, ModelResponse
+from agent_runtime.providers import (
+    ModelResponse,
+    ModelTokenDelta,
+    MockProvider,
+    MockStreamingProvider,
+)
 from agent_runtime.runtime import Runtime, RuntimeConfig
 from agent_runtime.tools import ToolRegistry, register_builtin_tools
 from agent_runtime.sdk import demo_agent
@@ -41,7 +46,7 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.3.0"
+        assert health.json()["version"] == "0.4.0"
 
         created = await client.post(
             "/runs", json={"agent_name": "demo", "input": "hello", "metadata": {"source": "test"}}
@@ -119,3 +124,37 @@ def test_encode_sse_uses_sequence_and_json_payload() -> None:
     assert encoded.endswith("\n\n")
     data_line = encoded.splitlines()[2][len("data: ") :]
     assert json.loads(data_line)["payload"]["text"] == "中文"
+
+
+@pytest.mark.asyncio
+async def test_sse_exposes_model_token_delta_events(workspace: Path) -> None:
+    tools = ToolRegistry()
+    register_builtin_tools(tools)
+    runtime = Runtime(
+        RuntimeConfig(
+            workspace_path=workspace,
+            database_path=workspace / "streaming.sqlite3",
+            event_poll_interval_seconds=0.01,
+        ),
+        provider=MockStreamingProvider(
+            [
+                ModelTokenDelta(content="hello "),
+                ModelTokenDelta(content="stream", finish_reason="stop"),
+            ]
+        ),
+        tools=tools,
+    )
+    runtime.register_agent(demo_agent())
+    app = create_app(runtime)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/runs", json={"input": "stream"})
+        run_id = created.json()["id"]
+        await runtime.wait(run_id)
+        response = await client.get(f"/runs/{run_id}/events/stream")
+
+    assert response.status_code == 200
+    assert response.text.count("event: model.delta\n") == 2
+    assert '"content":"hello "' in response.text
+    assert '"content":"stream"' in response.text

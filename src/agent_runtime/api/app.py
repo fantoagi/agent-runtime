@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import json
@@ -74,7 +74,7 @@ def create_app(runtime: Runtime, *, default_agent: str = "demo") -> FastAPI:
     """
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.3.0",
+        version="0.4.0",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
     )
     app.state.runtime = runtime
@@ -90,7 +90,7 @@ def create_app(runtime: Runtime, *, default_agent: str = "demo") -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "runtime": "agent-runtime", "version": "0.3.0"}
+        return {"status": "ok", "runtime": "agent-runtime", "version": "0.4.0"}
 
     @app.post("/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(request: CreateRunRequest) -> dict[str, Any]:
