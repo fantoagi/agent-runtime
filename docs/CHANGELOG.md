@@ -25,7 +25,7 @@
   - `docs/adr/README.md`
   - `docs/adr/0007-model-token-streaming.md`
   - `README.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`444dec4`
 - **关联 ADR**：[ADR-0007](./adr/0007-model-token-streaming.md)
 
 ### 变更摘要

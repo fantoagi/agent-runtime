@@ -4,7 +4,7 @@
 - **当前里程碑**：真实模型 Provider 与 Token Streaming v0.4
 - **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`（v0.4 变更提交后回填）
+- **当前代码基线 commit**：`444dec4`
 - **最近演进记录**：[E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001)
 
 ## 状态定义
