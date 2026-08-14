@@ -4,7 +4,7 @@
 - **当前里程碑**：可视化 Agent Runtime Learning Console v0.5.1
 - **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`
+- **当前代码基线 commit**：`19a0b20`
 - **最近演进记录**：[E2026-08-14-004](./CHANGELOG.md#e2026-08-14-004)
 
 ## 状态定义
