@@ -40,7 +40,7 @@
   - `docs/CHANGELOG.md`
   - `docs/adr/0010-parent-child-run-delegation.md`
   - `docs/adr/README.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`e7ab51a`
 - **关联 ADR**：[ADR-0010](./adr/0010-parent-child-run-delegation.md)
 
 ### 变更摘要
