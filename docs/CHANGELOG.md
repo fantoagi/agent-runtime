@@ -4,6 +4,66 @@
 
 ---
 
+<a id="e2026-08-14-003"></a>
+## E2026-08-14-003：建立 v0.6 至 v1.0 演进路线图
+
+- **完成时间**：2026-08-14
+- **状态**：✅ stable
+- **类型**：governance
+- **影响范围**：
+  - `docs/ROADMAP.md`
+  - `docs/README.md`
+  - `docs/CURRENT.md`
+  - `docs/CHANGELOG.md`
+  - `README.md`
+  - `scripts/check_docs.py`
+- **关联 commit**：`pending`
+- **关联 ADR**：不需要；本次只建立规划与文档治理规则，不改变 Runtime 架构和执行协议
+
+### 变更摘要
+
+将此前分散在 CURRENT、CHANGELOG 和对话中的后续方向整理为独立 `ROADMAP.md`，正式记录 v0.6 至 v1.0 的演进顺序、版本范围、前置依赖、非目标、验收重点和预计 ADR。
+
+### 系统架构
+
+无 Runtime 架构变化。新增 Roadmap 只负责描述未来计划，当前实现事实仍由 `CURRENT.md` 和 `ARCHITECTURE.md` 维护，已完成历史仍由 `CHANGELOG.md` 维护。
+
+### 实现方式
+
+- 路线图按版本从低到高排列，与 CHANGELOG 的完成时间倒序职责分离。
+- completed 版本关联已有 Change ID，planned 版本不伪造完成记录和日期。
+- 同一时间最多允许一个主版本处于 `in-progress`。
+- `check_docs.py` 检查文件存在性、版本顺序、状态、完成记录和当前版本一致性。
+- README 和文档中心增加 Roadmap 导航入口。
+
+### 当前功能
+
+- 可以从一个文件查看 v0.6 多 Agent、v0.7 Memory、v0.8 Sandbox、v0.9 Worker、v0.10 生产治理和 v1.0 稳定协议规划。
+- 每个版本包含目标、计划范围、验收重点、非目标和预计 ADR。
+- 路线图定义开始、完成和调整时如何同步 CURRENT、CHANGELOG、ARCHITECTURE 和 ADR。
+
+### 已知限制
+
+- 路线图是 Living Document，不代表固定交付日期。
+- planned 内容可能随着前置版本的实现结果调整。
+- 路线图只定义方向和验收边界，具体技术方案仍需在版本开始时通过 ADR 确认。
+
+### 测试与验收
+
+```powershell
+cd D:\AICoding\Agent
+python scripts/check_docs.py
+python -m pytest -p no:cacheprovider -q
+```
+
+文档门禁必须识别 7 条演进记录，并验证 Roadmap 的版本顺序、状态和 Change ID 关联；现有 30 项 Runtime 测试保持通过。
+
+### 后续计划
+
+按照路线图进入 v0.6.0：Parent/Child Run、RunRelation、AgentRegistry 和受控 `Runtime.delegate()`。
+
+---
+
 <a id="e2026-08-14-002"></a>
 ## E2026-08-14-002：增加 Observability、Tracing、Metrics 与 Evals
 

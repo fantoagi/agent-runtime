@@ -4,8 +4,8 @@
 - **当前里程碑**：Observability、Tracing、Metrics 与 Evals v0.5
 - **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`b5ddc61`
-- **最近演进记录**：[E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002)
+- **当前代码基线 commit**：`pending`（路线图治理变更提交后回填）
+- **最近演进记录**：[E2026-08-14-003](./CHANGELOG.md#e2026-08-14-003)
 
 ## 状态定义
 
@@ -41,6 +41,7 @@
 | ✅ stable | Python SDK | 提供 Runtime、Agent 和本地 Demo 构造接口 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
 | ✅ stable | CLI | 支持 demo、Run 控制、审批、unknown 工具处置、Trace、Metrics 和内置 Eval Suite | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | 演进文档体系 | 当前事实、时间线、ADR、模板和自动检查职责分离 | [E2026-08-11-002](./CHANGELOG.md#e2026-08-11-002) |
+| ✅ stable | 演进路线图 | 通过 `ROADMAP.md` 记录 v0.6～v1.0 的顺序、范围、非目标、验收重点和维护规则 | [E2026-08-14-003](./CHANGELOG.md#e2026-08-14-003) |
 
 ## 部分实现或实验能力
 
