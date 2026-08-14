@@ -4,6 +4,86 @@
 
 ---
 
+<a id="e2026-08-14-002"></a>
+## E2026-08-14-002：增加 Observability、Tracing、Metrics 与 Evals
+
+- **完成时间**：2026-08-14
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `pyproject.toml`
+  - `src/agent_runtime/__init__.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/observability.py`
+  - `src/agent_runtime/evals.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/api/app.py`
+  - `tests/test_observability.py`
+  - `tests/test_evals.py`
+  - `tests/test_api.py`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0008-observability-evals.md`
+  - `README.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0008](./adr/0008-observability-evals.md)
+
+### 变更摘要
+
+为 v0.4 Runtime 增加基于持久化执行事实派生的 Trace、Metrics、Prometheus 和确定性 Eval Runner，使每个运行和评估用例都可以定位到 Run、Event、Trace、报告和代码版本。
+
+### 系统架构
+
+- Runtime 创建 Run 时自动生成 `trace_id`，但不改变 Run 状态机和 SQLite Event schema。
+- `ObservabilityService` 位于 Runtime 之外，从 Run/Event 派生 Span 和指标。
+- `EvalRunner` 通过正式 `Runtime.run()` 执行用例，复用 Provider、Tool、Checkpoint、安全和恢复语义。
+- FastAPI 和 CLI 作为 Adapter 暴露观测结果，核心 Runtime 不依赖遥测框架。
+
+### 实现方式
+
+- Run、Model、Tool 和 Approval Span 根据事件时间、sequence 和关联 ID 配对。
+- Metrics 汇总 Run 状态、Event 类型、模型/工具/审批次数、token usage、平均延迟和 p95 Run 延迟。
+- Prometheus 使用 `agent_runtime_*` 指标名称输出纯文本。
+- Eval 内置状态、精确匹配和包含判断评估器，报告写入 Artifact Store。
+- Eval Run metadata 保存 report、suite 和 case 标识，可反查 Trace 与 Event。
+
+### 当前功能
+
+- Python SDK：`ObservabilityService`、`RunTrace`、`MetricsSnapshot`、`EvalSuite`、`EvalCase`、`EvalRunner`。
+- CLI：`agent-runtime observe metrics`、`agent-runtime observe trace <run-id>`、`agent-runtime eval demo`。
+- API：`GET /observability/metrics`、`GET /observability/metrics/prometheus`、`GET /runs/{run_id}/trace`。
+- 每个 Run 自动生成并持久化 `trace_id`。
+- Eval Report 包含用例通过率、Run ID、Trace ID、断言、耗时和 Artifact 路径。
+- API 和项目版本更新为 `0.5.0`。
+
+### 已知限制
+
+- Metrics 当前通过扫描本地 SQLite 历史派生，尚未做增量聚合。
+- 尚未接入 OpenTelemetry Collector、外部 Trace Backend 或时序数据库。
+- Eval Suite 顺序执行，尚无并发评估、数据集版本和统计显著性分析。
+- 评估器暂不支持 LLM-as-a-Judge、语义相似度或工具轨迹规则。
+
+### 测试与验收
+
+```powershell
+cd D:\AICoding\Agent
+python -m compileall -q src tests
+python -m pytest -p no:cacheprovider -q
+python scripts/check_docs.py
+agent-runtime eval demo
+agent-runtime observe metrics
+```
+
+当前测试：30 passed。覆盖 trace_id、Run/Model/Tool Span、历史 Metrics、Prometheus、Observability API、Eval 通过/失败、Contains 评估、Artifact 报告和 metadata 追溯。
+
+### 后续计划
+
+进入 v0.6：多 Agent 编排基础，包括子 Run、委派关系、并行执行和结果汇聚，同时复用 v0.5 Trace 与 Eval 能力。
+
+---
+
 <a id="e2026-08-14-001"></a>
 ## E2026-08-14-001：增加真实模型 Provider 与 Token Streaming
 

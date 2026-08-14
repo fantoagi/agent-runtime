@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .evals import EvalCase, EvalRunner, EvalSuite
+from .observability import ObservabilityService
 from .sdk import create_local_runtime, demo_agent
 
 
@@ -17,6 +19,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     demo = subcommands.add_parser("demo", help="Run the deterministic arithmetic demo")
     demo.add_argument("input", help="Arithmetic expression, e.g. '19 * 23'")
+
+    observe = subcommands.add_parser("observe", help="Inspect derived metrics and run traces")
+    observe_subcommands = observe.add_subparsers(dest="observe_command", required=True)
+    metrics = observe_subcommands.add_parser("metrics", help="Show a JSON metrics snapshot")
+    metrics.add_argument("--limit", type=int, default=1000)
+    trace = observe_subcommands.add_parser("trace", help="Show the trace for one run")
+    trace.add_argument("run_id")
+
+    eval_command = subcommands.add_parser("eval", help="Run deterministic evaluation suites")
+    eval_subcommands = eval_command.add_subparsers(dest="eval_command", required=True)
+    eval_subcommands.add_parser("demo", help="Evaluate the built-in arithmetic agent")
 
     runs = subcommands.add_parser("runs", help="Inspect or control existing runs")
     runs_subcommands = runs.add_subparsers(dest="runs_command", required=True)
@@ -62,6 +75,27 @@ async def async_main(arguments: argparse.Namespace) -> int:
         async for event in runtime.stream(run.id):
             _print(event.to_dict())
         return 0 if run.status == "completed" else 1
+
+    if arguments.command == "observe":
+        observability = ObservabilityService(runtime.store)
+        if arguments.observe_command == "metrics":
+            _print(observability.metrics(limit=arguments.limit).to_dict())
+            return 0
+        if arguments.observe_command == "trace":
+            _print(observability.trace(arguments.run_id).to_dict())
+            return 0
+
+    if arguments.command == "eval":
+        suite = EvalSuite(
+            name="arithmetic-demo",
+            cases=[
+                EvalCase(name="multiply", input="19 * 23", expected_output="The result is 437."),
+                EvalCase(name="addition", input="2 + 2", expected_output="The result is 4."),
+            ],
+        )
+        report = await EvalRunner(runtime).run(suite, "demo")
+        _print(report.to_dict())
+        return 0 if report.failed_cases == 0 else 1
 
     if arguments.command == "approve":
         approval = runtime.resolve_approval(arguments.approval_id, not arguments.reject, arguments.reason)

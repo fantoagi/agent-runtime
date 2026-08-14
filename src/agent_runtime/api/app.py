@@ -6,12 +6,13 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from ..domain import AgentRun, Approval, RunNotFound, RuntimeEvent
+from ..observability import ObservabilityService
 from ..runtime import Runtime
 from ..sdk import create_local_runtime, demo_agent
 
 try:
     from fastapi import FastAPI, HTTPException, Query, Request, status
-    from fastapi.responses import JSONResponse, StreamingResponse
+    from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
     from pydantic import BaseModel, Field
 except ImportError as error:  # pragma: no cover - exercised when the optional extra is absent
     raise ImportError(
@@ -74,7 +75,7 @@ def create_app(runtime: Runtime, *, default_agent: str = "demo") -> FastAPI:
     """
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.4.0",
+        version="0.5.0",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
     )
     app.state.runtime = runtime
@@ -90,7 +91,25 @@ def create_app(runtime: Runtime, *, default_agent: str = "demo") -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "runtime": "agent-runtime", "version": "0.4.0"}
+        return {"status": "ok", "runtime": "agent-runtime", "version": "0.5.0"}
+
+    @app.get("/observability/metrics")
+    async def observability_metrics(limit: int = Query(1000, ge=1, le=10000)) -> dict[str, Any]:
+        return ObservabilityService(runtime.store).metrics(limit=limit).to_dict()
+
+    @app.get("/observability/metrics/prometheus")
+    async def prometheus_metrics(
+        limit: int = Query(1000, ge=1, le=10000),
+    ) -> PlainTextResponse:
+        content = ObservabilityService(runtime.store).metrics(limit=limit).to_prometheus()
+        return PlainTextResponse(content, media_type="text/plain; version=0.0.4")
+
+    @app.get("/runs/{run_id}/trace")
+    async def get_run_trace(run_id: str) -> dict[str, Any]:
+        try:
+            return ObservabilityService(runtime.store).trace(run_id).to_dict()
+        except (KeyError, RunNotFound) as error:
+            raise _not_found(error) from error
 
     @app.post("/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(request: CreateRunRequest) -> dict[str, Any]:

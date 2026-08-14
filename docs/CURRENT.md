@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.4.0`
-- **当前里程碑**：真实模型 Provider 与 Token Streaming v0.4
+- **当前版本**：`0.5.0`
+- **当前里程碑**：Observability、Tracing、Metrics 与 Evals v0.5
 - **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`444dec4`
-- **最近演进记录**：[E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001)
+- **当前代码基线 commit**：`pending`（v0.5 变更提交后回填）
+- **最近演进记录**：[E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002)
 
 ## 状态定义
 
@@ -32,11 +32,14 @@
 | ✅ stable | Event Log | 每个 Run 使用单调递增 sequence，并支持状态和事件原子提交 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | Model Token Streaming | Provider 可按增量输出文本和 Tool Call，Runtime 持久化 `model.delta` 并最终合并为完整响应 | [E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001) |
 | ✅ stable | FastAPI / SSE API | HTTP Run lifecycle、持久化 Runtime Event 和模型增量 SSE | [E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002) |
+| ✅ stable | Run Trace | 每个 Run 自动生成 `trace_id`，并从持久化事件派生 Run、Model、Tool、Approval Span | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
+| ✅ stable | Metrics / Prometheus | 从 SQLite 历史派生 Run 状态、事件、延迟、模型/工具次数和 token 指标 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
+| ✅ stable | Eval Runner | 支持状态、精确匹配、包含判断、通过率和 JSON Artifact 报告 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Step / ToolExecution / Checkpoint | 持久化模型步骤、工具队列、结果和恢复消息 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | Pause / Resume / Cancel | 支持生命周期控制、活动 Task 取消和工具协作式取消 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | 人工审批 | 高风险工具可等待审批，多个工具调用可逐项恢复 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | Python SDK | 提供 Runtime、Agent 和本地 Demo 构造接口 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
-| ✅ stable | CLI | 支持 demo、run 查询、事件、暂停、恢复、取消、审批和 unknown 工具处置 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
+| ✅ stable | CLI | 支持 demo、Run 控制、审批、unknown 工具处置、Trace、Metrics 和内置 Eval Suite | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | 演进文档体系 | 当前事实、时间线、ADR、模板和自动检查职责分离 | [E2026-08-11-002](./CHANGELOG.md#e2026-08-11-002) |
 
 ## 部分实现或实验能力
@@ -74,12 +77,14 @@
 - 多工具调用已持久化为 ToolExecution 队列并可逐项审批；尚未支持并行工具调度。
 - CLI 重新启动后只能恢复已注册的 Agent；当前 CLI 默认只注册 Demo Agent。
 - 本地 `.venv` 默认只安装 runtime 包，运行测试前需要安装 `pytest` 和 `pytest-asyncio`。
+- 当前 Trace 和 Metrics 从本地 SQLite 派生，尚未接入 OpenTelemetry Collector 或外部时序数据库。
+- 当前 Eval Runner 顺序执行用例，内置评估器只覆盖状态、精确匹配和字符串包含，尚无 LLM-as-a-Judge。
 
 ## 当前测试状态
 
 - **最近验证日期**：2026-08-14
-- **结果**：`25 passed`
-- **覆盖范围**：状态机、工具校验、workspace 安全、审批、恢复与幂等、事务回滚、FastAPI / SSE、Mock token streaming、OpenAI-compatible SSE 解析、增量 Tool Call 拼接和最终 Checkpoint。
+- **结果**：`30 passed`
+- **覆盖范围**：状态机、工具安全、审批、恢复与幂等、FastAPI / SSE、Token Streaming、Trace Span、JSON/Prometheus Metrics、Eval 通过率、结果 Artifact 和 Eval metadata 追溯。
 - **文档检查**：使用 `python scripts/check_docs.py`。
 
 ## 当前运行方式
@@ -104,3 +109,14 @@ uvicorn agent_runtime.api.app:app --reload
 ```
 
 主要接口：`GET /health`、`POST /runs`、`GET /runs/{run_id}`、`GET /runs/{run_id}/events`、`GET /runs/{run_id}/events/stream`、Run 生命周期控制和审批处理。v0.4 的模型增量使用 `model.delta` 事件进入同一 SSE 流。
+
+
+### Observability / Evals
+
+```powershell
+agent-runtime observe metrics
+agent-runtime observe trace <run-id>
+agent-runtime eval demo
+```
+
+API 入口：`GET /observability/metrics`、`GET /observability/metrics/prometheus` 和 `GET /runs/{run_id}/trace`。Python SDK 可以使用 `ObservabilityService`、`EvalSuite`、`EvalCase` 和 `EvalRunner`。
