@@ -21,6 +21,7 @@ from .domain import (
     ToolExecutionError,
     ToolExecutionStatus,
     ToolOutcomeUnknown,
+    new_id,
     utc_now,
 )
 from .providers import (
@@ -81,15 +82,21 @@ class Runtime:
         metadata: dict[str, Any] | None = None,
     ) -> AgentRun:
         definition = self._resolve_agent(agent)
+        run_metadata = {**self.config.metadata, **(metadata or {})}
+        run_metadata.setdefault("trace_id", new_id("trace"))
         run = AgentRun.create(
             definition.name,
             input_text,
-            {**self.config.metadata, **(metadata or {})},
+            run_metadata,
         )
         self.store.create_run_with_event(
             run,
             "run.created",
-            {"agent_name": definition.name, "input": input_text},
+            {
+                "agent_name": definition.name,
+                "input": input_text,
+                "trace_id": run.metadata["trace_id"],
+            },
         )
         return run
 

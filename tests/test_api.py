@@ -46,7 +46,7 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.4.0"
+        assert health.json()["version"] == "0.5.0"
 
         created = await client.post(
             "/runs", json={"agent_name": "demo", "input": "hello", "metadata": {"source": "test"}}
@@ -158,3 +158,28 @@ async def test_sse_exposes_model_token_delta_events(workspace: Path) -> None:
     assert response.text.count("event: model.delta\n") == 2
     assert '"content":"hello "' in response.text
     assert '"content":"stream"' in response.text
+
+
+@pytest.mark.asyncio
+async def test_observability_api_exposes_trace_and_metrics(workspace: Path) -> None:
+    runtime = make_api_runtime(workspace)
+    app = create_app(runtime)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/runs", json={"input": "observe me"})
+        run_id = created.json()["id"]
+        await runtime.wait(run_id)
+
+        trace = await client.get(f"/runs/{run_id}/trace")
+        metrics = await client.get("/observability/metrics")
+        prometheus = await client.get("/observability/metrics/prometheus")
+
+    assert trace.status_code == 200
+    assert trace.json()["run_id"] == run_id
+    assert trace.json()["trace_id"].startswith("trace_")
+    assert any(span["kind"] == "model" for span in trace.json()["spans"])
+    assert metrics.status_code == 200
+    assert metrics.json()["total_runs"] == 1
+    assert metrics.json()["model_requests"] == 1
+    assert prometheus.status_code == 200
+    assert "agent_runtime_runs_total" in prometheus.text

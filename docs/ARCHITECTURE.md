@@ -1,8 +1,8 @@
 # Agent Runtime 当前架构
 
 > 最近更新：2026-08-14
-> 关联记录：[E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001)
-> 关联决策：[ADR-0007](./adr/0007-model-token-streaming.md)、[ADR-0006](./adr/0006-fastapi-sse-adapter.md)、[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
+> 关联记录：[E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002)
+> 关联决策：[ADR-0008](./adr/0008-observability-evals.md)、[ADR-0007](./adr/0007-model-token-streaming.md)、[ADR-0006](./adr/0006-fastapi-sse-adapter.md)、[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
 
 ## 1. 系统目标和边界
 
@@ -23,6 +23,8 @@ flowchart TD
     Events["Persistent Event Log"]
     Checkpoints["Checkpoint Store"]
     Artifacts["Artifact Store"]
+    Observe["Observability / Trace / Metrics"]
+    Evals["Eval Runner"]
 
     CLI --> Runtime
     API --> Runtime
@@ -32,6 +34,10 @@ flowchart TD
     Runtime --> Events
     Runtime --> Checkpoints
     Runtime --> Artifacts
+    Events --> Observe
+    State --> Observe
+    Evals --> Runtime
+    Evals --> Artifacts
 ```
 
 核心依赖方向由入口指向 Runtime，再由 Runtime 依赖抽象化的 Provider、Tool 和 Store；模型厂商响应和具体工具实现不进入 Runtime Kernel 的领域模型。
@@ -41,7 +47,7 @@ flowchart TD
 `Runtime` 负责：
 
 - 注册 `AgentDefinition`。
-- 创建、启动、等待和恢复 `AgentRun`。
+- 创建、启动、等待和恢复 `AgentRun`，并为每个 Run 注入稳定 `trace_id`。
 - 执行有最大步数和最大工具调用数的 Agent 循环。
 - 将模型响应规范化为文本或 `ToolCall`。
 - 触发工具执行、人工审批和 Checkpoint。
@@ -152,6 +158,9 @@ agent-runtime runs resume
 agent-runtime runs cancel
 agent-runtime approve
 agent-runtime resolve-unknown
+agent-runtime observe metrics
+agent-runtime observe trace <run-id>
+agent-runtime eval demo
 ```
 
 核心 Runtime 不依赖 CLI 或 HTTP 框架。
@@ -168,6 +177,34 @@ FastAPI 位于 Application / Adapter Layer，只调用 Runtime、SQLiteStore 和
 - `GET /runs/{run_id}/approvals/pending` 与 `POST /approvals/{approval_id}/resolve` 完成人工审批。
 
 v0.4 起，SSE 仍然只有一个事件流协议；客户端根据 `type` 区分 `model.delta`、`tool.completed` 等事件。`model.delta` 是持久化 Runtime Event，因此支持 `after_sequence` 断点续传；Provider 不支持 streaming 时，Runtime 会回退为一次性的完整响应事件。
+
+## 9.2 Observability、Trace 与 Metrics
+
+`ObservabilityService` 不侵入 Runtime 状态机，而是从 `SQLiteStore` 中已经持久化的 Run 和 Runtime Event 派生观测结果：
+
+- `RunTrace`：包含一个 Run root span，以及 Model、Tool、Approval 子 span。
+- `MetricsSnapshot`：包含 Run 状态分布、事件计数、模型/工具/审批次数、token usage、平均延迟和 p95 Run 延迟。
+- Prometheus 文本：通过固定 `agent_runtime_*` 指标名称导出。
+
+每个新 Run 的 metadata 自动包含 `trace_id`。Trace Span 使用事件 sequence 和 timestamp 构造，因此可以回溯到原始事件，但当前没有修改 SQLite Event schema，也没有依赖 OpenTelemetry SDK。
+
+FastAPI 暴露：
+
+- `GET /observability/metrics`。
+- `GET /observability/metrics/prometheus`。
+- `GET /runs/{run_id}/trace`。
+
+## 9.3 Eval Runner
+
+`EvalRunner` 使用与生产执行相同的 Runtime 路径逐个运行 `EvalCase`，不会绕过 Provider、Tool、Checkpoint 或 Event Log。每个 Eval Run 的 metadata 保存 `eval_report_id`、`eval_suite` 和 `eval_case`，因此评估结果可以反查完整 Trace 和事件。
+
+当前内置评估器：
+
+- `ExpectedStatusEvaluator`：检查 Run 最终状态。
+- `ExactMatchEvaluator`：检查最终文本精确匹配。
+- `ContainsEvaluator`：检查最终文本包含指定片段。
+
+`EvalReport` 汇总用例级断言、通过率、Run ID、Trace ID 和耗时，并写入 Artifact Store 的 `eval-report.json`。当前顺序执行以保证确定性，尚未实现并发评估、统计显著性或 LLM-as-a-Judge。
 
 ## 10. 安全边界
 
@@ -199,7 +236,7 @@ v0.4 起，SSE 仍然只有一个事件流协议；客户端根据 `type` 区分
 - 新增 `ModelProvider` 实现。
 - 注册新的受控工具。
 - 将 SQLite repository 替换为其他持久化实现。
-- 在事件消费边界上增加 SSE、WebSocket 或消息队列。
+- 在事件消费边界上增加 WebSocket、消息队列或 OpenTelemetry Exporter。
 - 增加独立 `SandboxExecutor`，而不是让 Runtime 直接执行 Shell。
 - 在单 Agent Kernel 之上增加调度与多 Agent 编排层。
 
@@ -211,3 +248,5 @@ v0.4 起，SSE 仍然只有一个事件流协议；客户端根据 `type` 区分
 - 向量数据库与长期记忆治理。
 - 任意代码或 Shell 执行。
 - 完整 Web 控制台。
+- 外部 OpenTelemetry Collector、时序数据库和分布式 Trace Backend。
+- LLM-as-a-Judge、数据集版本管理和统计显著性分析。
