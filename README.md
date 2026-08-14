@@ -27,7 +27,7 @@ OpenAI-compatible provider in application code when connecting to a real model.
 agent-runtime lab
 ```
 
-浏览器会打开 `http://127.0.0.1:8000/lab`。v0.5.2 内置纯文本、Tool Calling、Token Streaming 和 Human Approval 四个确定性场景，并提供：
+浏览器会打开 `http://127.0.0.1:8000/lab`。v0.5.3 内置纯文本、Tool Calling、Token Streaming 和 Human Approval 四个确定性场景，并提供：
 
 - 按 Run / Model / Tool / Approval / State 分组的动态泳道图。
 - 从头回放、逐事件前进和自动播放。

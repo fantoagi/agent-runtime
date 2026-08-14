@@ -1,7 +1,7 @@
 # Agent Runtime 当前架构
 
 > 最近更新：2026-08-14
-> 关联记录：[E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005)
+> 关联记录：[E2026-08-14-006](./CHANGELOG.md#e2026-08-14-006)
 > 关联决策：[ADR-0009](./adr/0009-learning-console.md)、[ADR-0008](./adr/0008-observability-evals.md)、[ADR-0007](./adr/0007-model-token-streaming.md)、[ADR-0006](./adr/0006-fastapi-sse-adapter.md)、[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
 
 ## 1. 系统目标和边界
@@ -231,10 +231,12 @@ Snapshot 使用 `SQLiteStore.steps_for_run()` 和 `tool_executions_for_run()` �
 
 泳道图是纯前端投影：`eventLane()` 仅根据 Event type 选择泳道，`RuntimeEvent.sequence` 决定水平顺序，timestamp 只用于计算相对时间。SVG 连线、自动滚动和播放状态都不回写 Store。
 
+空状态仅在 Snapshot 没有 Event 时显示。JavaScript 切换 `HTMLElement.hidden`，CSS 显式定义 `.empty-state[hidden] { display: none; }`，避免空状态的 `display: grid` 覆盖浏览器 hidden 默认样式。该适配属于 Static UI，不改变 Snapshot 和 Runtime 语义。
+
 事件“回放”只移动浏览器展示游标。它不会暂停 Runtime asyncio Task，也不会改变 Run 状态机、Event sequence 或恢复语义。该边界保证 Learning Console 可以随功能演进扩展，而 Runtime Kernel 不依赖 UI。
 
 > 最近更新：2026-08-14
-> 关联记录：[E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005)
+> 关联记录：[E2026-08-14-006](./CHANGELOG.md#e2026-08-14-006)
 > 关联决策：[ADR-0009](./adr/0009-learning-console.md)
 
 ## 10. 安全边界

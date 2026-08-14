@@ -20,6 +20,8 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         assert "--accent" in stylesheet.text
         assert ".swimlane-board" in stylesheet.text
         assert ".swimlane-link" in stylesheet.text
+        assert ".empty-state[hidden]" in stylesheet.text
+        assert "min-height: 164px" in stylesheet.text
 
         script = await client.get("/lab/static/app.js")
         assert script.status_code == 200

@@ -1,6 +1,6 @@
 ﻿# Agent Runtime Learning Console 使用指南
 
-Learning Console 是 v0.5.2 提供的本地可视化学习入口。它把原本需要多条 PowerShell 命令才能观察的 Run、Event、Step、ToolExecution、Checkpoint、Approval、Trace 和 Metrics 放到同一个浏览器页面中。
+Learning Console 是 v0.5.3 提供的本地可视化学习入口。它把原本需要多条 PowerShell 命令才能观察的 Run、Event、Step、ToolExecution、Checkpoint、Approval、Trace 和 Metrics 放到同一个浏览器页面中。
 
 > 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。
 
@@ -43,7 +43,7 @@ uvicorn agent_runtime.api.app:app --reload
 
 ### 左侧：Learning Path
 
-选择确定性学习场景。v0.5.2 继续提供以下 4 个场景：
+选择确定性学习场景。v0.5.3 继续提供以下 4 个场景：
 
 1. 纯文本响应。
 2. Tool Calling。
@@ -53,6 +53,8 @@ uvicorn agent_runtime.api.app:app --reload
 每张卡片都包含默认输入、学习目标、预期事件路径和自动验收规则。
 
 ### 中间：Durable Event Log
+
+尚未启动 Run 时，中间区域只显示一条紧凑的引导提示，用于说明事件来自 SQLite 和 SSE。一旦 Snapshot 中存在事件，该空状态会完全隐藏，不占用泳道图上方空间。
 
 持久化事件按 `RuntimeEvent.sequence` 从左向右进入动态泳道。纵向位置表示执行角色，曲线表示相邻事件之间的先后关系：
 
@@ -223,7 +225,7 @@ flowchart LR
 
 ## 6. 当前限制
 
-- v0.5.2 只提供 4 个确定性场景。
+- v0.5.3 只提供 4 个确定性场景。
 - “逐步回放”是对已持久化事件的展示控制，不是单步暂停 Python 协程。
 - Learning Console 面向本地单用户学习，没有身份认证和多租户隔离。
 - 页面使用 Vanilla JavaScript，无前端构建工具；复杂 Workflow Designer 不在当前范围。

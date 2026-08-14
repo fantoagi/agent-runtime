@@ -5,6 +5,87 @@
 ---
 
 
+<a id="e2026-08-14-006"></a>
+## E2026-08-14-006：修复 Learning Console 空状态占用大片空间
+
+- **完成时间**：2026-08-14
+- **状态**：✅ stable
+- **类型**：fix
+- **影响范围**：
+  - `pyproject.toml`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/lab/static/styles.css`
+  - `tests/test_api.py`
+  - `tests/test_lab_api.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/LEARNING.md`
+  - `docs/ROADMAP.md`
+  - `docs/CHANGELOG.md`
+  - `docs/adr/0009-learning-console.md`
+  - `docs/adr/README.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0009](./adr/0009-learning-console.md)
+
+### 变更摘要
+
+修复 Learning Console 在已有 Runtime Event 时仍显示“运行一个场景”空状态的问题。该区域的用途只是在尚未启动 Run 时提示 SQLite / SSE 数据来源，不应在泳道图已出现时继续占用页面高度。
+
+### 系统架构
+
+- Runtime Kernel、SQLite、Snapshot API、SSE 和泳道事件数据保持不变。
+- 变更仅位于 Learning Console Static UI 展示层。
+- 空状态和泳道图继续由 Snapshot 中是否存在 Event 决定，两者必须互斥。
+
+### 实现方式
+
+- 根因是 `.empty-state { display: grid; }` 的作者样式覆盖了浏览器默认 `[hidden] { display: none; }`。
+- 新增 `.empty-state[hidden] { display: none; }`，使 `timelineEmpty.hidden = true` 可靠生效。
+- 将未运行时的空状态从 390px 纯居中大区域改为 164px 紧凑横向引导，并缩小轨道动画。
+- 390px 移动宽度使用 138px 紧凑空状态，不引入页面横向溢出。
+
+### 当前功能
+
+- 未创建 Run 时显示紧凑引导提示。
+- 一旦 Snapshot 存在 Event，空状态立即完全隐藏。
+- 泳道图直接紧跟图例显示，不再有额外 390px 空白区域。
+- 原有 SSE 追加、回放、节点连线、Inspector 和审批功能保持不变。
+- API 和项目版本更新为 `0.5.3`。
+
+### 已知限制
+
+- 空状态仍只用于“尚无 Event”，尚未区分首次访问、场景启动中和加载失败等更细状态。
+- Learning Console 仍为本地单用户教学界面，不是生产运维控制台。
+
+### 测试与验收
+
+```powershell
+cd D:\AICoding\Agent
+node --check src\agent_runtime\lab\static\app.js
+python -m pytest -p no:cacheprovider -q
+python scripts/check_docs.py
+```
+
+当前自动化测试：`37 passed`。
+
+浏览器回归结果：
+
+- 运行前空状态为 `display: grid`，高度为 164px。
+- 运行前泳道图为 `display: none`。
+- 运行后空状态为 `hidden=true`、`display: none`，高度为 0。
+- 运行后泳道图为 `display: grid`。
+- 图例与泳道图之间的间距为 12px。
+- Tool Calling 教学场景生成 18 个泳道节点。
+
+静态回归检查：CSS 必须包含 `.empty-state[hidden]` 和 164px 紧凑高度。
+
+### 后续计划
+
+可在后续版本将“初始引导”、“Run 启动中”和“加载失败”拆分为独立紧凑状态，同时保持泳道为中间区域的主视图。
+
+
 <a id="e2026-08-14-005"></a>
 ## E2026-08-14-005：Learning Console 改用动态事件泳道图
 

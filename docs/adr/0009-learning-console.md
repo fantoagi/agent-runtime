@@ -3,7 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-08-14
 - **决策人**：Agent Runtime Maintainers
-- **关联变更**：[E2026-08-14-005](../CHANGELOG.md#e2026-08-14-005)、[E2026-08-14-004](../CHANGELOG.md#e2026-08-14-004)
+- **关联变更**：[E2026-08-14-006](../CHANGELOG.md#e2026-08-14-006)、[E2026-08-14-005](../CHANGELOG.md#e2026-08-14-005)、[E2026-08-14-004](../CHANGELOG.md#e2026-08-14-004)
 
 ## 背景
 
@@ -18,6 +18,7 @@ v0.5 已具备 Run、Event、Step、ToolExecution、Checkpoint、Approval、SSE�
 5. 事件回放只改变浏览器的展示游标，不改变 Runtime 状态机，也不提供内核级单步暂停。泳道、sequence 列、相对时间和连线都是 RuntimeEvent 的纯展示投影。
 6. 教学解释、颜色、源码映射、场景预期和自动验收属于 Lab 模块，不进入 Runtime Kernel 和领域模型。
 7. 前端使用静态 HTML、CSS 和 Vanilla JavaScript，不引入 Node.js 构建链或 SPA 框架。
+8. 展示层的空状态必须与有事件的泳道状态互斥；CSS 不得覆盖 `hidden` 语义，且未运行提示应保持紧凑。
 
 ## 影响
 

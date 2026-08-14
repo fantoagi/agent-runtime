@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.5.2`
-- **当前里程碑**：动态泳道 Learning Console v0.5.2
+- **当前版本**：`0.5.3`
+- **当前里程碑**：Learning Console 空状态布局优化 v0.5.3
 - **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`3559243`
-- **最近演进记录**：[E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005)
+- **当前代码基线 commit**：`pending`
+- **最近演进记录**：[E2026-08-14-006](./CHANGELOG.md#e2026-08-14-006)
 
 ## 状态定义
 
@@ -32,7 +32,7 @@
 | ✅ stable | Event Log | 每个 Run 使用单调递增 sequence，并支持状态和事件原子提交 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | Model Token Streaming | Provider 可按增量输出文本和 Tool Call，Runtime 持久化 `model.delta` 并最终合并为完整响应 | [E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001) |
 | ✅ stable | FastAPI / SSE API | HTTP Run lifecycle、持久化 Runtime Event 和模型增量 SSE | [E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002) |
-| ✅ stable | Learning Console | 一条命令启动本地可视化学习环境；事件按 Run / Model / Tool / Approval / State 泳道实时展示，并支持回放、连线、相对时间、Inspector、审批和自动验收 | [E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005) |
+| ✅ stable | Learning Console | 一条命令启动本地可视化学习环境；事件按 Run / Model / Tool / Approval / State 泳道实时展示；未运行时仅显示紧凑提示，有事件后空状态完全隐藏 | [E2026-08-14-006](./CHANGELOG.md#e2026-08-14-006) |
 | ✅ stable | Run Trace | 每个 Run 自动生成 `trace_id`，并从持久化事件派生 Run、Model、Tool、Approval Span | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Metrics / Prometheus | 从 SQLite 历史派生 Run 状态、事件、延迟、模型/工具次数和 token 指标 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Eval Runner | 支持状态、精确匹配、包含判断、通过率和 JSON Artifact 报告 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
