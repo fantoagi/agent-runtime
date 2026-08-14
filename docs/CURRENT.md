@@ -4,7 +4,7 @@
 - **当前里程碑**：动态泳道 Learning Console v0.5.2
 - **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`
+- **当前代码基线 commit**：`3559243`
 - **最近演进记录**：[E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005)
 
 ## 状态定义
