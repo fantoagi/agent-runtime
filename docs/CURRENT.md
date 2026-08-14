@@ -4,7 +4,7 @@
 - **当前里程碑**：Learning Console 空状态布局优化 v0.5.3
 - **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`
+- **当前代码基线 commit**：`b8fad6d`
 - **最近演进记录**：[E2026-08-14-006](./CHANGELOG.md#e2026-08-14-006)
 
 ## 状态定义
