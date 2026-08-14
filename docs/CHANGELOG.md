@@ -4,6 +4,81 @@
 
 ---
 
+<a id="e2026-08-14-001"></a>
+## E2026-08-14-001：增加真实模型 Provider 与 Token Streaming
+
+- **完成时间**：2026-08-14
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `pyproject.toml`
+  - `src/agent_runtime/__init__.py`
+  - `src/agent_runtime/providers.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/api/app.py`
+  - `tests/test_providers.py`
+  - `tests/test_runtime.py`
+  - `tests/test_api.py`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0007-model-token-streaming.md`
+  - `README.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0007](./adr/0007-model-token-streaming.md)
+
+### 变更摘要
+
+在 v0.3 FastAPI / SSE 基础上增加真实模型 Provider 的流式响应能力。Runtime 可以接收文本和 Tool Call 增量，产生持久化 `model.delta` 事件，并最终恢复为原有完整模型响应。
+
+### 系统架构
+
+- `ModelProvider.complete()` 继续作为兼容基线。
+- 新增可选 `StreamingModelProvider.stream()` 和 `ModelTokenDelta`。
+- Runtime Kernel 负责把 Provider 增量转换为 `model.stream.started`、`model.delta`、`model.stream.completed`。
+- FastAPI 不新增第二套 token API，继续通过 `/runs/{run_id}/events/stream` 输出统一事件流。
+
+### 实现方式
+
+- `MockStreamingProvider` 用于确定性测试，验证多个文本 delta 和 Tool Call delta 的合并。
+- `OpenAICompatibleProvider` 使用标准库 HTTP 和后台线程逐行解析 Chat Completions SSE，支持 `[DONE]`、finish reason、usage 和 Tool Call 增量。
+- Runtime 对不支持 `stream()` 的 Provider 自动回退到 `complete()`，保留 v0.2/v0.3 行为。
+- 流式响应完成后才生成最终 assistant message，并继续使用既有 Step、ToolExecution、Checkpoint 和审批流程。
+
+### 当前功能
+
+- 支持 OpenAI-compatible Chat Completions 非流式调用。
+- 支持 OpenAI-compatible SSE 流式文本响应。
+- 支持多个 `model.delta` 事件通过 Runtime Event Log 和 SSE 输出。
+- 支持流式 Tool Call 参数拼接后进入原有工具 schema 校验。
+- 支持旧 Provider 无 streaming 时自动 fallback。
+- API 版本更新为 `0.4.0`。
+
+### 已知限制
+
+- 仍然使用标准库 HTTP；不同厂商的 SSE 扩展格式需要持续补充适配。
+- 当前每个 delta 都持久化，极高吞吐场景的存储成本尚未优化。
+- 标准库阻塞 HTTP 在 `asyncio.to_thread` 中执行，取消请求不能立即中断底层 socket。
+- 尚未实现多 Agent 编排、分布式 Worker、长期记忆和 Docker 代码沙箱。
+
+### 测试与验收
+
+```powershell
+cd D:\AICoding\Agent
+python -m compileall -q src tests
+python -m pytest -p no:cacheprovider -q
+python scripts/check_docs.py
+```
+
+当前测试：25 passed。覆盖 Mock streaming、OpenAI-compatible SSE 解析、Runtime 增量事件、最终 Checkpoint 合并和 v0.3 API 回归。
+
+### 后续计划
+
+进入 v0.5：Observability、Metrics、Tracing 与 Evals，继续保持每个功能都有事件、测试和演进记录。
+
+---
+
 <a id="e2026-08-13-002"></a>
 ## E2026-08-13-002：增加 FastAPI Run API 与 SSE 事件接口
 

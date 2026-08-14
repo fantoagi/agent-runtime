@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal
@@ -15,13 +16,20 @@ from .domain import (
     RunStatus,
     Step,
     StepStatus,
+    ToolCall,
     ToolExecution,
     ToolExecutionError,
     ToolExecutionStatus,
     ToolOutcomeUnknown,
     utc_now,
 )
-from .providers import ModelProvider
+from .providers import (
+    ModelProvider,
+    ModelResponse,
+    ModelTokenDelta,
+    StreamingModelProvider,
+    ToolCallDelta,
+)
 from .storage import ArtifactStore, SQLiteStore
 from .tools import CancellationToken, ToolContext, ToolRegistry
 
@@ -49,7 +57,7 @@ class Runtime:
     def __init__(
         self,
         config: RuntimeConfig,
-        provider: ModelProvider,
+        provider: ModelProvider | StreamingModelProvider,
         tools: ToolRegistry,
         store: SQLiteStore | None = None,
     ) -> None:
@@ -321,7 +329,7 @@ class Runtime:
                         "model.requested",
                         {"step": run.step_count, "model": agent.model.model},
                     )
-                    response = await self._request_model(messages, agent)
+                    response = await self._request_model(run, messages, agent, step.step_index)
                     assistant_message = Message(
                         role="assistant",
                         content=response.content,
@@ -337,7 +345,7 @@ class Runtime:
                     }
                     delta_payload = (
                         {"step": run.step_count, "content": response.content}
-                        if response.content
+                        if response.content and not response.raw_response.get("_streamed")
                         else None
                     )
 
@@ -675,11 +683,46 @@ class Runtime:
         """Failure-injection seam: called after a handler returns, before durable completion."""
 
     async def _request_model(
-        self, messages: list[Message], agent: AgentDefinition
-    ):
+        self,
+        run: AgentRun,
+        messages: list[Message],
+        agent: AgentDefinition,
+        step_index: int,
+    ) -> ModelResponse:
         last_error: Exception | None = None
         for attempt in range(self.config.max_model_retries + 1):
             try:
+                stream = getattr(self.provider, "stream", None)
+                if callable(stream):
+                    self._event(
+                        run.id,
+                        "model.stream.started",
+                        {"step": step_index, "attempt": attempt + 1},
+                    )
+                    response = await asyncio.wait_for(
+                        self._consume_model_stream(
+                            run,
+                            stream(
+                                messages,
+                                self.tools.definitions_for(agent.tools),
+                                agent.model,
+                            ),
+                            step_index,
+                            attempt + 1,
+                        ),
+                        timeout=self.config.model_timeout_seconds,
+                    )
+                    self._event(
+                        run.id,
+                        "model.stream.completed",
+                        {
+                            "step": step_index,
+                            "finish_reason": response.finish_reason,
+                            "usage": response.usage,
+                            "has_tool_calls": bool(response.tool_calls),
+                        },
+                    )
+                    return response
                 return await asyncio.wait_for(
                     self.provider.complete(
                         messages,
@@ -692,11 +735,72 @@ class Runtime:
                 raise
             except Exception as error:
                 last_error = error
+                if callable(getattr(self.provider, "stream", None)):
+                    self._event(
+                        run.id,
+                        "model.stream.failed",
+                        {"step": step_index, "attempt": attempt + 1, "error": str(error)},
+                    )
                 if attempt >= self.config.max_model_retries:
                     break
                 await asyncio.sleep(0.25 * (2**attempt))
         assert last_error is not None
         raise last_error
+
+    async def _consume_model_stream(
+        self,
+        run: AgentRun,
+        deltas: AsyncIterator[ModelTokenDelta],
+        step_index: int,
+        attempt: int,
+    ) -> ModelResponse:
+        content: list[str] = []
+        calls: dict[int, ToolCallDelta] = {}
+        finish_reason: str | None = None
+        usage: dict[str, int] = {}
+        async for delta in deltas:
+            if delta.content:
+                content.append(delta.content)
+            for item in delta.tool_call_deltas:
+                existing = calls.setdefault(item.index, ToolCallDelta(item.index))
+                existing.id = item.id or existing.id
+                existing.name = item.name or existing.name
+                existing.arguments += item.arguments
+            finish_reason = delta.finish_reason or finish_reason
+            usage.update(delta.usage)
+            self._event(
+                run.id,
+                "model.delta",
+                {
+                    "step": step_index,
+                    "attempt": attempt,
+                    "content": delta.content,
+                    "tool_call_deltas": [item.to_dict() for item in delta.tool_call_deltas],
+                    "finish_reason": delta.finish_reason,
+                    "usage": delta.usage,
+                },
+            )
+        tool_calls = []
+        for index in sorted(calls):
+            item = calls[index]
+            try:
+                arguments = json.loads(item.arguments or "{}")
+            except json.JSONDecodeError as error:
+                raise ValueError(f"Invalid streamed tool arguments for index {index}.") from error
+            tool_calls.append(
+                ToolCall(
+                    item.id or f"streamed_call_{index}",
+                    item.name or "",
+                    arguments,
+                )
+            )
+        return ModelResponse(
+            content="".join(content) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            usage=usage,
+            raw_response={"_streamed": True},
+        )
 
     def _load_messages(self, run: AgentRun) -> list[Message]:
         checkpoint = self.store.latest_checkpoint(run.id)

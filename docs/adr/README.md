@@ -26,6 +26,7 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
+| [ADR-0007](./0007-model-token-streaming.md) | Accepted | 2026-08-14 | Model Provider Token Streaming 与 Runtime Event 边界 | E2026-08-14-001 |
 | [ADR-0005](./0005-tool-execution-idempotency.md) | Accepted | 2026-08-13 | Step 与 ToolExecution 持久化和幂等恢复 | E2026-08-13-001 |
 | [ADR-0001](./0001-runtime-kernel.md) | Accepted | 2026-08-11 | Runtime Kernel 和 Run 状态机 | E2026-08-11-001 |
 | [ADR-0002](./0002-model-provider-protocol.md) | Accepted | 2026-08-11 | Model Provider 抽象 | E2026-08-11-001 |
