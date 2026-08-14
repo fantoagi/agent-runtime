@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.5.0`
-- **当前里程碑**：Observability、Tracing、Metrics 与 Evals v0.5
+- **当前版本**：`0.5.1`
+- **当前里程碑**：可视化 Agent Runtime Learning Console v0.5.1
 - **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`80d90c2`
-- **最近演进记录**：[E2026-08-14-003](./CHANGELOG.md#e2026-08-14-003)
+- **当前代码基线 commit**：`pending`
+- **最近演进记录**：[E2026-08-14-004](./CHANGELOG.md#e2026-08-14-004)
 
 ## 状态定义
 
@@ -32,6 +32,7 @@
 | ✅ stable | Event Log | 每个 Run 使用单调递增 sequence，并支持状态和事件原子提交 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | Model Token Streaming | Provider 可按增量输出文本和 Tool Call，Runtime 持久化 `model.delta` 并最终合并为完整响应 | [E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001) |
 | ✅ stable | FastAPI / SSE API | HTTP Run lifecycle、持久化 Runtime Event 和模型增量 SSE | [E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002) |
+| ✅ stable | Learning Console | 一条命令启动本地可视化学习环境，支持真实场景、SSE 时间线、事件回放、状态 diff、Inspector、审批和自动验收 | [E2026-08-14-004](./CHANGELOG.md#e2026-08-14-004) |
 | ✅ stable | Run Trace | 每个 Run 自动生成 `trace_id`，并从持久化事件派生 Run、Model、Tool、Approval Span | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Metrics / Prometheus | 从 SQLite 历史派生 Run 状态、事件、延迟、模型/工具次数和 token 指标 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Eval Runner | 支持状态、精确匹配、包含判断、通过率和 JSON Artifact 报告 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
@@ -39,7 +40,7 @@
 | ✅ stable | Pause / Resume / Cancel | 支持生命周期控制、活动 Task 取消和工具协作式取消 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | 人工审批 | 高风险工具可等待审批，多个工具调用可逐项恢复 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | Python SDK | 提供 Runtime、Agent 和本地 Demo 构造接口 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
-| ✅ stable | CLI | 支持 demo、Run 控制、审批、unknown 工具处置、Trace、Metrics 和内置 Eval Suite | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
+| ✅ stable | CLI | 支持 lab、demo、Run 控制、审批、unknown 工具处置、Trace、Metrics 和内置 Eval Suite | [E2026-08-14-004](./CHANGELOG.md#e2026-08-14-004) |
 | ✅ stable | 演进文档体系 | 当前事实、时间线、ADR、模板和自动检查职责分离 | [E2026-08-11-002](./CHANGELOG.md#e2026-08-11-002) |
 | ✅ stable | 演进路线图 | 通过 `ROADMAP.md` 记录 v0.6～v1.0 的顺序、范围、非目标、验收重点和维护规则 | [E2026-08-14-003](./CHANGELOG.md#e2026-08-14-003) |
 
@@ -80,12 +81,14 @@
 - 本地 `.venv` 默认只安装 runtime 包，运行测试前需要安装 `pytest` 和 `pytest-asyncio`。
 - 当前 Trace 和 Metrics 从本地 SQLite 派生，尚未接入 OpenTelemetry Collector 或外部时序数据库。
 - 当前 Eval Runner 顺序执行用例，内置评估器只覆盖状态、精确匹配和字符串包含，尚无 LLM-as-a-Judge。
+- Learning Console 当前只有 4 个确定性场景；事件回放是展示层回放，不是 Runtime 内核级单步暂停。
+- Learning Console 面向本地单用户学习，没有认证、授权和多租户隔离。
 
 ## 当前测试状态
 
 - **最近验证日期**：2026-08-14
-- **结果**：`30 passed`
-- **覆盖范围**：状态机、工具安全、审批、恢复与幂等、FastAPI / SSE、Token Streaming、Trace Span、JSON/Prometheus Metrics、Eval 通过率、结果 Artifact 和 Eval metadata 追溯。
+- **结果**：`37 passed`
+- **覆盖范围**：状态机、工具安全、审批、恢复与幂等、FastAPI / SSE、Token Streaming、Trace Span、JSON/Prometheus Metrics、Eval、Learning Console 页面、场景执行、事件教学数据、Snapshot 和自动验收。
 - **文档检查**：使用 `python scripts/check_docs.py`。
 
 ## 当前运行方式
@@ -94,6 +97,9 @@
 cd D:\AICoding\Agent
 .\.venv\Scripts\Activate.ps1
 python -m pip install pytest pytest-asyncio
+agent-runtime lab
+# 浏览器打开 http://127.0.0.1:8000/lab
+
 agent-runtime demo "19 * 23"
 python scripts/check_docs.py
 pytest
@@ -121,3 +127,13 @@ agent-runtime eval demo
 ```
 
 API 入口：`GET /observability/metrics`、`GET /observability/metrics/prometheus` 和 `GET /runs/{run_id}/trace`。Python SDK 可以使用 `ObservabilityService`、`EvalSuite`、`EvalCase` 和 `EvalRunner`。
+### Learning Console
+
+安装 API 依赖后一条命令启动：
+
+```powershell
+python -m pip install -e .[api]
+agent-runtime lab
+```
+
+默认地址：`http://127.0.0.1:8000/lab`。首批提供纯文本、Tool Calling、Token Streaming 和 Human Approval 四个确定性场景。详细操作见 [LEARNING.md](./LEARNING.md)。

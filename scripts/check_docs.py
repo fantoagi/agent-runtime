@@ -22,6 +22,7 @@ REQUIRED_FILES = (
     "docs/ARCHITECTURE.md",
     "docs/CHANGELOG.md",
     "docs/ROADMAP.md",
+    "docs/LEARNING.md",
     "docs/adr/README.md",
     "docs/templates/change-entry.md",
     "docs/templates/adr.md",

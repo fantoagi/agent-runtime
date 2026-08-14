@@ -547,6 +547,30 @@ class SQLiteStore:
             ).fetchone()
         return self._step_from_row(row) if row else None
 
+    def steps_for_run(self, run_id: str) -> list[Step]:
+        """Return all persisted model steps for a Run in execution order."""
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM steps WHERE run_id=? ORDER BY step_index",
+                (run_id,),
+            ).fetchall()
+        return [self._step_from_row(row) for row in rows]
+
+    def tool_executions_for_run(self, run_id: str) -> list[ToolExecution]:
+        """Return all persisted tool executions for a Run in step/position order."""
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT tool_executions.*
+                FROM tool_executions
+                JOIN steps ON steps.id = tool_executions.step_id
+                WHERE tool_executions.run_id=?
+                ORDER BY steps.step_index, tool_executions.position
+                """,
+                (run_id,),
+            ).fetchall()
+        return [self._tool_execution_from_row(row) for row in rows]
+
     def create_tool_executions(
         self,
         step: Step,

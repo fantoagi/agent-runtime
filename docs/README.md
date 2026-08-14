@@ -7,6 +7,7 @@
 - [CURRENT.md](./CURRENT.md)：当前版本、能力状态、限制、测试结果和运行方式。
 - [ARCHITECTURE.md](./ARCHITECTURE.md)：当前系统架构与实现边界。
 - [ROADMAP.md](./ROADMAP.md)：未来版本顺序、范围、非目标和验收方向。
+- [LEARNING.md](./LEARNING.md)：Learning Console 启动方式、场景路径、事件回放和代码对照指南。
 - [CHANGELOG.md](./CHANGELOG.md)：按完成时间倒序维护的功能与架构演进记录。
 - [adr/README.md](./adr/README.md)：关键架构决策记录（ADR）索引。
 - [templates/change-entry.md](./templates/change-entry.md)：演进记录模板。
@@ -19,6 +20,7 @@
 | `CURRENT.md` | 系统现在能做什么、不能做什么？ | 功能状态、版本、测试或限制变化时 |
 | `ARCHITECTURE.md` | 系统现在如何组成和运行？ | 模块边界、数据流、安全或恢复语义变化时 |
 | `ROADMAP.md` | 系统接下来按什么顺序演进？ | 版本方向、优先级、范围或依赖变化时 |
+| `LEARNING.md` | 如何直观运行并学习当前 Runtime？ | Learning Console、场景或教学流程变化时 |
 | `CHANGELOG.md` | 系统何时、为何、如何发生变化？ | 每个可独立验收的功能、修复或架构变更完成时 |
 | `adr/*.md` | 为什么选择这一方案而不是其他方案？ | 公共接口、数据、可靠性或安全决策变化时 |
 

@@ -17,6 +17,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-dir", default=None, help="Runtime state directory (default: <workspace>/.agent-runtime)")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
+    lab = subcommands.add_parser("lab", help="Launch the visual Agent Runtime Learning Console")
+    lab.add_argument("--host", default="127.0.0.1")
+    lab.add_argument("--port", type=int, default=8000)
+    lab.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically")
+
     demo = subcommands.add_parser("demo", help="Run the deterministic arithmetic demo")
     demo.add_argument("input", help="Arithmetic expression, e.g. '19 * 23'")
 
@@ -65,6 +70,36 @@ def _print(value: Any) -> None:
 
 
 async def async_main(arguments: argparse.Namespace) -> int:
+    if arguments.command == "lab":
+        try:
+            import uvicorn
+        except ImportError as error:
+            raise RuntimeError(
+                "Learning Console requires API dependencies. Run `pip install -e .[api]`.",
+            ) from error
+        from .api.app import create_demo_app
+
+        app = create_demo_app(
+            arguments.workspace,
+            arguments.state_dir,
+            enable_learning_console=True,
+        )
+        url = f"http://{arguments.host}:{arguments.port}/lab"
+        if not arguments.no_browser:
+            async def open_browser() -> None:
+                import webbrowser
+
+                await asyncio.sleep(0.8)
+                await asyncio.to_thread(webbrowser.open, url)
+
+            asyncio.create_task(open_browser())
+        print(f"Learning Console: {url}")
+        server = uvicorn.Server(
+            uvicorn.Config(app, host=arguments.host, port=arguments.port, log_level="info")
+        )
+        await server.serve()
+        return 0
+
     runtime = create_local_runtime(Path(arguments.workspace), arguments.state_dir)
     runtime.register_agent(demo_agent())
 

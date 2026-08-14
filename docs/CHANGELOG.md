@@ -4,6 +4,99 @@
 
 ---
 
+
+<a id="e2026-08-14-004"></a>
+## E2026-08-14-004：增加可视化 Learning Console v0.5.1
+
+- **完成时间**：2026-08-14
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `pyproject.toml`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/lab/__init__.py`
+  - `src/agent_runtime/lab/console.py`
+  - `src/agent_runtime/lab/scenarios.py`
+  - `src/agent_runtime/lab/explanations.py`
+  - `src/agent_runtime/lab/routes.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/lab/static/app.js`
+  - `src/agent_runtime/lab/static/styles.css`
+  - `tests/test_lab_api.py`
+  - `tests/test_lab_scenarios.py`
+  - `tests/test_api.py`
+  - `docs/LEARNING.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/ROADMAP.md`
+  - `docs/CHANGELOG.md`
+  - `docs/README.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0009-learning-console.md`
+  - `README.md`
+  - `scripts/check_docs.py`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0009](./adr/0009-learning-console.md)
+
+### 变更摘要
+
+增加面向初学者的本地可视化 Learning Console，将 Run、Event、Step、ToolExecution、Checkpoint、Approval、Trace、Metrics 和自动验收集中到一个浏览器页面。用户只需执行 `agent-runtime lab`，即可运行确定性场景、实时观察持久化事件、逐步回放并映射到源码处理链。
+
+### 系统架构
+
+- 新增 `agent_runtime.lab` 教学 Adapter，挂载到现有 FastAPI Demo App 的 `/lab`。
+- Learning Console 的场景通过真实 Runtime、Provider、ToolRegistry 和 SQLiteStore 执行，不建立第二套模拟状态。
+- 不同场景使用独立确定性 Provider/AgentDefinition，并共享现有 SQLite 执行事实。
+- 页面复用 `/runs/{run_id}/events/stream` SSE、ObservabilityService 和持久化 Checkpoint。
+- Runtime Kernel、Run 状态机、Event Envelope、Provider Protocol 和 SQLite schema 均未改变。
+
+### 实现方式
+
+- `ScenarioRegistry` 定义默认输入、预期事件、学习点、自动验收和人工动作提示。
+- `LearningConsole` 根据 Run metadata 将场景 Run 路由回正确 Runtime，支持审批后从原 Checkpoint 恢复。
+- Snapshot API 聚合 Run、Event、Step、ToolExecution、Approval、Checkpoint、Trace、Metrics 和 SQLite 记录统计。
+- 每个 Event 附带教学解释、源码方法映射和 before/after 状态投影。
+- 静态 HTML/CSS/Vanilla JavaScript 提供三栏界面、SSE 实时刷新、事件回放、Inspector Tabs 和审批操作，不引入 Node.js 构建链。
+- SQLiteStore 增加只读 `steps_for_run()` 和 `tool_executions_for_run()` 查询，供观测 Adapter 使用。
+
+### 当前功能
+
+- CLI：`agent-runtime lab` 一条命令启动并默认打开浏览器。
+- 页面：`GET /lab`。
+- 场景 API：场景目录、启动 Run、读取 Snapshot 和处理审批。
+- 首批场景：纯文本响应、Tool Calling、Token Streaming、Human Approval。
+- 事件时间线支持从头回放、上一步、下一步、自动播放和速度选择。
+- Inspector 支持事件解释、状态 diff、Messages、Step/ToolExecution、Trace、Metrics、SQLite 和自动验收。
+- API 和项目版本更新为 `0.5.1`。
+
+### 已知限制
+
+- 首版仅提供 4 个确定性学习场景。
+- 回放控制的是持久化事件展示，不是 Runtime 协程的内核级单步调试。
+- Learning Console 面向本地单用户环境，没有认证、授权和多租户隔离。
+- Snapshot 采用按请求聚合查询，不面向高并发生产控制台。
+- 尚未展示多 Agent Parent/Child Run 和 Trace Tree。
+
+### 测试与验收
+
+```powershell
+cd D:\AICoding\Agent
+python -m compileall -q src tests
+python -m pytest -p no:cacheprovider -q
+python scripts/check_docs.py
+agent-runtime lab --no-browser
+```
+
+当前测试：37 passed。新增覆盖静态页面、场景目录、CLI 参数、真实 Runtime 场景执行、Tool Calling、Token Streaming、Approval 暂停/恢复、Snapshot 教学数据、Trace、SQLite 统计和自动验收。
+
+### 后续计划
+
+进入 v0.6 多 Agent 编排后，在 Learning Console 中增加 Parent/Child Run Tree、委派事件、并行子 Run、聚合策略和跨 Run Trace 可视化。
+
+---
+
 <a id="e2026-08-14-003"></a>
 ## E2026-08-14-003：建立 v0.6 至 v1.0 演进路线图
 

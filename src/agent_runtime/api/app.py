@@ -67,7 +67,12 @@ def encode_sse(event: RuntimeEvent) -> str:
     return f"id: {event.sequence}\nevent: {event.type}\ndata: {data}\n\n"
 
 
-def create_app(runtime: Runtime, *, default_agent: str = "demo") -> FastAPI:
+def create_app(
+    runtime: Runtime,
+    *,
+    default_agent: str = "demo",
+    enable_learning_console: bool = False,
+) -> FastAPI:
     """Create a FastAPI adapter around an existing Runtime instance.
 
     The adapter owns HTTP concerns only. It delegates persistence, lifecycle,
@@ -75,7 +80,7 @@ def create_app(runtime: Runtime, *, default_agent: str = "demo") -> FastAPI:
     """
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.5.0",
+        version="0.5.1",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
     )
     app.state.runtime = runtime
@@ -91,7 +96,7 @@ def create_app(runtime: Runtime, *, default_agent: str = "demo") -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "runtime": "agent-runtime", "version": "0.5.0"}
+        return {"status": "ok", "runtime": "agent-runtime", "version": "0.5.1"}
 
     @app.get("/observability/metrics")
     async def observability_metrics(limit: int = Query(1000, ge=1, le=10000)) -> dict[str, Any]:
@@ -207,14 +212,24 @@ def create_app(runtime: Runtime, *, default_agent: str = "demo") -> FastAPI:
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
+    if enable_learning_console:
+        from ..lab import LearningConsole, install_learning_console
+
+        install_learning_console(app, LearningConsole(runtime))
+
     return app
 
 
-def create_demo_app(workspace: str = ".", state_dir: str | None = None) -> FastAPI:
+def create_demo_app(
+    workspace: str = ".",
+    state_dir: str | None = None,
+    *,
+    enable_learning_console: bool = True,
+) -> FastAPI:
     """Create a ready-to-run API backed by the deterministic demo agent."""
     runtime = create_local_runtime(workspace, state_dir)
     runtime.register_agent(demo_agent())
-    return create_app(runtime)
+    return create_app(runtime, enable_learning_console=enable_learning_console)
 
 
 async def run_until_complete(runtime: Runtime, run_id: str) -> AgentRun:

@@ -2,7 +2,7 @@
 
 A small, durable single-agent runtime with model-provider abstraction, structured tool
 execution, SQLite migrations, durable steps, idempotent recovery, event streaming, token streaming,
-checkpoints, approval gates, cooperative cancellation, tracing, metrics, evals, and a CLI.
+checkpoints, approval gates, cooperative cancellation, tracing, metrics, evals, a CLI, and a visual Learning Console.
 
 ## Quick start
 
@@ -11,11 +11,31 @@ cd D:\AICoding\Agent
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e .[api]
 python -m pip install pytest pytest-asyncio
+agent-runtime lab
+# Or run the CLI-only demo:
 agent-runtime demo "19 * 23"
 ```
 
 The demo uses a deterministic local provider. Set `OPENAI_API_KEY` and select the
 OpenAI-compatible provider in application code when connecting to a real model.
+
+## Learning Console
+
+如果你希望直观学习一次 Agent Run 的完整处理流程，启动本地可视化控制台：
+
+```powershell
+agent-runtime lab
+```
+
+浏览器会打开 `http://127.0.0.1:8000/lab`。v0.5.1 内置纯文本、Tool Calling、Token Streaming 和 Human Approval 四个确定性场景，并提供：
+
+- 持久化 Runtime Event 实时时间线。
+- 从头回放、逐事件前进和自动播放。
+- Event 状态 diff、原因、下一步和源码方法映射。
+- Messages、Step、ToolExecution、Checkpoint、Trace、Metrics 和 SQLite 检查器。
+- 浏览器内审批与场景自动验收。
+
+详细学习路径见 [Learning Console 使用指南](./docs/LEARNING.md)。
 
 ## FastAPI / SSE
 
@@ -80,6 +100,7 @@ The project treats documentation as part of the implementation contract:
 - [Current system state](./docs/CURRENT.md): what is implemented, experimental, planned, or unsupported.
 - [Current architecture](./docs/ARCHITECTURE.md): how the runtime is structured today.
 - [Roadmap](./docs/ROADMAP.md): planned versions, scope boundaries, dependencies, and acceptance direction.
+- [Learning Console guide](./docs/LEARNING.md): visual scenarios, event replay, inspectors, and source-code mapping.
 - [Evolution log](./docs/CHANGELOG.md): feature and architecture changes in reverse completion-time order.
 - [Architecture Decision Records](./docs/adr/README.md): why important public, data, reliability, or security decisions were made.
 - [Documentation workflow](./docs/README.md): Change IDs, templates, update rules, and quality gates.
@@ -97,4 +118,4 @@ boundaries must also add or update an ADR.
 - **Storage**: SQLite event log plus file-backed artifacts.
 - **Observability**: trace and metrics derived from persisted runs/events, with JSON and Prometheus outputs.
 - **Evals**: deterministic suites that execute through the real Runtime path and persist reports.
-- **Interfaces**: Python SDK and CLI; the core has no HTTP dependency.
+- **Interfaces**: Python SDK, CLI, FastAPI/SSE, and a local Learning Console; the core has no UI dependency.
