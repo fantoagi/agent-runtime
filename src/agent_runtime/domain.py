@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -15,6 +15,11 @@ class RunStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class RunRelationType(StrEnum):
+    DELEGATION = "delegation"
+    WORKFLOW = "workflow"
 
 
 class StepStatus(StrEnum):
@@ -184,6 +189,64 @@ class AgentRun:
             error=value.get("error"),
             step_count=value.get("step_count", 0),
             tool_call_count=value.get("tool_call_count", 0),
+            metadata=value.get("metadata", {}),
+        )
+
+
+@dataclass(slots=True)
+class RunRelation:
+    id: str
+    parent_run_id: str
+    child_run_id: str
+    root_run_id: str
+    relation_type: RunRelationType
+    delegation_key: str
+    created_at: datetime = field(default_factory=utc_now)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def create(
+        cls,
+        parent_run_id: str,
+        child_run_id: str,
+        root_run_id: str,
+        delegation_key: str,
+        *,
+        relation_type: RunRelationType = RunRelationType.DELEGATION,
+        metadata: dict[str, Any] | None = None,
+    ) -> RunRelation:
+        return cls(
+            id=new_id("rel"),
+            parent_run_id=parent_run_id,
+            child_run_id=child_run_id,
+            root_run_id=root_run_id,
+            relation_type=relation_type,
+            delegation_key=delegation_key,
+            metadata=metadata or {},
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "parent_run_id": self.parent_run_id,
+            "child_run_id": self.child_run_id,
+            "root_run_id": self.root_run_id,
+            "relation_type": self.relation_type.value,
+            "delegation_key": self.delegation_key,
+            "created_at": self.created_at.isoformat(),
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> RunRelation:
+        return cls(
+            id=value["id"],
+            parent_run_id=value["parent_run_id"],
+            child_run_id=value["child_run_id"],
+            root_run_id=value["root_run_id"],
+            relation_type=RunRelationType(value["relation_type"]),
+            delegation_key=value["delegation_key"],
+            created_at=datetime.fromisoformat(value["created_at"]),
             metadata=value.get("metadata", {}),
         )
 

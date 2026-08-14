@@ -423,7 +423,7 @@ def test_schema_migrates_existing_v01_database(workspace: Path) -> None:
     connection.close()
 
     store = SQLiteStore(database)
-    assert store.schema_version == 2
+    assert store.schema_version == 3
     columns = {
         row["name"]
         for row in store._connection.execute("PRAGMA table_info(approvals)").fetchall()
@@ -435,7 +435,7 @@ def test_schema_migrates_existing_v01_database(workspace: Path) -> None:
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()
     }
-    assert {"schema_migrations", "steps", "tool_executions"} <= tables
+    assert {"schema_migrations", "steps", "tool_executions", "run_relations"} <= tables
     store.close()
 
 

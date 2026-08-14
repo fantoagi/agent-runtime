@@ -5,6 +5,110 @@
 ---
 
 
+<a id="e2026-08-14-007"></a>
+## E2026-08-14-007：完成持久化多 Agent 编排基础 v0.6
+
+- **完成时间**：2026-08-14
+- **状态**：✅ stable
+- **类型**：milestone
+- **影响范围**：
+  - `pyproject.toml`
+  - `src/agent_runtime/__init__.py`
+  - `src/agent_runtime/domain.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/orchestration.py`
+  - `src/agent_runtime/observability.py`
+  - `src/agent_runtime/evals.py`
+  - `src/agent_runtime/sdk.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/lab/console.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_orchestration.py`
+  - `tests/test_runtime.py`
+  - `tests/test_api.py`
+  - `tests/test_lab_api.py`
+  - `scripts/check_docs.py`
+  - `README.md`
+  - `docs/README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/LEARNING.md`
+  - `docs/MULTI_AGENT.md`
+  - `docs/ROADMAP.md`
+  - `docs/CHANGELOG.md`
+  - `docs/adr/0010-parent-child-run-delegation.md`
+  - `docs/adr/README.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0010](./adr/0010-parent-child-run-delegation.md)
+
+### 变更摘要
+
+完成 v0.6 单机多 Agent 编排基础。Parent 可以通过持久化 RunRelation 和稳定 delegation key 委派独立 Child Run；系统提供顺序与并行 Workflow、并发与超时控制、三种汇聚策略、取消传播、幂等恢复、Trace Tree、Multi-Agent Metrics 和 Workflow Eval。
+
+### 系统架构
+
+- 新增 `agent_runtime.orchestration`，包含 AgentRegistry、SequentialWorkflow、ParallelWorkflow、WorkflowStep、WorkflowExecution 和 AggregationStrategy。
+- 每个 Workflow Parent 和 Agent Child 都是独立 AgentRun，继续使用既有状态机、Runtime Event、Checkpoint、ToolExecution 和 Approval 语义。
+- SQLite schema 从 version 2 升级到 version 3，新增 `run_relations`。
+- Observability 从单 RunTrace 扩展为可从任意节点查询的 Parent/Child TraceTree。
+- Learning Console Snapshot 增加 `trace_tree`，但 UI 内核不感知多 Agent 展示逻辑。
+
+### 实现方式
+
+- `AgentRegistry` 校验 Agent 名称和工具定义，同名不同定义会被拒绝。
+- `Runtime.delegate()` 使用 `parent_run_id + delegation_key` 查重；首次委派原子写入 Child Run、RunRelation 和双方事件，恢复时复用原 Child。
+- Child 使用独立 `trace_id`，并保存 Parent、Root、root_trace_id 和 delegation key metadata。
+- `SequentialWorkflow` 用稳定 step key 顺序传递结果。
+- `ParallelWorkflow` 使用 Semaphore 控制最大并发，通过 timeout 收敛超时，并支持 `all`、`best_effort` 和 `first_success`。
+- Parent Cancel 递归取消活动 Child，已完成 Child 不改写终态。
+- Workflow Parent 保存独立初始与终态 Checkpoint。
+- `WorkflowEvalRunner` 复用 EvalCase / EvalSuite，可额外断言 Child Run 数量并写入 JSON Artifact。
+
+### 当前功能
+
+- 支持 Parent / Child / Root 关系查询。
+- 支持手工 `Runtime.delegate()`。
+- 支持 Planner → Worker → Reviewer 顺序 Workflow。
+- 支持并行分支、最大并发数和 Workflow timeout。
+- 支持 `all`、`best_effort`、`first_success` 汇聚。
+- 支持 Parent 取消传播。
+- 支持稳定 delegation key 幂等恢复。
+- 支持 Trace Tree、Root/Child/Workflow/Delegation Metrics 和 Prometheus 导出。
+- 支持 `GET /agents`、关系查询、Trace Tree 和委派 API。
+- 支持 `agent-runtime workflow demo` 与 `agent-runtime observe trace-tree`。
+- 项目版本更新为 `0.6.0`。
+
+### 已知限制
+
+- Child 仍在同一 Python 进程和 SQLite Store 中执行，没有跨机器 Worker。
+- Workflow 定义和 AgentRegistry 仍由应用代码提供，数据库不持久化可执行定义。
+- Workflow 不支持通用 pause/resume；恢复必须重新使用原 Workflow 定义和 parent_run_id。
+- ParallelWorkflow 不提供通用 DAG 依赖表达式或图形化 Designer。
+- Learning Console 尚未提供专用的跨 Run Trace Tree 画布。
+- 尚无长期记忆、Docker Sandbox、多租户和 OpenTelemetry Collector。
+
+### 测试与验收
+
+```powershell
+cd D:\AICoding\Agent
+$env:PYTHONPATH='src'
+python -m pytest -p no:cacheprovider -q
+python scripts/check_docs.py
+python -m compileall -q src tests
+node --check src\agent_runtime\lab\static\app.js
+agent-runtime workflow demo "设计一个可靠的恢复机制"
+```
+
+当前测试：`44 passed`。
+
+新增覆盖：AgentRegistry 冲突校验、RunRelation migration、委派幂等、独立 Trace ID、顺序结果传递、恢复复用、并发上限、严格/尽力汇聚、first_success、Parent Cancel 传播、Trace Tree、Multi-Agent Metrics、Workflow Eval、API 和 Learning Console Snapshot。
+
+### 后续计划
+
+进入 v0.7，增加 Context、Session、短期上下文窗口与长期记忆接口；分布式 Worker、Queue 和 Lease 继续保留到 v0.9。
+
 <a id="e2026-08-14-006"></a>
 ## E2026-08-14-006：修复 Learning Console 空状态占用大片空间
 

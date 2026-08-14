@@ -26,6 +26,13 @@ class CreateRunRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class CreateDelegationRequest(BaseModel):
+    agent_name: str
+    input: str = Field(min_length=1)
+    delegation_key: str = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ApprovalResolutionRequest(BaseModel):
     approved: bool
     reason: str | None = None
@@ -80,7 +87,7 @@ def create_app(
     """
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.5.3",
+        version="0.6.0",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
     )
     app.state.runtime = runtime
@@ -96,7 +103,21 @@ def create_app(
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "runtime": "agent-runtime", "version": "0.5.3"}
+        return {"status": "ok", "runtime": "agent-runtime", "version": "0.6.0"}
+
+    @app.get("/agents")
+    async def list_agents() -> list[dict[str, Any]]:
+        return [
+            {
+                "name": agent.name,
+                "model": agent.model.model,
+                "provider": agent.model.provider,
+                "tools": [tool.name for tool in agent.tools],
+                "max_steps": agent.max_steps,
+                "max_tool_calls": agent.max_tool_calls,
+            }
+            for agent in runtime.list_agents()
+        ]
 
     @app.get("/observability/metrics")
     async def observability_metrics(limit: int = Query(1000, ge=1, le=10000)) -> dict[str, Any]:
@@ -115,6 +136,54 @@ def create_app(
             return ObservabilityService(runtime.store).trace(run_id).to_dict()
         except (KeyError, RunNotFound) as error:
             raise _not_found(error) from error
+
+    @app.get("/runs/{run_id}/trace/tree")
+    async def get_trace_tree(run_id: str) -> dict[str, Any]:
+        try:
+            return ObservabilityService(runtime.store).trace_tree(run_id).to_dict()
+        except (KeyError, RunNotFound) as error:
+            raise _not_found(error) from error
+
+    @app.get("/runs/{run_id}/relations")
+    async def get_run_relations(run_id: str) -> dict[str, Any]:
+        try:
+            root_run_id = runtime.store.root_run_id(run_id)
+            return {
+                "root_run_id": root_run_id,
+                "parent_relation": (
+                    runtime.store.get_run_relation(run_id).to_dict()
+                    if runtime.store.get_run_relation(run_id)
+                    else None
+                ),
+                "children": [
+                    relation.to_dict()
+                    for relation in runtime.store.child_relations(run_id)
+                ],
+            }
+        except (KeyError, RunNotFound) as error:
+            raise _not_found(error) from error
+
+    @app.post("/runs/{parent_run_id}/delegations")
+    async def create_delegation(
+        parent_run_id: str, request: CreateDelegationRequest
+    ) -> dict[str, Any]:
+        try:
+            child = await runtime.delegate(
+                parent_run_id,
+                request.agent_name,
+                request.input,
+                delegation_key=request.delegation_key,
+                metadata=request.metadata,
+            )
+            relation = runtime.store.get_run_relation(child.id)
+            return {
+                "run": child.to_dict(),
+                "relation": relation.to_dict() if relation else None,
+            }
+        except (KeyError, RunNotFound) as error:
+            raise _not_found(error) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(request: CreateRunRequest) -> dict[str, Any]:

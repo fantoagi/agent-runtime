@@ -1,9 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
 from .domain import AgentDefinition, ModelConfig, ToolDefinition
-from .providers import MockProvider, arithmetic_demo_responder
+from .providers import MockProvider, ModelResponse, arithmetic_demo_responder
+from .orchestration import SequentialWorkflow
 from .runtime import Runtime, RuntimeConfig
 from .tools import ToolRegistry, register_builtin_tools
 
@@ -43,3 +44,45 @@ def demo_agent() -> AgentDefinition:
         ],
         model=ModelConfig(provider="mock", model="arithmetic-demo"),
     )
+
+def create_multi_agent_demo_runtime(
+    workspace: str | Path, state_dir: str | Path | None = None
+) -> Runtime:
+    """Create a deterministic Planner -> Worker -> Reviewer learning runtime."""
+    workspace_path = Path(workspace).resolve()
+    runtime_dir = Path(state_dir or workspace_path / ".agent-runtime").resolve()
+
+    def responder(messages, tools, config):
+        del tools, config
+        role = messages[0].content or "agent"
+        value = messages[-1].content or ""
+        labels = {
+            "planner": "PLAN",
+            "worker": "DRAFT",
+            "reviewer": "REVIEWED",
+        }
+        return ModelResponse(content=f"{labels.get(role, role.upper())}: {value}")
+
+    runtime = Runtime(
+        RuntimeConfig(
+            workspace_path=workspace_path,
+            database_path=runtime_dir / "runtime.sqlite3",
+            artifact_path=runtime_dir / "artifacts",
+        ),
+        provider=MockProvider(responder),
+        tools=ToolRegistry(),
+    )
+    for name in ("planner", "worker", "reviewer"):
+        runtime.register_agent(
+            AgentDefinition(
+                name=name,
+                system_prompt=name,
+                tools=[],
+                model=ModelConfig(provider="mock", model="multi-agent-demo"),
+            )
+        )
+    return runtime
+
+
+def multi_agent_demo_workflow() -> SequentialWorkflow:
+    return SequentialWorkflow("planner-worker-reviewer", ["planner", "worker", "reviewer"])

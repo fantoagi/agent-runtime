@@ -97,8 +97,10 @@ class LearningConsole:
                 approvals.append(self._approval_payload(approval))
                 seen_approvals.add(approval.id)
 
-        trace = ObservabilityService(self.store).trace(run_id)
-        metrics = ObservabilityService(self.store).metrics(limit=1000)
+        observability = ObservabilityService(self.store)
+        trace = observability.trace(run_id)
+        trace_tree = observability.trace_tree(run_id)
+        metrics = observability.metrics(limit=1000)
         acceptance = self._evaluate(scenario, run.to_dict(), events)
         return {
             "scenario": scenario.to_dict(),
@@ -112,6 +114,7 @@ class LearningConsole:
                 (item for item in approvals if item["status"] == "pending"), None
             ),
             "trace": trace.to_dict(),
+            "trace_tree": trace_tree.to_dict(),
             "metrics": metrics.to_dict(),
             "acceptance": acceptance,
             "persistence": {

@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
 - **最近更新**：2026-08-14
-- **当前版本**：v0.5.3
-- **当前阶段**：单 Agent Runtime 与可视化学习环境完成，下一阶段进入多 Agent 编排
+- **当前版本**：v0.6.0
+- **当前阶段**：多 Agent 编排基础完成，下一阶段进入 Context、Session 与长期记忆
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -29,7 +29,7 @@
 | v0.5.1 | ✅ completed | 可视化 Learning Console 与执行流程教学 | [E2026-08-14-004](./CHANGELOG.md#e2026-08-14-004) |
 | v0.5.2 | ✅ completed | Learning Console 动态事件泳道图 | [E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005) |
 | v0.5.3 | ✅ completed | Learning Console 空状态显示与布局优化 | [E2026-08-14-006](./CHANGELOG.md#e2026-08-14-006) |
-| v0.6 | 📋 planned | 多 Agent 编排基础 | — |
+| v0.6 | ✅ completed | 多 Agent 编排基础 | [E2026-08-14-007](./CHANGELOG.md#e2026-08-14-007) |
 | v0.7 | 📋 planned | Context、Session 与长期记忆 | — |
 | v0.8 | 📋 planned | Sandbox、Tool Capability 与 Secret 安全 | — |
 | v0.9 | 📋 planned | 分布式 Worker、Queue 与 Lease | — |
@@ -48,8 +48,9 @@
 
 ## v0.6：多 Agent 编排基础
 
-- **状态**：📋 planned
+- **状态**：✅ completed
 - **前置版本**：v0.5.3
+- **完成记录**：[E2026-08-14-007](./CHANGELOG.md#e2026-08-14-007)
 - **目标**：让一个 Parent Agent 可以通过持久化 Child Run 委派任务，并支持顺序、并行和结果汇聚。
 
 ### 计划范围
@@ -66,11 +67,11 @@
 ### 分阶段实施
 
 ```text
-v0.6.0  Parent/Child Run、RunRelation、delegate()
-v0.6.1  SequentialWorkflow 和结果传递
-v0.6.2  ParallelWorkflow、并发限制和汇聚策略
-v0.6.3  Parent/Child 取消传播、恢复和幂等委派
-v0.6.4  多 Agent Trace、Metrics 和 Eval
+✅ Parent/Child Run、RunRelation、delegate()
+✅ SequentialWorkflow 和结果传递
+✅ ParallelWorkflow、并发限制和汇聚策略
+✅ Parent/Child 取消传播、恢复和幂等委派
+✅ 多 Agent Trace、Metrics 和 Eval
 ```
 
 ### 验收重点
@@ -90,7 +91,7 @@ v0.6.4  多 Agent Trace、Metrics 和 Eval
 
 ### 预计 ADR
 
-- `ADR-0009`：Parent/Child Run 与多 Agent 委派模型。
+- [ADR-0010](./adr/0010-parent-child-run-delegation.md)：Parent/Child Run 与持久化多 Agent 委派模型。
 
 ## v0.7：Context、Session 与长期记忆
 

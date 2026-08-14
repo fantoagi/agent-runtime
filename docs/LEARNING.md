@@ -1,6 +1,6 @@
-﻿# Agent Runtime Learning Console 使用指南
+# Agent Runtime Learning Console 使用指南
 
-Learning Console 是 v0.5.3 提供的本地可视化学习入口。它把原本需要多条 PowerShell 命令才能观察的 Run、Event、Step、ToolExecution、Checkpoint、Approval、Trace 和 Metrics 放到同一个浏览器页面中。
+Learning Console 是 v0.6.0 继续提供的本地可视化学习入口。它把原本需要多条 PowerShell 命令才能观察的 Run、Event、Step、ToolExecution、Checkpoint、Approval、Trace 和 Metrics 放到同一个浏览器页面中。
 
 > 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。
 
@@ -43,7 +43,7 @@ uvicorn agent_runtime.api.app:app --reload
 
 ### 左侧：Learning Path
 
-选择确定性学习场景。v0.5.3 继续提供以下 4 个场景：
+选择确定性学习场景。v0.6.0 继续提供以下 4 个单 Run 场景：
 
 1. 纯文本响应。
 2. Tool Calling。
@@ -225,11 +225,11 @@ flowchart LR
 
 ## 6. 当前限制
 
-- v0.5.3 只提供 4 个确定性场景。
+- v0.6.0 的 Learning Console 仍只提供 4 个单 Run 确定性场景；多 Agent 可先通过 `agent-runtime workflow demo` 学习。
 - “逐步回放”是对已持久化事件的展示控制，不是单步暂停 Python 协程。
 - Learning Console 面向本地单用户学习，没有身份认证和多租户隔离。
 - 页面使用 Vanilla JavaScript，无前端构建工具；复杂 Workflow Designer 不在当前范围。
-- 目前不展示跨 Run 的 Parent/Child Trace Tree；这将在 v0.6 多 Agent 后补充。
+- Snapshot API 已返回 Parent/Child `trace_tree`；专用的可折叠跨 Run 树形画布尚未实现。
 
 ## 7. 自动验证
 

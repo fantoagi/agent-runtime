@@ -8,13 +8,14 @@ import httpx
 import pytest
 
 from agent_runtime.api import create_app, encode_sse
-from agent_runtime.domain import RuntimeEvent
+from agent_runtime.domain import AgentDefinition, ModelConfig, RuntimeEvent
 from agent_runtime.providers import (
     ModelResponse,
     ModelTokenDelta,
     MockProvider,
     MockStreamingProvider,
 )
+from agent_runtime.orchestration import SequentialWorkflow
 from agent_runtime.runtime import Runtime, RuntimeConfig
 from agent_runtime.tools import ToolRegistry, register_builtin_tools
 from agent_runtime.sdk import demo_agent
@@ -46,7 +47,7 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.5.3"
+        assert health.json()["version"] == "0.6.0"
 
         created = await client.post(
             "/runs", json={"agent_name": "demo", "input": "hello", "metadata": {"source": "test"}}
@@ -183,3 +184,61 @@ async def test_observability_api_exposes_trace_and_metrics(workspace: Path) -> N
     assert metrics.json()["model_requests"] == 1
     assert prometheus.status_code == 200
     assert "agent_runtime_runs_total" in prometheus.text
+
+@pytest.mark.asyncio
+async def test_multi_agent_registry_relations_and_trace_tree_api(workspace: Path) -> None:
+    runtime = make_api_runtime(workspace)
+    planner = AgentDefinition(
+        name="planner",
+        system_prompt="planner",
+        tools=[],
+        model=ModelConfig(provider="mock", model="test"),
+    )
+    worker = AgentDefinition(
+        name="worker",
+        system_prompt="worker",
+        tools=[],
+        model=ModelConfig(provider="mock", model="test"),
+    )
+    runtime.register_agent(planner)
+    runtime.register_agent(worker)
+    execution = await SequentialWorkflow("api-flow", ["planner", "worker"]).run(
+        runtime, "task"
+    )
+    manual_parent = runtime.begin_workflow(
+        "api-manual", "manual task", workflow_type="manual"
+    )
+
+    app = create_app(runtime)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        agents = await client.get("/agents")
+        relations = await client.get(f"/runs/{execution.parent.id}/relations")
+        tree = await client.get(f"/runs/{execution.children[0].id}/trace/tree")
+        delegated = await client.post(
+            f"/runs/{manual_parent.id}/delegations",
+            json={
+                "agent_name": "planner",
+                "input": "delegated through HTTP",
+                "delegation_key": "http-task-1",
+            },
+        )
+        delegated_again = await client.post(
+            f"/runs/{manual_parent.id}/delegations",
+            json={
+                "agent_name": "planner",
+                "input": "ignored by idempotent reuse",
+                "delegation_key": "http-task-1",
+            },
+        )
+
+    assert agents.status_code == 200
+    assert {item["name"] for item in agents.json()} >= {"demo", "planner", "worker"}
+    assert relations.status_code == 200
+    assert len(relations.json()["children"]) == 2
+    assert tree.status_code == 200
+    assert tree.json()["root_run_id"] == execution.parent.id
+    assert tree.json()["node_count"] == 3
+    assert delegated.status_code == 200
+    assert delegated.json()["relation"]["parent_run_id"] == manual_parent.id
+    assert delegated_again.json()["run"]["id"] == delegated.json()["run"]["id"]

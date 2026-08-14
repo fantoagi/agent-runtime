@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .domain import AgentRun, RuntimeEvent, utc_now
+from .domain import AgentRun, RunRelation, RuntimeEvent, utc_now
 from .storage import SQLiteStore
 
 
@@ -64,9 +64,45 @@ class RunTrace:
 
 
 @dataclass(slots=True)
+class TraceTreeNode:
+    run: AgentRun
+    trace: RunTrace
+    relation: RunRelation | None = None
+    children: list[TraceTreeNode] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run": self.run.to_dict(),
+            "trace": self.trace.to_dict(),
+            "relation": self.relation.to_dict() if self.relation else None,
+            "children": [child.to_dict() for child in self.children],
+        }
+
+
+@dataclass(slots=True)
+class TraceTree:
+    root_run_id: str
+    root_trace_id: str
+    node_count: int
+    root: TraceTreeNode
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "root_run_id": self.root_run_id,
+            "root_trace_id": self.root_trace_id,
+            "node_count": self.node_count,
+            "root": self.root.to_dict(),
+        }
+
+
+@dataclass(slots=True)
 class MetricsSnapshot:
     generated_at: datetime
     total_runs: int
+    root_runs: int
+    child_runs: int
+    workflow_runs: int
+    delegations: int
     runs_by_status: dict[str, int]
     total_events: int
     events_by_type: dict[str, int]
@@ -85,6 +121,12 @@ class MetricsSnapshot:
         return {
             "generated_at": self.generated_at.isoformat(),
             "total_runs": self.total_runs,
+            "multi_agent": {
+                "root_runs": self.root_runs,
+                "child_runs": self.child_runs,
+                "workflow_runs": self.workflow_runs,
+                "delegations": self.delegations,
+            },
             "runs_by_status": self.runs_by_status,
             "total_events": self.total_events,
             "events_by_type": self.events_by_type,
@@ -113,6 +155,10 @@ class MetricsSnapshot:
             lines.append(f'agent_runtime_runs_total{{status="{status}"}} {value}')
         lines.extend(
             [
+                f"agent_runtime_root_runs_total {self.root_runs}",
+                f"agent_runtime_child_runs_total {self.child_runs}",
+                f"agent_runtime_workflow_runs_total {self.workflow_runs}",
+                f"agent_runtime_delegations_total {self.delegations}",
                 "# HELP agent_runtime_events_total Total persisted runtime events.",
                 "# TYPE agent_runtime_events_total gauge",
             ]
@@ -159,9 +205,43 @@ class ObservabilityService:
             events=events,
         )
 
+    def trace_tree(self, run_id: str) -> TraceTree:
+        root_run_id = self.store.root_run_id(run_id)
+        relations = self.store.relations_for_root(root_run_id)
+        by_parent: dict[str, list[RunRelation]] = {}
+        for relation in relations:
+            by_parent.setdefault(relation.parent_run_id, []).append(relation)
+
+        def build(current_run_id: str, relation: RunRelation | None = None) -> TraceTreeNode:
+            run = self.store.get_run(current_run_id)
+            return TraceTreeNode(
+                run=run,
+                trace=self.trace(current_run_id),
+                relation=relation,
+                children=[
+                    build(child_relation.child_run_id, child_relation)
+                    for child_relation in by_parent.get(current_run_id, [])
+                ],
+            )
+
+        root = self.store.get_run(root_run_id)
+        return TraceTree(
+            root_run_id=root_run_id,
+            root_trace_id=str(
+                root.metadata.get("root_trace_id")
+                or root.metadata.get("trace_id")
+                or root.id
+            ),
+            node_count=1 + len(relations),
+            root=build(root_run_id),
+        )
+
     def metrics(self, limit: int = 1000) -> MetricsSnapshot:
         runs = self.store.list_runs(limit=limit)
         statuses = Counter(run.status.value for run in runs)
+        child_runs = sum(bool(run.metadata.get("parent_run_id")) for run in runs)
+        workflow_runs = sum(run.metadata.get("run_kind") == "workflow" for run in runs)
+        root_runs = len(runs) - child_runs
         event_counts: Counter[str] = Counter()
         run_durations: list[float] = []
         model_durations: list[float] = []
@@ -195,6 +275,10 @@ class ObservabilityService:
         return MetricsSnapshot(
             generated_at=utc_now(),
             total_runs=len(runs),
+            root_runs=root_runs,
+            child_runs=child_runs,
+            workflow_runs=workflow_runs,
+            delegations=self.store.count_run_relations(),
             runs_by_status=dict(sorted(statuses.items())),
             total_events=sum(event_counts.values()),
             events_by_type=dict(sorted(event_counts.items())),

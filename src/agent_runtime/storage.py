@@ -13,6 +13,8 @@ from .domain import (
     Checkpoint,
     Message,
     RunNotFound,
+    RunRelation,
+    RunRelationType,
     RuntimeEvent,
     Step,
     StepStatus,
@@ -114,6 +116,27 @@ MIGRATIONS: tuple[Migration, ...] = (
             ON steps(run_id, step_index);
         CREATE INDEX IF NOT EXISTS idx_tool_executions_run_status
             ON tool_executions(run_id, status, position);
+        """,
+    ),
+    (
+        3,
+        "parent_child_run_relations",
+        """
+        CREATE TABLE IF NOT EXISTS run_relations (
+            id TEXT PRIMARY KEY,
+            parent_run_id TEXT NOT NULL REFERENCES runs(id),
+            child_run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),
+            root_run_id TEXT NOT NULL REFERENCES runs(id),
+            relation_type TEXT NOT NULL,
+            delegation_key TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            UNIQUE(parent_run_id, delegation_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_run_relations_parent
+            ON run_relations(parent_run_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_run_relations_root
+            ON run_relations(root_run_id, created_at);
         """,
     ),
 )
@@ -242,6 +265,129 @@ class SQLiteStore:
                 "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
         return [self._run_from_row(row) for row in rows]
+
+    def create_child_run_with_relation(
+        self,
+        child: AgentRun,
+        relation: RunRelation,
+        *,
+        parent_event_payload: dict[str, Any],
+        child_event_payload: dict[str, Any],
+    ) -> RunRelation:
+        """Atomically persist a delegated child, its relation, and both event records."""
+        with self._lock, self._connection:
+            self._insert_run(child)
+            self._insert_run_relation_locked(relation)
+            self._append_event_locked(
+                relation.parent_run_id, "delegation.created", parent_event_payload
+            )
+            self._append_event_locked(child.id, "run.created", child_event_payload)
+        return relation
+
+    def _insert_run_relation_locked(self, relation: RunRelation) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO run_relations (
+                id, parent_run_id, child_run_id, root_run_id, relation_type,
+                delegation_key, created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                relation.id,
+                relation.parent_run_id,
+                relation.child_run_id,
+                relation.root_run_id,
+                relation.relation_type.value,
+                relation.delegation_key,
+                relation.created_at.isoformat(),
+                self._dump(relation.metadata),
+            ),
+        )
+
+    def get_run_relation(self, child_run_id: str) -> RunRelation | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM run_relations WHERE child_run_id = ?", (child_run_id,)
+            ).fetchone()
+        return self._run_relation_from_row(row) if row else None
+
+    def get_delegation(self, parent_run_id: str, delegation_key: str) -> RunRelation | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM run_relations
+                WHERE parent_run_id = ? AND delegation_key = ?
+                """,
+                (parent_run_id, delegation_key),
+            ).fetchone()
+        return self._run_relation_from_row(row) if row else None
+
+    def child_relations(self, parent_run_id: str) -> list[RunRelation]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM run_relations
+                WHERE parent_run_id = ? ORDER BY created_at, id
+                """,
+                (parent_run_id,),
+            ).fetchall()
+        return [self._run_relation_from_row(row) for row in rows]
+
+    def child_runs(self, parent_run_id: str) -> list[AgentRun]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT runs.* FROM run_relations
+                JOIN runs ON runs.id = run_relations.child_run_id
+                WHERE run_relations.parent_run_id = ?
+                ORDER BY run_relations.created_at, run_relations.id
+                """,
+                (parent_run_id,),
+            ).fetchall()
+        return [self._run_from_row(row) for row in rows]
+
+    def relations_for_root(self, root_run_id: str) -> list[RunRelation]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM run_relations
+                WHERE root_run_id = ? ORDER BY created_at, id
+                """,
+                (root_run_id,),
+            ).fetchall()
+        return [self._run_relation_from_row(row) for row in rows]
+
+    def root_run_id(self, run_id: str) -> str:
+        self.get_run(run_id)
+        relation = self.get_run_relation(run_id)
+        return relation.root_run_id if relation is not None else run_id
+
+    def descendant_runs(self, parent_run_id: str) -> list[AgentRun]:
+        self.get_run(parent_run_id)
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                WITH RECURSIVE descendants(child_run_id, depth) AS (
+                    SELECT child_run_id, 1 FROM run_relations WHERE parent_run_id = ?
+                    UNION ALL
+                    SELECT relation.child_run_id, descendants.depth + 1
+                    FROM run_relations AS relation
+                    JOIN descendants ON relation.parent_run_id = descendants.child_run_id
+                )
+                SELECT runs.* FROM descendants
+                JOIN runs ON runs.id = descendants.child_run_id
+                ORDER BY descendants.depth DESC, runs.created_at DESC
+                """,
+                (parent_run_id,),
+            ).fetchall()
+        return [self._run_from_row(row) for row in rows]
+
+    def count_run_relations(self) -> int:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT COUNT(*) AS count FROM run_relations"
+            ).fetchone()
+        return int(row["count"])
 
     def save_run(self, run: AgentRun) -> None:
         with self._lock, self._connection:
@@ -386,6 +532,23 @@ class SQLiteStore:
         return Checkpoint.from_dict(
             {**dict(row), "messages": self._load(row["messages_json"])}
         )
+
+    def save_run_checkpoint_with_event(
+        self,
+        run: AgentRun,
+        checkpoint: Checkpoint,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> RuntimeEvent:
+        with self._lock, self._connection:
+            self._update_run_locked(run)
+            self._insert_checkpoint_locked(checkpoint)
+            self._append_event_locked(
+                run.id,
+                "checkpoint.created",
+                {"checkpoint_id": checkpoint.id, "step": checkpoint.step},
+            )
+            return self._append_event_locked(run.id, event_type, payload)
 
     def create_step_with_event(
         self,
@@ -878,6 +1041,18 @@ class SQLiteStore:
     def _run_from_row(self, row: sqlite3.Row) -> AgentRun:
         return AgentRun.from_dict(
             {**dict(row), "metadata": self._load(row["metadata_json"])}
+        )
+
+    def _run_relation_from_row(self, row: sqlite3.Row) -> RunRelation:
+        return RunRelation(
+            id=row["id"],
+            parent_run_id=row["parent_run_id"],
+            child_run_id=row["child_run_id"],
+            root_run_id=row["root_run_id"],
+            relation_type=RunRelationType(row["relation_type"]),
+            delegation_key=row["delegation_key"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            metadata=self._load(row["metadata_json"]),
         )
 
     def _step_from_row(self, row: sqlite3.Row) -> Step:

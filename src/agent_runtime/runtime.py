@@ -13,7 +13,10 @@ from .domain import (
     Checkpoint,
     Message,
     RunLimitExceeded,
+    RunRelation,
+    RunRelationType,
     RunStatus,
+    TERMINAL_STATUSES,
     Step,
     StepStatus,
     ToolCall,
@@ -24,6 +27,7 @@ from .domain import (
     new_id,
     utc_now,
 )
+from .orchestration import AgentRegistry
 from .providers import (
     ModelProvider,
     ModelResponse,
@@ -67,13 +71,17 @@ class Runtime:
         self.tools = tools
         self.store = store or SQLiteStore(config.database_path)
         self.artifacts = ArtifactStore(config.artifact_path)
-        self._agents: dict[str, AgentDefinition] = {}
+        self.agent_registry = AgentRegistry(
+            validator=lambda agent: self.tools.definitions_for(agent.tools)
+        )
         self._tasks: dict[str, asyncio.Task[AgentRun]] = {}
         self._cancellation_tokens: dict[str, CancellationToken] = {}
 
     def register_agent(self, agent: AgentDefinition) -> None:
-        self.tools.definitions_for(agent.tools)
-        self._agents[agent.name] = agent
+        self.agent_registry.register(agent)
+
+    def list_agents(self) -> list[AgentDefinition]:
+        return self.agent_registry.list()
 
     def create_run(
         self,
@@ -89,6 +97,8 @@ class Runtime:
             input_text,
             run_metadata,
         )
+        run.metadata.setdefault("root_run_id", run.id)
+        run.metadata.setdefault("root_trace_id", run.metadata["trace_id"])
         self.store.create_run_with_event(
             run,
             "run.created",
@@ -99,6 +109,230 @@ class Runtime:
             },
         )
         return run
+
+    def create_workflow_run(
+        self,
+        workflow_name: str,
+        input_text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        workflow_type: str,
+    ) -> AgentRun:
+        run_metadata = {**self.config.metadata, **(metadata or {})}
+        run_metadata.update(
+            {
+                "trace_id": run_metadata.get("trace_id") or new_id("trace"),
+                "run_kind": "workflow",
+                "workflow_name": workflow_name,
+                "workflow_type": workflow_type,
+            }
+        )
+        run = AgentRun.create(f"workflow:{workflow_name}", input_text, run_metadata)
+        run.metadata.setdefault("root_run_id", run.id)
+        run.metadata.setdefault("root_trace_id", run.metadata["trace_id"])
+        self.store.create_run_with_event(
+            run,
+            "run.created",
+            {
+                "agent_name": run.agent_name,
+                "input": input_text,
+                "trace_id": run.metadata["trace_id"],
+                "run_kind": "workflow",
+                "workflow_name": workflow_name,
+                "workflow_type": workflow_type,
+            },
+        )
+        return run
+
+    def begin_workflow(
+        self,
+        workflow_name: str,
+        input_text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        parent_run_id: str | None = None,
+        workflow_type: str,
+    ) -> AgentRun:
+        run = (
+            self.store.get_run(parent_run_id)
+            if parent_run_id is not None
+            else self.create_workflow_run(
+                workflow_name, input_text, metadata=metadata, workflow_type=workflow_type
+            )
+        )
+        if run.status is RunStatus.CREATED:
+            run.transition_to(RunStatus.RUNNING)
+            self.store.save_run_with_event(
+                run,
+                "workflow.started",
+                {"workflow_name": workflow_name, "workflow_type": workflow_type},
+            )
+            self._checkpoint(
+                run,
+                [
+                    Message(
+                        role="system",
+                        content=f"Durable {workflow_type} workflow: {workflow_name}",
+                    ),
+                    Message(role="user", content=run.input),
+                ],
+            )
+        elif run.status is RunStatus.PAUSED:
+            run.transition_to(RunStatus.RUNNING)
+            self.store.save_run_with_event(
+                run,
+                "workflow.resumed",
+                {"workflow_name": workflow_name, "workflow_type": workflow_type},
+            )
+        elif run.status is RunStatus.RUNNING:
+            self._event(
+                run.id,
+                "workflow.recovered",
+                {"workflow_name": workflow_name, "workflow_type": workflow_type},
+            )
+        elif run.status in TERMINAL_STATUSES:
+            return run
+        return run
+
+    def finish_workflow(
+        self,
+        run_id: str,
+        *,
+        result: str | None = None,
+        status: RunStatus = RunStatus.COMPLETED,
+        error: str | None = None,
+    ) -> AgentRun:
+        run = self.store.get_run(run_id)
+        if run.status in TERMINAL_STATUSES:
+            return run
+        if status not in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
+            raise ValueError("Workflow terminal status must be completed, failed, or cancelled.")
+        run.result = result
+        run.error = error
+        run.step_count = max(run.step_count, 1)
+        run.transition_to(status)
+        event_type = {
+            RunStatus.COMPLETED: "workflow.completed",
+            RunStatus.FAILED: "workflow.failed",
+            RunStatus.CANCELLED: "workflow.cancelled",
+        }[status]
+        messages = [
+            Message(
+                role="system",
+                content=(
+                    f"Durable {run.metadata.get('workflow_type', 'multi-agent')} workflow: "
+                    f"{run.metadata.get('workflow_name', run.agent_name)}"
+                ),
+            ),
+            Message(role="user", content=run.input),
+            Message(role="assistant", content=result or error or status.value),
+        ]
+        checkpoint = Checkpoint.create(run.id, run.step_count, messages, 0)
+        self.store.save_run_checkpoint_with_event(
+            run, checkpoint, event_type, {"result": result, "error": error}
+        )
+        return run
+
+    async def delegate(
+        self,
+        parent_run_id: str,
+        agent: AgentDefinition | str,
+        input_text: str,
+        *,
+        delegation_key: str,
+        relation_type: RunRelationType = RunRelationType.DELEGATION,
+        metadata: dict[str, Any] | None = None,
+    ) -> AgentRun:
+        if not delegation_key.strip():
+            raise ValueError("delegation_key must not be empty.")
+        definition = self._resolve_agent(agent)
+        existing = self.store.get_delegation(parent_run_id, delegation_key)
+        if existing is not None:
+            child = self.store.get_run(existing.child_run_id)
+            if child.status in TERMINAL_STATUSES:
+                return child
+            task = self._tasks.get(child.id)
+            if task is not None and not task.done():
+                return await task
+            if child.status is RunStatus.CREATED:
+                return await self._execute(child.id)
+            return await self.resume(child.id)
+
+        parent = self.store.get_run(parent_run_id)
+        if parent.status is not RunStatus.RUNNING:
+            raise ValueError(
+                f"Parent run {parent_run_id} must be running before delegation; "
+                f"current status is {parent.status.value}."
+            )
+        root_run_id = self.store.root_run_id(parent_run_id)
+        root_run = self.store.get_run(root_run_id)
+        child_metadata = {**self.config.metadata, **(metadata or {})}
+        child_metadata.update(
+            {
+                "trace_id": child_metadata.get("trace_id") or new_id("trace"),
+                "root_trace_id": root_run.metadata.get("root_trace_id")
+                or root_run.metadata.get("trace_id")
+                or root_run.id,
+                "parent_run_id": parent_run_id,
+                "root_run_id": root_run_id,
+                "delegation_key": delegation_key,
+                "run_kind": "child",
+            }
+        )
+        child = AgentRun.create(definition.name, input_text, child_metadata)
+        relation = RunRelation.create(
+            parent_run_id,
+            child.id,
+            root_run_id,
+            delegation_key,
+            relation_type=relation_type,
+            metadata=metadata,
+        )
+        relation_payload = {
+            "relation_id": relation.id,
+            "parent_run_id": parent_run_id,
+            "child_run_id": child.id,
+            "root_run_id": root_run_id,
+            "relation_type": relation.relation_type.value,
+            "delegation_key": delegation_key,
+            "agent_name": definition.name,
+        }
+        self.store.create_child_run_with_relation(
+            child,
+            relation,
+            parent_event_payload=relation_payload,
+            child_event_payload={
+                "agent_name": definition.name,
+                "input": input_text,
+                "trace_id": child.metadata["trace_id"],
+                **relation_payload,
+            },
+        )
+        task = asyncio.create_task(self._execute(child.id))
+        self.track_task(child.id, task)
+        child = await task
+        self._event(
+            parent_run_id,
+            f"delegation.{child.status.value}",
+            {**relation_payload, "result": child.result, "error": child.error},
+        )
+        return child
+
+    def track_task(self, run_id: str, task: asyncio.Task[AgentRun]) -> None:
+        self._tasks[run_id] = task
+
+        def discard(completed: asyncio.Task[AgentRun]) -> None:
+            if self._tasks.get(run_id) is completed:
+                self._tasks.pop(run_id, None)
+
+        task.add_done_callback(discard)
+
+    def cancel_children(self, parent_run_id: str) -> list[AgentRun]:
+        cancelled: list[AgentRun] = []
+        for child in self.store.child_runs(parent_run_id):
+            if child.status not in TERMINAL_STATUSES:
+                cancelled.append(self.cancel(child.id))
+        return cancelled
 
     async def run(
         self,
@@ -116,7 +350,7 @@ class Runtime:
         metadata: dict[str, Any] | None = None,
     ) -> AgentRun:
         run = self.create_run(agent, input_text, metadata)
-        self._tasks[run.id] = asyncio.create_task(self._execute(run.id))
+        self.track_task(run.id, asyncio.create_task(self._execute(run.id)))
         return run
 
     async def wait(self, run_id: str) -> AgentRun:
@@ -130,6 +364,11 @@ class Runtime:
         if existing is not None and not existing.done():
             return await existing
         run = self.store.get_run(run_id)
+        if run.metadata.get("run_kind") == "workflow":
+            raise ValueError(
+                "Workflow runs must be resumed with the original Workflow.run(..., "
+                "parent_run_id=run_id) definition."
+            )
         if run.status not in {
             RunStatus.RUNNING,
             RunStatus.PAUSED,
@@ -138,11 +377,17 @@ class Runtime:
             raise ValueError(
                 f"Run {run_id} cannot be resumed from status {run.status}."
             )
-        self._tasks[run_id] = asyncio.create_task(self._execute(run_id))
-        return await self._tasks[run_id]
+        task = asyncio.create_task(self._execute(run_id))
+        self.track_task(run_id, task)
+        return await task
 
     def pause(self, run_id: str) -> AgentRun:
         run = self.store.get_run(run_id)
+        if run.metadata.get("run_kind") == "workflow":
+            raise ValueError(
+                "Workflow pause is not supported; cancel it or resume it through "
+                "the original Workflow definition after a process restart."
+            )
         if run.status != RunStatus.RUNNING:
             raise ValueError(
                 f"Only running runs can be paused; run {run_id} is {run.status}."
@@ -159,6 +404,7 @@ class Runtime:
             RunStatus.CANCELLED,
         }:
             return run
+        self.cancel_children(run_id)
         token = self._cancellation_tokens.get(run_id)
         if token is not None:
             token.cancel()
@@ -887,9 +1133,4 @@ class Runtime:
         if isinstance(agent, AgentDefinition):
             self.register_agent(agent)
             return agent
-        try:
-            return self._agents[agent]
-        except KeyError as error:
-            raise KeyError(
-                f"Agent {agent!r} is not registered with this runtime."
-            ) from error
+        return self.agent_registry.get(agent)

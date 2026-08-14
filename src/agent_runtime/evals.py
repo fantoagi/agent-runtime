@@ -17,6 +17,7 @@ class EvalCase:
     expected_contains: list[str] = field(default_factory=list)
     expected_status: str = "completed"
     metadata: dict[str, Any] = field(default_factory=dict)
+    expected_child_count: int | None = None
 
 
 @dataclass(slots=True)
@@ -270,6 +271,97 @@ class EvalRunner:
             path = self.runtime.artifacts.write_text(
                 report.id,
                 "eval-report.json",
+                json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
+            )
+            report.artifact_path = str(path)
+            path.write_text(
+                json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        return report
+
+class WorkflowEvalRunner:
+    """Evaluate a sequential or parallel workflow through its durable parent Run."""
+
+    def __init__(
+        self,
+        runtime: Runtime,
+        evaluators: list[Evaluator] | None = None,
+        *,
+        persist_report: bool = True,
+    ) -> None:
+        self.runtime = runtime
+        self.evaluators = evaluators or [
+            ExpectedStatusEvaluator(),
+            ExactMatchEvaluator(),
+            ContainsEvaluator(),
+        ]
+        self.persist_report = persist_report
+
+    async def run(self, suite: EvalSuite, workflow: Any) -> EvalReport:
+        report_id = new_id("workflow_eval")
+        started_at = utc_now()
+        results: list[EvalCaseResult] = []
+        for case in suite.cases:
+            case_started = utc_now()
+            execution = await workflow.run(
+                self.runtime,
+                case.input,
+                metadata={
+                    **case.metadata,
+                    "eval_report_id": report_id,
+                    "eval_suite": suite.name,
+                    "eval_case": case.name,
+                    "eval_kind": "workflow",
+                },
+            )
+            run = execution.parent
+            assertions = [
+                evaluator.evaluate(case, run)
+                for evaluator in self.evaluators
+                if evaluator.supports(case)
+            ]
+            if case.expected_child_count is not None:
+                actual_count = len(execution.children)
+                assertions.append(
+                    EvalAssertion(
+                        evaluator="expected_child_count",
+                        passed=actual_count == case.expected_child_count,
+                        expected=case.expected_child_count,
+                        actual=actual_count,
+                        message=(
+                            "Child Run count matched."
+                            if actual_count == case.expected_child_count
+                            else "Child Run count did not match."
+                        ),
+                    )
+                )
+            results.append(
+                EvalCaseResult(
+                    case_name=case.name,
+                    run_id=run.id,
+                    trace_id=str(run.metadata.get("trace_id") or run.id),
+                    status=run.status.value,
+                    output=run.result,
+                    passed=all(assertion.passed for assertion in assertions),
+                    duration_ms=round(
+                        max(0.0, (utc_now() - case_started).total_seconds() * 1000), 3
+                    ),
+                    assertions=assertions,
+                )
+            )
+        report = EvalReport(
+            id=report_id,
+            suite_name=suite.name,
+            started_at=started_at,
+            completed_at=utc_now(),
+            results=results,
+            metadata={**suite.metadata, "eval_kind": "workflow"},
+        )
+        if self.persist_report:
+            path = self.runtime.artifacts.write_text(
+                report.id,
+                "workflow-eval-report.json",
                 json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
             )
             report.artifact_path = str(path)

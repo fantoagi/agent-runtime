@@ -72,6 +72,8 @@ async def test_learning_scenarios_run_through_real_runtime(
         assert payload["events"][0]["teaching"]["code"]
         assert payload["events"][0]["state_before"] != payload["events"][0]["state_after"]
         assert payload["trace"]["trace_id"] == payload["run"]["metadata"]["trace_id"]
+        assert payload["trace_tree"]["root_run_id"] == run_id
+        assert payload["trace_tree"]["node_count"] == 1
         assert payload["persistence"]["tables"]["events"] == len(payload["events"])
         assert payload["acceptance"]["passed"] is True
 

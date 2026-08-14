@@ -8,13 +8,29 @@ from typing import Any
 
 from .evals import EvalCase, EvalRunner, EvalSuite
 from .observability import ObservabilityService
-from .sdk import create_local_runtime, demo_agent
+from .sdk import (
+    create_local_runtime,
+    create_multi_agent_demo_runtime,
+    demo_agent,
+    multi_agent_demo_workflow,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agent-runtime", description="Durable single-agent runtime CLI")
-    parser.add_argument("--workspace", default=".", help="Workspace available to built-in tools (default: current directory)")
-    parser.add_argument("--state-dir", default=None, help="Runtime state directory (default: <workspace>/.agent-runtime)")
+    parser = argparse.ArgumentParser(
+        prog="agent-runtime",
+        description="Durable single-agent and multi-agent runtime CLI",
+    )
+    parser.add_argument(
+        "--workspace",
+        default=".",
+        help="Workspace available to built-in tools (default: current directory)",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help="Runtime state directory (default: <workspace>/.agent-runtime)",
+    )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     lab = subcommands.add_parser("lab", help="Launch the visual Agent Runtime Learning Console")
@@ -25,12 +41,23 @@ def build_parser() -> argparse.ArgumentParser:
     demo = subcommands.add_parser("demo", help="Run the deterministic arithmetic demo")
     demo.add_argument("input", help="Arithmetic expression, e.g. '19 * 23'")
 
+    workflow = subcommands.add_parser("workflow", help="Run deterministic multi-agent workflows")
+    workflow_subcommands = workflow.add_subparsers(dest="workflow_command", required=True)
+    workflow_demo = workflow_subcommands.add_parser(
+        "demo", help="Run Planner -> Worker -> Reviewer"
+    )
+    workflow_demo.add_argument("input", help="Task delegated through the three agents")
+
     observe = subcommands.add_parser("observe", help="Inspect derived metrics and run traces")
     observe_subcommands = observe.add_subparsers(dest="observe_command", required=True)
     metrics = observe_subcommands.add_parser("metrics", help="Show a JSON metrics snapshot")
     metrics.add_argument("--limit", type=int, default=1000)
     trace = observe_subcommands.add_parser("trace", help="Show the trace for one run")
     trace.add_argument("run_id")
+    trace_tree = observe_subcommands.add_parser(
+        "trace-tree", help="Show the Parent/Child trace tree for one run"
+    )
+    trace_tree.add_argument("run_id")
 
     eval_command = subcommands.add_parser("eval", help="Run deterministic evaluation suites")
     eval_subcommands = eval_command.add_subparsers(dest="eval_command", required=True)
@@ -100,6 +127,21 @@ async def async_main(arguments: argparse.Namespace) -> int:
         await server.serve()
         return 0
 
+    if arguments.command == "workflow":
+        runtime = create_multi_agent_demo_runtime(
+            Path(arguments.workspace), arguments.state_dir
+        )
+        execution = await multi_agent_demo_workflow().run(runtime, arguments.input)
+        _print(
+            {
+                "execution": execution.to_dict(),
+                "trace_tree": ObservabilityService(runtime.store)
+                .trace_tree(execution.parent.id)
+                .to_dict(),
+            }
+        )
+        return 0 if execution.parent.status == "completed" else 1
+
     runtime = create_local_runtime(Path(arguments.workspace), arguments.state_dir)
     runtime.register_agent(demo_agent())
 
@@ -118,6 +160,9 @@ async def async_main(arguments: argparse.Namespace) -> int:
             return 0
         if arguments.observe_command == "trace":
             _print(observability.trace(arguments.run_id).to_dict())
+            return 0
+        if arguments.observe_command == "trace-tree":
+            _print(observability.trace_tree(arguments.run_id).to_dict())
             return 0
 
     if arguments.command == "eval":
