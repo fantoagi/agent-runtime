@@ -14,12 +14,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CHANGELOG = ROOT / "docs" / "CHANGELOG.md"
 CURRENT = ROOT / "docs" / "CURRENT.md"
+ROADMAP = ROOT / "docs" / "ROADMAP.md"
 
 REQUIRED_FILES = (
     "docs/README.md",
     "docs/CURRENT.md",
     "docs/ARCHITECTURE.md",
     "docs/CHANGELOG.md",
+    "docs/ROADMAP.md",
     "docs/adr/README.md",
     "docs/templates/change-entry.md",
     "docs/templates/adr.md",
@@ -62,6 +64,34 @@ ADR_LINK = re.compile(r"\]\((?P<target>\./adr/[^)#]+\.md)(?:#[^)]+)?\)")
 CHANGE_ID = re.compile(r"E\d{4}-\d{2}-\d{2}-\d{3}")
 COMMIT_HASH = re.compile(r"[0-9a-fA-F]{7,40}")
 STATUS_MARKERS = ("✅ stable", "🧪 experimental", "🚧 partial", "📋 planned", "⛔ unsupported")
+ROADMAP_STATUSES = {
+    "✅ completed",
+    "🚧 in-progress",
+    "📋 planned",
+    "💡 candidate",
+    "⛔ out-of-scope",
+}
+ROADMAP_REQUIRED_SECTIONS = (
+    "状态定义",
+    "版本总览",
+    "演进原则",
+    "v0.6",
+    "v0.7",
+    "v0.8",
+    "v0.9",
+    "v0.10",
+    "v1.0",
+    "明确暂不优先事项",
+    "路线图维护规则",
+)
+ROADMAP_ROW = re.compile(
+    r"^\|\s*(?P<version>v\d+\.\d+(?:\.\d+)?)\s*"
+    r"\|\s*(?P<status>[^|]+?)\s*"
+    r"\|\s*(?P<goal>[^|]+?)\s*"
+    r"\|\s*(?P<record>[^|]+?)\s*\|$",
+    re.MULTILINE,
+)
+VERSION = re.compile(r"v?(?P<major>\d+)\.(?P<minor>\d+)(?:\.(?P<patch>\d+))?")
 
 
 @dataclass(frozen=True)
@@ -71,6 +101,14 @@ class ChangeEntry:
     sequence: int
     title: str
     body: str
+
+
+@dataclass(frozen=True)
+class RoadmapEntry:
+    version_text: str
+    version: tuple[int, int, int]
+    status: str
+    record: str
 
 
 class Validation:
@@ -216,6 +254,127 @@ def validate_current(validation: Validation, known_ids: set[str], require_commit
                     )
 
 
+def parse_version(value: str) -> tuple[int, int, int] | None:
+    match = VERSION.fullmatch(value.strip())
+    if match is None:
+        return None
+    return (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch") or 0),
+    )
+
+
+def validate_roadmap(validation: Validation, known_ids: set[str]) -> None:
+    if not ROADMAP.exists():
+        return
+
+    text = read_text(ROADMAP)
+    today = (datetime.now(timezone.utc) + timedelta(hours=8)).date()
+
+    headings = re.findall(r"^## (?P<title>.+?)\s*$", text, re.MULTILINE)
+    for required in ROADMAP_REQUIRED_SECTIONS:
+        if not any(title == required or title.startswith(f"{required}：") for title in headings):
+            validation.error(f"docs/ROADMAP.md 缺少章节：{required}")
+
+    updated_match = re.search(
+        r"^- \*\*最近更新\*\*：(?P<value>\d{4}-\d{2}-\d{2})\s*$",
+        text,
+        re.MULTILINE,
+    )
+    if updated_match is None:
+        validation.error("docs/ROADMAP.md 缺少合法的最近更新日期。")
+    else:
+        try:
+            updated = date.fromisoformat(updated_match.group("value"))
+        except ValueError:
+            validation.error("docs/ROADMAP.md 的最近更新日期必须是 YYYY-MM-DD。")
+        else:
+            if updated > today:
+                validation.error(
+                    f"docs/ROADMAP.md 的最近更新日期 {updated} 晚于 Asia/Shanghai 当前日期 {today}。"
+                )
+
+    roadmap_current_match = re.search(
+        r"^- \*\*当前版本\*\*：`?(?P<value>v?\d+\.\d+(?:\.\d+)?)`?\s*$",
+        text,
+        re.MULTILINE,
+    )
+    roadmap_current = None
+    if roadmap_current_match is None:
+        validation.error("docs/ROADMAP.md 缺少合法的当前版本。")
+    else:
+        roadmap_current = parse_version(roadmap_current_match.group("value"))
+
+    current_text = read_text(CURRENT) if CURRENT.exists() else ""
+    current_match = re.search(
+        r"^- \*\*当前版本\*\*：`?(?P<value>v?\d+\.\d+(?:\.\d+)?)`?\s*$",
+        current_text,
+        re.MULTILINE,
+    )
+    current_version = None
+    if current_match is None:
+        validation.error("docs/CURRENT.md 缺少可与 ROADMAP 对齐的当前版本。")
+    else:
+        current_version = parse_version(current_match.group("value"))
+
+    if roadmap_current is not None and current_version is not None and roadmap_current != current_version:
+        validation.error("docs/ROADMAP.md 的当前版本与 docs/CURRENT.md 不一致。")
+
+    entries: list[RoadmapEntry] = []
+    seen_versions: set[tuple[int, int, int]] = set()
+    for match in ROADMAP_ROW.finditer(text):
+        version_text = match.group("version").strip()
+        version = parse_version(version_text)
+        if version is None:
+            validation.error(f"docs/ROADMAP.md 包含非法版本：{version_text}")
+            continue
+        if version in seen_versions:
+            validation.error(f"docs/ROADMAP.md 版本重复：{version_text}")
+        seen_versions.add(version)
+
+        status = match.group("status").strip()
+        record = match.group("record").strip()
+        if status not in ROADMAP_STATUSES:
+            validation.error(f"docs/ROADMAP.md 的 {version_text} 状态非法：{status}")
+
+        change_ids = CHANGE_ID.findall(record)
+        if status == "✅ completed":
+            if len(change_ids) != 1:
+                validation.error(f"docs/ROADMAP.md 的 completed 版本 {version_text} 必须关联一个 Change ID。")
+            elif change_ids[0] not in known_ids:
+                validation.error(
+                    f"docs/ROADMAP.md 的 {version_text} 引用未知 Change ID：{change_ids[0]}"
+                )
+        entries.append(RoadmapEntry(version_text, version, status, record))
+
+    if not entries:
+        validation.error("docs/ROADMAP.md 的版本总览中没有合法版本记录。")
+        return
+
+    versions = [entry.version for entry in entries]
+    if versions != sorted(versions) or len(versions) != len(set(versions)):
+        validation.error("docs/ROADMAP.md 的版本总览必须按版本从低到高排列且不能重复。")
+
+    in_progress = [entry.version_text for entry in entries if entry.status == "🚧 in-progress"]
+    if len(in_progress) > 1:
+        validation.error(
+            "docs/ROADMAP.md 同一时间最多只能有一个 in-progress 主版本："
+            + ", ".join(in_progress)
+        )
+
+    completed = [entry for entry in entries if entry.status == "✅ completed"]
+    if not completed:
+        validation.error("docs/ROADMAP.md 至少需要一个 completed 版本。")
+    else:
+        latest_completed = max(completed, key=lambda entry: entry.version)
+        if roadmap_current is not None and latest_completed.version != roadmap_current:
+            validation.error(
+                "docs/ROADMAP.md 的最新 completed 版本必须与当前版本一致："
+                f"{latest_completed.version_text} != v{roadmap_current[0]}.{roadmap_current[1]}.{roadmap_current[2]}"
+            )
+
+
 def validate_adrs(validation: Validation, known_ids: set[str]) -> None:
     adr_dir = ROOT / "docs" / "adr"
     for path in sorted(adr_dir.glob("[0-9][0-9][0-9][0-9]-*.md")):
@@ -311,6 +470,7 @@ def main() -> int:
     known_ids = {entry.change_id for entry in entries}
     validate_entry_details(validation, entries, args.require_commit_hash)
     validate_current(validation, known_ids, args.require_commit_hash)
+    validate_roadmap(validation, known_ids)
     validate_adrs(validation, known_ids)
     validate_markdown_links(validation)
     validate_git_gate(validation, args.base_ref)

@@ -79,6 +79,7 @@ The project treats documentation as part of the implementation contract:
 
 - [Current system state](./docs/CURRENT.md): what is implemented, experimental, planned, or unsupported.
 - [Current architecture](./docs/ARCHITECTURE.md): how the runtime is structured today.
+- [Roadmap](./docs/ROADMAP.md): planned versions, scope boundaries, dependencies, and acceptance direction.
 - [Evolution log](./docs/CHANGELOG.md): feature and architecture changes in reverse completion-time order.
 - [Architecture Decision Records](./docs/adr/README.md): why important public, data, reliability, or security decisions were made.
 - [Documentation workflow](./docs/README.md): Change IDs, templates, update rules, and quality gates.
