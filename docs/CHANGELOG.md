@@ -28,7 +28,7 @@
   - `docs/ROADMAP.md`
   - `docs/CHANGELOG.md`
   - `docs/adr/0009-learning-console.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`c9c5f4c`
 - **关联 ADR**：[ADR-0009](./adr/0009-learning-console.md)
 
 ### 变更摘要

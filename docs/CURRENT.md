@@ -4,7 +4,7 @@
 - **当前里程碑**：Learning Console v0.6/v0.7 教学投影 v0.7.1
 - **Runtime 构建完成时间**：2026-08-15（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`
+- **当前代码基线 commit**：`c9c5f4c`
 - **最近演进记录**：[E2026-08-15-002](./CHANGELOG.md#e2026-08-15-002)
 
 ## 状态定义
