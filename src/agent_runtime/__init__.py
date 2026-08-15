@@ -1,6 +1,7 @@
 """Durable single-agent and multi-agent runtime primitives."""
 
 from .context import ContextBuilder, ContextBuildResult
+from .doctor import DoctorCheck, DoctorReport, RuntimeDoctor
 from .domain import (
     AgentDefinition,
     AgentRun,
@@ -12,6 +13,7 @@ from .domain import (
     RunStatus,
     Session,
     ToolDefinition,
+    UnknownToolResolution,
 )
 from .evals import (
     ContainsEvaluator,
@@ -66,6 +68,8 @@ __all__ = [
     "ContainsEvaluator",
     "ContextBuildResult",
     "ContextBuilder",
+    "DoctorCheck",
+    "DoctorReport",
     "EvalAssertion",
     "EvalCase",
     "EvalReport",
@@ -90,6 +94,7 @@ __all__ = [
     "RunTrace",
     "Runtime",
     "RuntimeConfig",
+    "RuntimeDoctor",
     "SequentialWorkflow",
     "Session",
     "StreamingModelProvider",
@@ -99,6 +104,7 @@ __all__ = [
     "TraceSpan",
     "TraceTree",
     "TraceTreeNode",
+    "UnknownToolResolution",
     "WorkflowEvalRunner",
     "WorkflowExecution",
     "WorkflowStep",

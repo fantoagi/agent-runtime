@@ -204,3 +204,7 @@ v0.6 schema version 为 `3`。
 - 没有无限递归和 Agent 动态创建 Agent。
 - Learning Console Snapshot 已包含 `trace_tree`，但尚未提供专用的可折叠跨 Run 树形画布。
 - Parent/Child 共享 Root Trace 身份，但每个 Run 有自己的 Trace ID；当前没有接入 OpenTelemetry Collector。
+
+## v0.7.7 Workflow 崩溃恢复
+
+Sequential/Parallel Workflow 创建时保存规范化 snapshot。进程重启后，`await runtime.resume(parent_run_id)` 会从 snapshot 重建 Workflow，并通过稳定 delegation key 复用已经创建或完成的 Child Run。应用仍需重新注册 snapshot 引用的 AgentDefinition。

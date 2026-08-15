@@ -19,9 +19,9 @@ agent-runtime demo "19 * 23"
 The demo uses a deterministic local provider. Set `OPENAI_API_KEY` and select the
 OpenAI-compatible provider in application code when connecting to a real model.
 
-## v0.7.6 Reliability / Hardening
+## v0.7.7 Crash Recovery & Operational Closure
 
-当前版本暂停新增 Agent 能力，重点完善同步 Tool 有界隔离、副作用 `UNKNOWN`、异步 Provider、Runtime 受控 shutdown、SQLite durability、FastAPI lifespan、SSE 断线恢复，以及跨平台 CI、压力、soak 和 Wheel 验证。
+当前版本继续暂停新增 Agent 智能能力，重点补齐真实进程崩溃恢复、UNKNOWN 人工确认审计、Workflow snapshot 自动恢复、Runtime Doctor，以及 Windows/Linux Crash Matrix。
 
 ```powershell
 python scripts/check_docs.py
@@ -30,6 +30,8 @@ python -m mypy src\agent_runtime
 python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json
 python scripts/check_coverage.py coverage.json
 python scripts/run_reliability.py --stress-runs 20 --concurrency 20
+python scripts/run_crash_recovery.py
+agent-runtime doctor --json
 ```
 ## Learning Console
 
@@ -39,7 +41,7 @@ python scripts/run_reliability.py --stress-runs 20 --concurrency 20
 agent-runtime lab
 ```
 
-浏览器会打开 `http://127.0.0.1:8000/lab`。v0.7.6 内置 9 个确定性场景，覆盖单 Run、v0.6 多 Agent 和 v0.7 Context/Memory，并提供：
+浏览器会打开 `http://127.0.0.1:8000/lab`。v0.7.7 内置 9 个确定性场景，覆盖单 Run、v0.6 多 Agent 和 v0.7 Context/Memory，并提供：
 
 - 多 Agent 场景按 Workflow Parent 与每个 Child Agent 动态拆分独立泳道；单 Run 场景按实际出现的 Context / Model / Tool / Approval / State 领域展示。
 - 连线区分 Run 内部执行、Parent 委派和 Child 汇聚，避免把并行分支误画成串行依赖。

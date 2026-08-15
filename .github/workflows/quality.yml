@@ -73,9 +73,13 @@ jobs:
       - name: Fast 20-run concurrency gate
         run: python scripts/run_reliability.py --stress-runs 20 --concurrency 20
 
+      - name: Forced-crash recovery smoke
+        if: matrix.python == '3.13'
+        run: python scripts/run_crash_recovery.py --output crash-result.json
+
       - name: Build sdist and wheel
         run: python -m build
 
       - name: Verify clean wheel installation and CLI/API/SSE smokes
         if: matrix.python == '3.13'
-        run: python scripts/verify_distribution.py dist/agent_runtime-0.7.6-py3-none-any.whl
+        run: python scripts/verify_distribution.py dist/agent_runtime-0.7.7-py3-none-any.whl

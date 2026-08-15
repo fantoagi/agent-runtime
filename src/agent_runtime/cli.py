@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .doctor import RuntimeDoctor
 from .evals import EvalCase, EvalRunner, EvalSuite
 from .observability import ObservabilityService
 from .sdk import (
@@ -99,9 +100,18 @@ def build_parser() -> argparse.ArgumentParser:
         "resolve-unknown", help="Resolve a tool execution whose side effect is uncertain"
     )
     unknown.add_argument("execution_id")
-    unknown.add_argument("outcome", choices=("completed", "retry", "failed"))
-    unknown.add_argument("--result", default=None, help="Confirmed result for completed outcome")
-    unknown.add_argument("--error", default=None, help="Failure reason for failed outcome")
+    unknown.add_argument(
+        "outcome",
+        choices=("confirmed_succeeded", "confirmed_failed", "completed", "failed", "retry"),
+    )
+    unknown.add_argument("--result", default=None, help="Confirmed result for succeeded outcome")
+    unknown.add_argument("--error", default=None, help="Failure detail for failed outcome")
+    unknown.add_argument("--reason", required=True, help="Required human audit reason")
+    unknown.add_argument("--resolved-by", default="local-user", help="Audit actor identity")
+
+    doctor = subcommands.add_parser("doctor", help="Run read-only Runtime diagnostics")
+    doctor.add_argument("--run-id", default=None, help="Limit diagnostics to one Run")
+    doctor.add_argument("--json", action="store_true", help="Print the complete JSON report")
     return parser
 
 
@@ -226,12 +236,26 @@ async def async_main(arguments: argparse.Namespace) -> int:
         _print({"id": approval.id, "run_id": approval.run_id, "status": approval.status})
         return 0
 
+    if arguments.command == "doctor":
+        doctor_report = RuntimeDoctor(runtime.store).run(arguments.run_id)
+        if arguments.json:
+            _print(doctor_report.to_dict())
+        else:
+            print(f"Runtime Doctor: {doctor_report.status}")
+            print(f"Database: {doctor_report.database_path}")
+            for check in doctor_report.checks:
+                marker = {"ok": "[OK]", "attention": "[ATTENTION]", "unhealthy": "[UNHEALTHY]"}[check.level]
+                print(f"{marker} {check.name}: {check.summary}")
+        return doctor_report.exit_code
+
     if arguments.command == "resolve-unknown":
         unknown_execution = runtime.resolve_unknown_tool(
             arguments.execution_id,
             arguments.outcome,
             result_content=arguments.result,
             error=arguments.error,
+            reason=arguments.reason,
+            resolved_by=arguments.resolved_by,
         )
         _print(
             {
@@ -240,6 +264,10 @@ async def async_main(arguments: argparse.Namespace) -> int:
                 "status": unknown_execution.status,
                 "result": unknown_execution.result_content,
                 "error": unknown_execution.error,
+                "resolution": unknown_execution.resolution,
+                "resolution_reason": unknown_execution.resolution_reason,
+                "resolved_by": unknown_execution.resolved_by,
+                "resolved_at": unknown_execution.resolved_at,
             }
         )
         return 0

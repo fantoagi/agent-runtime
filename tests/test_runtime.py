@@ -367,7 +367,17 @@ async def test_unknown_tool_can_be_confirmed_and_resumed(workspace: Path) -> Non
     run.transition_to(RunStatus.PAUSED)
     runtime.store.save_run(run)
 
-    runtime.resolve_unknown_tool(execution.id, "completed", result_content="already-written")
+    resolved = runtime.resolve_unknown_tool(
+        execution.id,
+        "confirmed_succeeded",
+        result_content="already-written",
+        reason="Verified the external file exists.",
+        resolved_by="operator:test",
+    )
+    assert runtime.store.get_run(run.id).status is RunStatus.PAUSED
+    assert resolved.resolution_reason == "Verified the external file exists."
+    assert resolved.resolved_by == "operator:test"
+    assert runtime.store.events_since(run.id)[-1].type == "tool.outcome_confirmed"
     completed = await runtime.resume(run.id)
     assert completed.status == "completed"
     assert completed.result == "confirmed: already-written"
@@ -425,12 +435,17 @@ def test_schema_migrates_existing_v01_database(workspace: Path) -> None:
     connection.close()
 
     store = SQLiteStore(database)
-    assert store.schema_version == 5
+    assert store.schema_version == 6
     columns = {
         row["name"]
         for row in store._connection.execute("PRAGMA table_info(approvals)").fetchall()
     }
     assert {"tool_execution_id", "kind"} <= columns
+    tool_columns = {
+        row["name"]
+        for row in store._connection.execute("PRAGMA table_info(tool_executions)").fetchall()
+    }
+    assert {"resolution", "resolution_reason", "resolved_by", "resolved_at"} <= tool_columns
     tables = {
         row["name"]
         for row in store._connection.execute(
@@ -534,3 +549,25 @@ async def test_runtime_reassembles_streamed_tool_call_before_execution(workspace
     execution = runtime.store.get_tool_execution_by_call(run.id, "stream_call")
     assert execution is not None
     assert execution.tool_call.arguments == {"value": "hello"}
+
+
+def test_unknown_side_effect_cannot_be_retried(workspace: Path) -> None:
+    def responder(messages, tools, config):
+        return ModelResponse(content="unused")
+
+    runtime = make_runtime(workspace, responder)
+    run = runtime.create_run(make_agent(), "unknown")
+    run.transition_to(RunStatus.RUNNING)
+    runtime.store.save_run(run)
+    step = Step.create(run.id, 1)
+    runtime.store.create_step_with_event(run, step, "model.requested", {"step": 1})
+    execution = ToolExecution.create(
+        run.id, step.id, 0, ToolCall("call_retry", "echo", {"value": "x"}),
+        requires_approval=False, side_effecting=True,
+    )
+    execution.status = ToolExecutionStatus.UNKNOWN
+    runtime.store.create_tool_executions(step, [execution])
+
+    with pytest.raises(ValueError, match="cannot be retried automatically"):
+        runtime.resolve_unknown_tool(execution.id, "retry", reason="try again")
+    assert runtime.store.get_tool_execution(execution.id).status is ToolExecutionStatus.UNKNOWN

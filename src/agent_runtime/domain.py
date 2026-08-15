@@ -34,6 +34,11 @@ class StepStatus(StrEnum):
     FAILED = "failed"
 
 
+class UnknownToolResolution(StrEnum):
+    CONFIRMED_SUCCEEDED = "confirmed_succeeded"
+    CONFIRMED_FAILED = "confirmed_failed"
+
+
 class ToolExecutionStatus(StrEnum):
     PENDING = "pending"
     WAITING_FOR_APPROVAL = "waiting_for_approval"
@@ -459,6 +464,10 @@ class ToolExecution:
     created_at: datetime = field(default_factory=utc_now)
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    resolution: UnknownToolResolution | None = None
+    resolution_reason: str | None = None
+    resolved_by: str | None = None
+    resolved_at: datetime | None = None
 
     @classmethod
     def create(

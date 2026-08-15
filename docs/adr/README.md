@@ -26,7 +26,9 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
-| [ADR-0016](./0016-fastapi-runtime-ownership-sse.md) | Accepted | 2026-08-15 | FastAPI Runtime 所有权、Lifespan 与 SSE 长稳 | E2026-08-15-007 |
+| [ADR-0019](./0019-runtime-doctor.md) | Accepted | 2026-08-15 | Runtime Doctor 只读诊断模型 | E2026-08-15-008 |
+| [ADR-0018](./0018-crash-recovery-contract.md) | Accepted | 2026-08-15 | 进程强杀恢复合同与 Workflow Snapshot 恢复 | E2026-08-15-008 |
+| [ADR-0017](./0017-unknown-outcome-confirmation.md) | Accepted | 2026-08-15 | UNKNOWN Outcome 人工确认与审计 | E2026-08-15-008 || [ADR-0016](./0016-fastapi-runtime-ownership-sse.md) | Accepted | 2026-08-15 | FastAPI Runtime 所有权、Lifespan 与 SSE 长稳 | E2026-08-15-007 |
 | [ADR-0015](./0015-runtime-shutdown-sqlite-recovery.md) | Accepted | 2026-08-15 | Runtime Shutdown、SQLite Durability 与进程恢复 | E2026-08-15-006 |
 | [ADR-0014](./0014-provider-async-transport-retry.md) | Accepted | 2026-08-15 | Provider 异步传输、协议校验与重试 | E2026-08-15-005 |
 | [ADR-0013](./0013-tool-isolation-unknown-outcome.md) | Accepted | 2026-08-15 | 同步 Tool 隔离与 UNKNOWN Outcome | E2026-08-15-005 |

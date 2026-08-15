@@ -87,6 +87,21 @@ class SequentialWorkflow:
         if not self.steps:
             raise ValueError("SequentialWorkflow requires at least one step.")
 
+    def definition(self) -> dict[str, Any]:
+        steps = tuple(_coerce_step(step) for step in self.steps)
+        return {
+            "name": self.name,
+            "type": "sequential",
+            "steps": [
+                {
+                    "agent_name": step.agent_name,
+                    "name": step.name,
+                    "input_prefix": step.input_prefix,
+                }
+                for step in steps
+            ],
+        }
+
     async def run(
         self,
         runtime: Runtime,
@@ -102,18 +117,7 @@ class SequentialWorkflow:
             metadata=metadata,
             parent_run_id=parent_run_id,
             workflow_type="sequential",
-            workflow_definition={
-                "name": self.name,
-                "type": "sequential",
-                "steps": [
-                    {
-                        "agent_name": step.agent_name,
-                        "name": step.name,
-                        "input_prefix": step.input_prefix,
-                    }
-                    for step in steps
-                ],
-            },
+            workflow_definition=self.definition(),
         )
         if parent.status in TERMINAL_STATUSES:
             return WorkflowExecution(parent, runtime.store.child_runs(parent.id))
@@ -162,7 +166,11 @@ class SequentialWorkflow:
 
     def start(self, runtime: Runtime, input_text: str, *, metadata: dict[str, Any] | None = None) -> AgentRun:
         parent = runtime.create_workflow_run(
-            self.name, input_text, metadata=metadata, workflow_type="sequential"
+            self.name,
+            input_text,
+            metadata=metadata,
+            workflow_type="sequential",
+            workflow_definition=self.definition(),
         )
         async def execute() -> AgentRun:
             return (
@@ -193,6 +201,24 @@ class ParallelWorkflow:
         if self.timeout_seconds is not None and self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive.")
 
+    def definition(self) -> dict[str, Any]:
+        steps = tuple(_coerce_step(step) for step in self.steps)
+        return {
+            "name": self.name,
+            "type": "parallel",
+            "aggregation": self.aggregation.value,
+            "max_concurrency": self.max_concurrency,
+            "timeout_seconds": self.timeout_seconds,
+            "steps": [
+                {
+                    "agent_name": step.agent_name,
+                    "name": step.name,
+                    "input_prefix": step.input_prefix,
+                }
+                for step in steps
+            ],
+        }
+
     async def run(
         self,
         runtime: Runtime,
@@ -208,21 +234,7 @@ class ParallelWorkflow:
             metadata=metadata,
             parent_run_id=parent_run_id,
             workflow_type="parallel",
-            workflow_definition={
-                "name": self.name,
-                "type": "parallel",
-                "aggregation": self.aggregation.value,
-                "max_concurrency": self.max_concurrency,
-                "timeout_seconds": self.timeout_seconds,
-                "steps": [
-                    {
-                        "agent_name": step.agent_name,
-                        "name": step.name,
-                        "input_prefix": step.input_prefix,
-                    }
-                    for step in steps
-                ],
-            },
+            workflow_definition=self.definition(),
         )
         if parent.status in TERMINAL_STATUSES:
             return WorkflowExecution(parent, runtime.store.child_runs(parent.id))
@@ -348,7 +360,11 @@ class ParallelWorkflow:
 
     def start(self, runtime: Runtime, input_text: str, *, metadata: dict[str, Any] | None = None) -> AgentRun:
         parent = runtime.create_workflow_run(
-            self.name, input_text, metadata=metadata, workflow_type="parallel"
+            self.name,
+            input_text,
+            metadata=metadata,
+            workflow_type="parallel",
+            workflow_definition=self.definition(),
         )
         async def execute() -> AgentRun:
             return (

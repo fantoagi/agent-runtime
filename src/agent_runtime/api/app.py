@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from ..doctor import RuntimeDoctor
 from ..domain import (
     AgentRun,
     Approval,
@@ -15,6 +16,7 @@ from ..domain import (
     RuntimeEvent,
     StoreBusyError,
     StoreError,
+    ToolExecution,
 )
 from ..observability import ObservabilityService
 from ..runtime import Runtime
@@ -63,6 +65,15 @@ class ApprovalResolutionRequest(BaseModel):
     reason: str | None = None
 
 
+class UnknownToolResolutionRequest(BaseModel):
+    resolution: str
+    reason: str = Field(min_length=1)
+    resolved_by: str = Field(default="api-user", min_length=1)
+    result_content: str | None = None
+    result_data: dict[str, Any] | None = None
+    error: str | None = None
+
+
 class ErrorResponse(BaseModel):
     detail: str
     code: str | None = None
@@ -88,6 +99,27 @@ def _approval_payload(approval: Approval) -> dict[str, Any]:
             "name": approval.tool_call.name,
             "arguments": approval.tool_call.arguments,
         },
+    }
+
+
+def _tool_execution_payload(execution: ToolExecution) -> dict[str, Any]:
+    return {
+        "id": execution.id,
+        "run_id": execution.run_id,
+        "step_id": execution.step_id,
+        "status": execution.status.value,
+        "tool_call": {
+            "id": execution.tool_call.id,
+            "name": execution.tool_call.name,
+            "arguments": execution.tool_call.arguments,
+        },
+        "result_content": execution.result_content,
+        "result_data": execution.result_data,
+        "error": execution.error,
+        "resolution": execution.resolution.value if execution.resolution else None,
+        "resolution_reason": execution.resolution_reason,
+        "resolved_by": execution.resolved_by,
+        "resolved_at": execution.resolved_at.isoformat() if execution.resolved_at else None,
     }
 
 
@@ -124,7 +156,7 @@ def create_app(
 
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.7.6",
+        version="0.7.7",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
         lifespan=lifespan,
     )
@@ -221,7 +253,7 @@ def create_app(
         return {
             "status": "ok",
             "runtime": "agent-runtime",
-            "version": "0.7.6",
+            "version": "0.7.7",
             "store": store,
         }
 
@@ -474,6 +506,32 @@ def create_app(
     async def cancel_run(run_id: str) -> dict[str, Any]:
         try:
             return _run_payload(runtime.cancel(run_id))
+        except (KeyError, RunNotFound) as error:
+            raise _not_found(error) from error
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.get("/doctor")
+    async def doctor(run_id: str | None = None) -> dict[str, Any]:
+        report = RuntimeDoctor(runtime.store).run(run_id)
+        return report.to_dict()
+
+    @app.post("/tool-executions/{execution_id}/resolve-unknown")
+    async def resolve_unknown_tool(
+        execution_id: str, request: UnknownToolResolutionRequest
+    ) -> dict[str, Any]:
+        try:
+            execution = runtime.resolve_unknown_tool(
+                execution_id,
+                request.resolution,
+                result_content=request.result_content,
+                result_data=request.result_data,
+                error=request.error,
+                reason=request.reason,
+                resolved_by=request.resolved_by,
+            )
+            run = runtime.store.get_run(execution.run_id)
+            return {"tool_execution": _tool_execution_payload(execution), "run": _run_payload(run)}
         except (KeyError, RunNotFound) as error:
             raise _not_found(error) from error
         except ValueError as error:

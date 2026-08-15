@@ -34,6 +34,7 @@ from .domain import (
     ToolCall,
     ToolExecution,
     ToolExecutionStatus,
+    UnknownToolResolution,
     utc_now,
 )
 
@@ -204,6 +205,18 @@ MIGRATIONS: tuple[Migration, ...] = (
             ON tool_executions(run_id, status, side_effecting);
         """,
     ),
+    (
+        6,
+        "unknown_tool_resolution_audit",
+        """
+        ALTER TABLE tool_executions ADD COLUMN resolution TEXT;
+        ALTER TABLE tool_executions ADD COLUMN resolution_reason TEXT;
+        ALTER TABLE tool_executions ADD COLUMN resolved_by TEXT;
+        ALTER TABLE tool_executions ADD COLUMN resolved_at TEXT;
+        CREATE INDEX IF NOT EXISTS idx_tool_executions_unknown
+            ON tool_executions(status, run_id, created_at);
+        """,
+    ),
 )
 
 
@@ -277,6 +290,110 @@ class SQLiteStore:
                     self._connection.execute("PRAGMA journal_mode").fetchone()[0]
                 ).lower(),
             }
+
+    def diagnostic_snapshot(self, run_id: str | None = None) -> dict[str, Any]:
+        """Return a read-only consistency snapshot for Runtime Doctor."""
+        with self._lock:
+            self._ensure_open()
+            where = " WHERE id=?" if run_id is not None else ""
+            params: tuple[object, ...] = (run_id,) if run_id is not None else ()
+            run_rows = self._connection.execute(
+                f"SELECT id, status, metadata_json FROM runs{where} ORDER BY created_at",
+                params,
+            ).fetchall()
+            run_ids = [str(row["id"]) for row in run_rows]
+            if run_id is not None and not run_rows:
+                raise RunNotFound(f"Run {run_id} was not found.")
+            filter_sql = " AND run_id=?" if run_id is not None else ""
+            filter_params = (run_id,) if run_id is not None else ()
+            tool_rows = self._connection.execute(
+                "SELECT id, run_id, status, side_effecting FROM tool_executions "
+                f"WHERE 1=1{filter_sql} ORDER BY created_at",
+                filter_params,
+            ).fetchall()
+            approval_rows = self._connection.execute(
+                "SELECT id, run_id FROM approvals WHERE status='pending'"
+                + filter_sql,
+                filter_params,
+            ).fetchall()
+            duplicate_events = self._connection.execute(
+                "SELECT run_id, sequence, COUNT(*) AS count FROM events WHERE 1=1"
+                + filter_sql
+                + " GROUP BY run_id, sequence HAVING COUNT(*) > 1",
+                filter_params,
+            ).fetchall()
+            event_ranges = self._connection.execute(
+                "SELECT run_id, COUNT(*) AS count, MIN(sequence) AS minimum, "
+                "MAX(sequence) AS maximum FROM events WHERE 1=1"
+                + filter_sql
+                + " GROUP BY run_id",
+                filter_params,
+            ).fetchall()
+            workflow_missing = self._connection.execute(
+                """
+                SELECT runs.id FROM runs
+                LEFT JOIN workflow_snapshots ON workflow_snapshots.run_id=runs.id
+                WHERE json_extract(runs.metadata_json, '$.run_kind')='workflow'
+                  AND workflow_snapshots.run_id IS NULL
+                """
+                + (" AND runs.id=?" if run_id is not None else ""),
+                filter_params,
+            ).fetchall()
+            orphan_steps = self._connection.execute(
+                """
+                SELECT steps.id FROM steps LEFT JOIN runs ON runs.id=steps.run_id
+                WHERE runs.id IS NULL
+                """
+            ).fetchall()
+            orphan_tools = self._connection.execute(
+                """
+                SELECT tool_executions.id FROM tool_executions
+                LEFT JOIN runs ON runs.id=tool_executions.run_id
+                LEFT JOIN steps ON steps.id=tool_executions.step_id
+                WHERE runs.id IS NULL OR steps.id IS NULL
+                """
+            ).fetchall()
+            snapshot_orphans = self._connection.execute(
+                """
+                SELECT workflow_snapshots.run_id FROM workflow_snapshots
+                LEFT JOIN runs ON runs.id=workflow_snapshots.run_id
+                WHERE runs.id IS NULL
+                """
+            ).fetchall()
+            foreign_keys = int(self._connection.execute("PRAGMA foreign_keys").fetchone()[0])
+            synchronous = int(self._connection.execute("PRAGMA synchronous").fetchone()[0])
+        status_counts: dict[str, int] = {}
+        for row in run_rows:
+            status = str(row["status"])
+            status_counts[status] = status_counts.get(status, 0) + 1
+        gaps = [
+            str(row["run_id"])
+            for row in event_ranges
+            if int(row["count"]) > 0
+            and (int(row["minimum"]) != 1 or int(row["maximum"]) != int(row["count"]))
+        ]
+        return {
+            "run_ids": run_ids,
+            "run_status_counts": status_counts,
+            "unknown_tool_execution_ids": [
+                str(row["id"]) for row in tool_rows if row["status"] == "unknown"
+            ],
+            "running_tool_execution_ids": [
+                str(row["id"]) for row in tool_rows if row["status"] == "running"
+            ],
+            "pending_approval_ids": [str(row["id"]) for row in approval_rows],
+            "duplicate_event_sequences": [
+                {"run_id": str(row["run_id"]), "sequence": int(row["sequence"])}
+                for row in duplicate_events
+            ],
+            "event_sequence_gap_run_ids": gaps,
+            "workflow_run_ids_without_snapshot": [str(row["id"]) for row in workflow_missing],
+            "orphan_step_ids": [str(row["id"]) for row in orphan_steps],
+            "orphan_tool_execution_ids": [str(row["id"]) for row in orphan_tools],
+            "orphan_workflow_snapshot_run_ids": [str(row["run_id"]) for row in snapshot_orphans],
+            "foreign_keys": foreign_keys,
+            "synchronous": synchronous,
+        }
 
     @property
     def schema_version(self) -> int:
@@ -1264,8 +1381,9 @@ class SQLiteStore:
                 id, run_id, step_id, position, tool_call_id, tool_name,
                 arguments_json, status, result_content, result_data_json, error,
                 idempotency_key, requires_approval, side_effecting,
-                created_at, started_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, started_at, completed_at, resolution,
+                resolution_reason, resolved_by, resolved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execution.id,
@@ -1287,6 +1405,10 @@ class SQLiteStore:
                 execution.created_at.isoformat(),
                 execution.started_at.isoformat() if execution.started_at else None,
                 execution.completed_at.isoformat() if execution.completed_at else None,
+                execution.resolution.value if execution.resolution else None,
+                execution.resolution_reason,
+                execution.resolved_by,
+                execution.resolved_at.isoformat() if execution.resolved_at else None,
             ),
         )
 
@@ -1360,7 +1482,8 @@ class SQLiteStore:
             """
             UPDATE tool_executions SET
                 status=?, result_content=?, result_data_json=?, error=?,
-                started_at=?, completed_at=?
+                started_at=?, completed_at=?, resolution=?, resolution_reason=?,
+                resolved_by=?, resolved_at=?
             WHERE id=?
             """,
             (
@@ -1372,6 +1495,10 @@ class SQLiteStore:
                 execution.error,
                 execution.started_at.isoformat() if execution.started_at else None,
                 execution.completed_at.isoformat() if execution.completed_at else None,
+                execution.resolution.value if execution.resolution else None,
+                execution.resolution_reason,
+                execution.resolved_by,
+                execution.resolved_at.isoformat() if execution.resolved_at else None,
                 execution.id,
             ),
         )
@@ -1406,19 +1533,26 @@ class SQLiteStore:
         self,
         execution: ToolExecution,
         run: AgentRun,
-        outcome: str,
+        resolution: UnknownToolResolution,
     ) -> RuntimeEvent:
         with self._lock, self._connection:
             self._update_tool_execution_locked(execution)
             self._update_run_locked(run)
             return self._append_event_locked(
                 execution.run_id,
-                "tool.unknown_resolved",
+                "tool.outcome_confirmed",
                 {
                     "tool_execution_id": execution.id,
                     "tool_call_id": execution.tool_call.id,
-                    "outcome": outcome,
+                    "previous_status": "unknown",
+                    "resolution": resolution.value,
+                    "reason": execution.resolution_reason,
+                    "resolved_by": execution.resolved_by,
+                    "resolved_at": execution.resolved_at.isoformat()
+                    if execution.resolved_at
+                    else None,
                     "result_content": execution.result_content,
+                    "result_data": execution.result_data,
                     "error": execution.error,
                 },
             )
@@ -1632,6 +1766,14 @@ class SQLiteStore:
             else None,
             completed_at=datetime.fromisoformat(row["completed_at"])
             if row["completed_at"]
+            else None,
+            resolution=UnknownToolResolution(row["resolution"])
+            if row["resolution"]
+            else None,
+            resolution_reason=row["resolution_reason"],
+            resolved_by=row["resolved_by"],
+            resolved_at=datetime.fromisoformat(row["resolved_at"])
+            if row["resolved_at"]
             else None,
         )
 

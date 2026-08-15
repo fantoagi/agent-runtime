@@ -72,7 +72,7 @@ async def test_delegate_persists_relation_and_reuses_stable_key(workspace: Path)
     parent = runtime.begin_workflow(
         "manual-parent", "root input", workflow_type="manual"
     )
-    with pytest.raises(ValueError, match="original Workflow"):
+    with pytest.raises(ValueError, match="no persisted definition snapshot"):
         await runtime.resume(parent.id)
     with pytest.raises(ValueError, match="pause is not supported"):
         runtime.pause(parent.id)
@@ -224,6 +224,7 @@ async def test_first_success_and_parent_cancel_propagate_to_children(workspace: 
 
     cancellable = ParallelWorkflow("cancel-tree", ["slow", "slow"], max_concurrency=2)
     parent = cancellable.start(runtime, "input")
+    assert runtime.store.workflow_snapshot(parent.id)["type"] == "parallel"
     for _ in range(100):
         if len(runtime.store.child_runs(parent.id)) == 2:
             break
@@ -312,6 +313,7 @@ async def test_sequential_start_failure_and_terminal_reuse(workspace: Path) -> N
     runtime.register_agent(make_agent("failure"))
 
     started = SequentialWorkflow("started", ["ok"]).start(runtime, "input")
+    assert runtime.store.workflow_snapshot(started.id)["type"] == "sequential"
     completed = await runtime.wait(started.id)
     assert completed.status is RunStatus.COMPLETED
     assert runtime.store.workflow_snapshot(started.id)["type"] == "sequential"
@@ -351,3 +353,47 @@ async def test_parallel_timeout_and_all_failed_first_success(workspace: Path) ->
     ).run(runtime, "input")
     assert failed.parent.status is RunStatus.FAILED
     assert "No parallel branch" in (failed.parent.error or "")
+
+
+@pytest.mark.asyncio
+async def test_sequential_workflow_resumes_from_persisted_snapshot(workspace: Path) -> None:
+    def responder(messages, tools, config):
+        return ModelResponse(content=f"{messages[0].content}({messages[-1].content})")
+
+    runtime = make_runtime(workspace, responder)
+    for name in ("planner", "worker", "reviewer"):
+        runtime.register_agent(make_agent(name))
+    definition = {
+        "name": "recoverable",
+        "type": "sequential",
+        "steps": [
+            {"agent_name": name, "name": None, "input_prefix": ""}
+            for name in ("planner", "worker", "reviewer")
+        ],
+    }
+    parent = runtime.begin_workflow(
+        "recoverable",
+        "request",
+        workflow_type="sequential",
+        workflow_definition=definition,
+    )
+    first = await runtime.delegate(
+        parent.id,
+        "planner",
+        "request",
+        delegation_key="recoverable:step:0",
+        relation_type=RunRelationType.WORKFLOW,
+    )
+    assert first.status is RunStatus.COMPLETED
+    runtime.store.close()
+
+    restarted = make_runtime(workspace, responder)
+    for name in ("planner", "worker", "reviewer"):
+        restarted.register_agent(make_agent(name))
+    completed = await restarted.resume(parent.id)
+
+    assert completed.status is RunStatus.COMPLETED
+    children = restarted.store.child_runs(parent.id)
+    assert len(children) == 3
+    assert children[0].id == first.id
+    assert completed.result == "reviewer(worker(planner(request)))"

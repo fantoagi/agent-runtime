@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-runtime"
-version = "0.7.6"
+version = "0.7.7"
 description = "A durable runtime for tool-calling agents and multi-agent workflows."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,6 +43,7 @@ markers = [
     "integration: tests spanning runtime subsystems",
     "stress: bounded concurrency and contention tests",
     "soak: long-running resource stability tests",
+    "crash: process-level forced termination and recovery tests",
 ]
 
 [tool.ruff]

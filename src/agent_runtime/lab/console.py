@@ -5,6 +5,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
+from ..doctor import RuntimeDoctor
 from ..domain import AgentDefinition, MemoryScope, Message, ModelConfig, ToolCall, ToolDefinition
 from ..observability import ObservabilityService
 from ..orchestration import AggregationStrategy, ParallelWorkflow, SequentialWorkflow, WorkflowStep
@@ -196,6 +197,7 @@ class LearningConsole:
             artifact_count=len(artifacts),
         )
         latest_root_checkpoint = self.store.latest_checkpoint(root_run_id)
+        doctor = RuntimeDoctor(self.store).run(root_run_id)
         return {
             "scenario": scenario.to_dict(),
             "run": root.to_dict(),
@@ -237,6 +239,7 @@ class LearningConsole:
                     if any(item.status.value == "unknown" for item in executions)
                     else "healthy"
                 ),
+                "doctor": doctor.to_dict(),
                 "unknown_tool_executions": sum(
                     item.status.value == "unknown" for item in executions
                 ),

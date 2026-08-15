@@ -8,7 +8,16 @@ import httpx
 import pytest
 
 from agent_runtime.api import create_app, encode_sse
-from agent_runtime.domain import AgentDefinition, ModelConfig, RuntimeEvent
+from agent_runtime.domain import (
+    AgentDefinition,
+    ModelConfig,
+    RunStatus,
+    RuntimeEvent,
+    Step,
+    ToolCall,
+    ToolExecution,
+    ToolExecutionStatus,
+)
 from agent_runtime.orchestration import SequentialWorkflow
 from agent_runtime.providers import (
     MockProvider,
@@ -47,8 +56,8 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.7.6"
-        assert health.json()["store"]["schema_version"] == 5
+        assert health.json()["version"] == "0.7.7"
+        assert health.json()["store"]["schema_version"] == 6
 
         invalid = await client.post("/runs", json={"input": ""})
         assert invalid.status_code == 422
@@ -308,3 +317,62 @@ async def test_session_and_memory_api(workspace: Path) -> None:
     assert search.json()[0]["record"]["id"] == memory_id
     assert deleted.status_code == 200
     assert deleted.json()["active"] is False
+
+
+@pytest.mark.asyncio
+async def test_doctor_endpoint(workspace: Path) -> None:
+    runtime = make_api_runtime(workspace)
+    app = create_app(runtime)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/doctor")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["checks"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_unknown_endpoint_records_audit_and_keeps_run_paused(
+    workspace: Path,
+) -> None:
+    runtime = make_api_runtime(workspace)
+    run = runtime.create_run("demo", "unknown")
+    run.transition_to(RunStatus.RUNNING)
+    runtime.store.save_run(run)
+    step = Step.create(run.id, 1)
+    runtime.store.create_step_with_event(run, step, "model.requested", {"step": 1})
+    execution = ToolExecution.create(
+        run.id,
+        step.id,
+        0,
+        ToolCall("unknown-api-call", "write_text_file", {"path": "x", "content": "y"}),
+        requires_approval=True,
+        side_effecting=True,
+    )
+    execution.status = ToolExecutionStatus.UNKNOWN
+    runtime.store.create_tool_executions(step, [execution])
+    run.transition_to(RunStatus.PAUSED)
+    runtime.store.save_run(run)
+
+    app = create_app(runtime)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            f"/tool-executions/{execution.id}/resolve-unknown",
+            json={
+                "resolution": "confirmed_succeeded",
+                "reason": "Verified external state",
+                "resolved_by": "api-test",
+                "result_content": "already written",
+            },
+        )
+        retry = await client.post(
+            f"/tool-executions/{execution.id}/resolve-unknown",
+            json={"resolution": "retry", "reason": "unsafe retry"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["run"]["status"] == "paused"
+    assert response.json()["tool_execution"]["resolution"] == "confirmed_succeeded"
+    assert response.json()["tool_execution"]["resolved_by"] == "api-test"
+    assert retry.status_code == 409

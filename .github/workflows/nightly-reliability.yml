@@ -36,6 +36,9 @@ jobs:
       - name: Repeat fault-injection and reliability tests
         run: python -m pytest tests/test_providers.py tests/test_reliability.py tests/test_contract_edges.py --count=3 -p no:cacheprovider
 
+      - name: Forced-crash recovery matrix
+        run: python scripts/run_crash_recovery.py --repeat 20 --output crash-result.json
+
       - name: 100-run stress and soak
         env:
           SOAK_SECONDS: ${{ inputs.soak_seconds || '1800' }}
@@ -57,12 +60,14 @@ jobs:
         run: python -m build
 
       - name: Verify release artifact
-        run: python scripts/verify_distribution.py dist/agent_runtime-0.7.6-py3-none-any.whl
+        run: python scripts/verify_distribution.py dist/agent_runtime-0.7.7-py3-none-any.whl
 
       - name: Upload reliability report
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: reliability-result
-          path: reliability-result.json
+          path: |
+            reliability-result.json
+            crash-result.json
           if-no-files-found: warn

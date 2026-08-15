@@ -1,8 +1,8 @@
 # Agent Runtime 当前架构
 
 > 最近更新：2026-08-15
-> 关联记录：[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
-> 关联决策：[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
+> 关联记录：[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
+> 关联决策：[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
 
 ## 1. 系统目标和边界
 
@@ -82,7 +82,7 @@ flowchart TD
 - 在模型调用前检索 Scoped Memory，并通过 ContextBuilder 构造受预算输入。
 - 将大 Tool Result 转存到 Artifact Store。
 
-公开入口包括 `run()`、`start()`、`wait()`、`stream()`、`pause()`、`resume()`、`cancel()`、`delegate()`、`begin_workflow()`、`finish_workflow()`、`resolve_approval()`、`create_session()`、`session_runs()`、`remember()`、`search_memory()`、`forget_memory()` 和 `purge_expired_memories()`。
+公开入口包括 `run()`、`start()`、`wait()`、`stream()`、`pause()`、`resume()`、`cancel()`、`delegate()`、`begin_workflow()`、`finish_workflow()`、`resolve_approval()`、`resolve_unknown_tool()`、`resume_workflow()`、`create_session()`、`session_runs()`、`remember()`、`search_memory()`、`forget_memory()` 和 `purge_expired_memories()`。
 
 ## 3.1 Multi-Agent Orchestration
 
@@ -365,7 +365,7 @@ Root 事件实时通知复用 `/runs/{run_id}/events/stream`。因为 Child Run 
 - `async with Runtime(...)` 自动执行相同关闭流程，重复关闭幂等。
 - 同步 Tool 进入 Runtime 独享有界线程池；Provider 复用 `httpx.AsyncClient` 并在关闭时释放连接池。
 - SQLite 使用 WAL、`synchronous=FULL`、`busy_timeout`、`quick_check` 和事务内 Event sequence；migration 带 checksum，只向前升级。
-- Workflow 创建时保存规范化定义快照；FastAPI 通过 `shutdown_runtime` 明确所有权；SSE heartbeat 不写 Event Log。
+- Workflow 创建时保存规范化定义快照，恢复时由 Runtime 重建 Sequential/Parallel Workflow 并复用 delegation key；FastAPI 通过 `shutdown_runtime` 明确所有权；SSE heartbeat 不写 Event Log。
 
 ```mermaid
 flowchart TD
@@ -379,6 +379,22 @@ flowchart TD
 ```
 
 PR 执行静态检查、126 项测试、覆盖率、20 并发和 Wheel smoke；Nightly 执行 100 并发、故障测试重复、30 分钟 soak 和性能检查。
+## 9.6 Runtime Doctor 与 Crash Recovery Matrix
+
+`RuntimeDoctor` 是只读诊断层，不修改 SQLite。它检查 quick_check、schema、foreign_keys、非终态 Run、UNKNOWN/Running ToolExecution、Pending Approval、Event sequence、孤儿记录和 Workflow snapshot。CLI 使用 `agent-runtime doctor`，HTTP 使用 `GET /doctor`。
+
+Crash Matrix 通过独立 Python 子进程制造模型请求中断、副作用 Tool 中断、Approval 等待中断和 Workflow 部分完成中断，再由新 Runtime 打开同一个 SQLite 文件进行恢复。副作用场景使用外部计数器证明恢复前后只执行一次。
+
+```mermaid
+flowchart LR
+    Worker["Child Process"] -->|"durable barrier"| SQLite["SQLite + external marker"]
+    Controller["Crash Matrix Controller"] -->|"process.kill()"| Worker
+    Controller --> Restart["New Runtime Process"]
+    Restart --> Reconcile["Reconcile RUNNING / UNKNOWN"]
+    Reconcile --> Confirm["Human confirmation if UNKNOWN"]
+    Confirm --> Resume["Explicit resume()"]
+    Resume --> Verify["Verify terminal state and no duplicate side effect"]
+```
 ## 10. 安全边界
 
 当前默认安全策略：
@@ -400,10 +416,10 @@ PR 执行静态检查、126 项测试、覆盖率、20 并发和 Wheel smoke；N
 - Run 超时：执行循环终止并进入 failed。
 - 暂停：保存最新 Checkpoint 后返回 paused。
 - 审批：保存工具调用和 Checkpoint，批准后执行，拒绝后将拒绝原因作为工具结果返回模型。
-- 恢复：加载最新 Checkpoint 和未完成 Step；已完成的 ToolExecution 复用持久化结果，不重复执行。Workflow 恢复则必须由调用方重新提供同一个 Workflow 定义和 parent_run_id，稳定 delegation key 会复用已创建 Child。
-- 未知副作用：进程在副作用工具运行中重启时标记为 `unknown`，Run 暂停并等待人工确认完成、重试或失败。
+- 恢复：加载最新 Checkpoint 和未完成 Step；已完成的 ToolExecution 复用持久化结果，不重复执行。Workflow Parent 可由 `resume()` 从持久化 snapshot 重建定义，稳定 delegation key 复用已创建 Child；应用必须重新注册被 snapshot 引用的 AgentDefinition。
+- 未知副作用：进程在副作用工具运行中重启时标记为 `unknown`，禁止直接 retry；人工只能确认成功或失败，并记录 reason、resolved_by、resolved_at，随后显式 `resume()`。
 - 取消：取消活动 asyncio Task，并通过 ToolContext 向 handler 发出协作式取消信号；Workflow Parent 会递归取消活动 Child。
-- Workflow pause：当前明确拒绝通用 `Runtime.pause()` / `Runtime.resume()`，避免在无法持久化 Python Workflow 定义时产生错误恢复。
+- Workflow pause：仍不支持在任意 Python 控制流位置暂停，但崩溃后的 RUNNING Workflow Parent 可以通过规范化 snapshot 和幂等 delegation key 显式恢复。
 
 ## 12. 当前扩展点
 

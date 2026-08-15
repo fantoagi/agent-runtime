@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .context import ContextBuilder, ContextBuildResult
 from .domain import (
@@ -36,6 +36,7 @@ from .domain import (
     ToolExecutionError,
     ToolExecutionStatus,
     ToolOutcomeUnknown,
+    UnknownToolResolution,
     new_id,
     utc_now,
 )
@@ -50,6 +51,9 @@ from .providers import (
 )
 from .storage import ArtifactStore, SQLiteStore
 from .tools import CancellationToken, ToolContext, ToolRegistry
+
+if TYPE_CHECKING:
+    from .orchestration import WorkflowExecution
 
 
 @dataclass(slots=True)
@@ -671,11 +675,6 @@ class Runtime:
         if existing is not None and not existing.done():
             return await existing
         run = self.store.get_run(run_id)
-        if run.metadata.get("run_kind") == "workflow":
-            raise ValueError(
-                "Workflow runs must be resumed with the original Workflow.run(..., "
-                "parent_run_id=run_id) definition."
-            )
         if run.status not in {
             RunStatus.RUNNING,
             RunStatus.PAUSED,
@@ -684,9 +683,72 @@ class Runtime:
             raise ValueError(
                 f"Run {run_id} cannot be resumed from status {run.status}."
             )
-        task = asyncio.create_task(self._execute(run_id))
+        if run.metadata.get("run_kind") == "workflow":
+            async def execute_workflow() -> AgentRun:
+                return (await self.resume_workflow(run_id)).parent
+
+            task = asyncio.create_task(execute_workflow())
+        else:
+            task = asyncio.create_task(self._execute(run_id))
         self.track_task(run_id, task)
         return await task
+
+    async def resume_workflow(self, run_id: str) -> WorkflowExecution:
+        """Resume a durable workflow from its persisted normalized definition."""
+        run = self.store.get_run(run_id)
+        if run.metadata.get("run_kind") != "workflow":
+            raise ValueError(f"Run {run_id} is not a workflow run.")
+        snapshot = self.store.workflow_snapshot(run_id)
+        if snapshot is None:
+            raise ValueError(f"Workflow run {run_id} has no persisted definition snapshot.")
+        workflow_type = snapshot.get("type")
+        raw_steps = snapshot.get("steps")
+        if not isinstance(raw_steps, list) or not raw_steps:
+            raise ValueError(f"Workflow run {run_id} has an invalid step snapshot.")
+        from .orchestration import (
+            AggregationStrategy,
+            ParallelWorkflow,
+            SequentialWorkflow,
+            WorkflowStep,
+        )
+
+        steps = [
+            WorkflowStep(
+                str(step["agent_name"]),
+                name=step.get("name"),
+                input_prefix=str(step.get("input_prefix") or ""),
+            )
+            for step in raw_steps
+            if isinstance(step, dict) and step.get("agent_name")
+        ]
+        if len(steps) != len(raw_steps):
+            raise ValueError(f"Workflow run {run_id} contains an invalid step definition.")
+        name = str(snapshot.get("name") or run.metadata.get("workflow_name") or run.agent_name)
+        workflow: SequentialWorkflow | ParallelWorkflow
+        if workflow_type == "sequential":
+            workflow = SequentialWorkflow(name, steps)
+        elif workflow_type == "parallel":
+            workflow = ParallelWorkflow(
+                name,
+                steps,
+                aggregation=AggregationStrategy(str(snapshot.get("aggregation", "all"))),
+                max_concurrency=int(snapshot.get("max_concurrency", 4)),
+                timeout_seconds=(
+                    float(snapshot["timeout_seconds"])
+                    if snapshot.get("timeout_seconds") is not None
+                    else None
+                ),
+            )
+        else:
+            raise ValueError(
+                f"Workflow run {run_id} has unsupported snapshot type {workflow_type!r}."
+            )
+        return await workflow.run(
+            self,
+            run.input,
+            metadata=run.metadata,
+            parent_run_id=run.id,
+        )
 
     def pause(self, run_id: str) -> AgentRun:
         run = self.store.get_run(run_id)
@@ -748,38 +810,60 @@ class Runtime:
     def resolve_unknown_tool(
         self,
         execution_id: str,
-        outcome: Literal["completed", "retry", "failed"],
+        resolution: UnknownToolResolution | str,
         *,
         result_content: str | None = None,
+        result_data: dict[str, Any] | None = None,
         error: str | None = None,
+        reason: str | None = None,
+        resolved_by: str = "local-user",
     ) -> ToolExecution:
         execution = self.store.get_tool_execution(execution_id)
         if execution.status != ToolExecutionStatus.UNKNOWN:
             raise ValueError(
                 f"Tool execution {execution_id} is {execution.status}, not unknown."
             )
-        if outcome == "completed":
+        aliases = {
+            "completed": UnknownToolResolution.CONFIRMED_SUCCEEDED,
+            "failed": UnknownToolResolution.CONFIRMED_FAILED,
+        }
+        if str(resolution) == "retry":
+            raise ValueError(
+                "UNKNOWN side-effecting tool executions cannot be retried automatically; "
+                "confirm succeeded or failed, then explicitly resume the Run."
+            )
+        normalized = aliases.get(str(resolution))
+        if normalized is None:
+            try:
+                normalized = UnknownToolResolution(str(resolution))
+            except ValueError as exc:
+                raise ValueError(f"Unsupported unknown-tool resolution: {resolution}") from exc
+        audit_reason = (reason or error or "Human reviewed the uncertain side effect.").strip()
+        if not audit_reason:
+            raise ValueError("reason must not be empty when confirming an UNKNOWN outcome.")
+        actor = resolved_by.strip()
+        if not actor:
+            raise ValueError("resolved_by must not be empty.")
+        now = utc_now()
+        execution.resolution = normalized
+        execution.resolution_reason = audit_reason
+        execution.resolved_by = actor
+        execution.resolved_at = now
+        execution.completed_at = now
+        if normalized is UnknownToolResolution.CONFIRMED_SUCCEEDED:
             execution.status = ToolExecutionStatus.COMPLETED
             execution.result_content = result_content or (
                 "Human review confirmed that the side effect completed."
             )
+            execution.result_data = result_data
             execution.error = None
-            execution.completed_at = utc_now()
-        elif outcome == "retry":
-            execution.status = ToolExecutionStatus.PENDING
-            execution.error = None
-            execution.started_at = None
-            execution.completed_at = None
-        elif outcome == "failed":
-            execution.status = ToolExecutionStatus.FAILED
-            execution.error = error or "Human review marked the tool execution as failed."
-            execution.completed_at = utc_now()
         else:
-            raise ValueError(f"Unsupported unknown-tool outcome: {outcome}")
+            execution.status = ToolExecutionStatus.FAILED
+            execution.result_content = result_content
+            execution.result_data = result_data
+            execution.error = error or audit_reason
         run = self.store.get_run(execution.run_id)
-        if run.status == RunStatus.PAUSED:
-            run.transition_to(RunStatus.RUNNING)
-        self.store.resolve_unknown_execution(execution, run, outcome)
+        self.store.resolve_unknown_execution(execution, run, normalized)
         return execution
 
     async def stream(

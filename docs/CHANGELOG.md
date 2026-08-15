@@ -4,6 +4,60 @@
 
 ---
 
+<a id="e2026-08-15-008"></a>
+## E2026-08-15-008：v0.7.7 崩溃恢复与运维闭环
+
+- **完成时间**：2026-08-15
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/domain.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/doctor.py`
+  - `src/agent_runtime/orchestration.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/api/app.py`
+  - `scripts/run_crash_recovery.py`
+  - `tests/crash_worker.py`
+  - `tests/test_crash_recovery.py`
+  - `.github/workflows/quality.yml`
+  - `.github/workflows/nightly-reliability.yml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0019](./adr/0019-runtime-doctor.md)
+
+### 变更摘要
+
+完成 UNKNOWN 副作用人工确认、Workflow 快照恢复、只读 Runtime Doctor 和真实进程强杀恢复矩阵，使“检测异常—人工确认—显式恢复—验证无重复副作用”形成闭环。
+
+### 系统架构
+
+schema 6 为 ToolExecution 增加确认审计字段；Runtime 从规范化 Workflow snapshot 重建串行/并行编排；Doctor 只读取 SQLite 持久化事实；Crash Matrix 使用独立子进程和真实 `process.kill()` 验证恢复合同。
+
+### 实现方式
+
+UNKNOWN 只允许确认成功或失败，禁止直接 retry，确认后 Run 保持 PAUSED 并等待显式 `resume()`；`tool.outcome_confirmed` 保存 reason、actor 和时间；CLI/API 提供确认和 Doctor 入口；CI 在 Windows/Linux Python 3.13 执行 crash smoke，Nightly 重复完整矩阵。
+
+### 当前功能
+
+支持模型请求中断恢复、副作用 Tool 崩溃不重复执行、Approval 恢复、串行/并行 Workflow 部分完成恢复、Doctor 数据一致性诊断，以及 schema 1–5 向 6 升级。
+
+### 已知限制
+
+恢复依赖应用重新注册 snapshot 中引用的 AgentDefinition；Doctor 只诊断不自动修复；当前仍不提供跨主机调度和不可信代码隔离。
+
+### 测试与验收
+
+```powershell
+python scripts/run_crash_recovery.py
+agent-runtime doctor --json
+python -m pytest -m crash
+python -m pytest
+```
+
+### 后续计划
+
+持续运行 v0.7.7 Nightly，稳定后再决定是否进入 v0.8 Sandbox。
 <a id="e2026-08-15-007"></a>
 ## E2026-08-15-007：v0.7.6 FastAPI/SSE 长稳与发布验证
 
