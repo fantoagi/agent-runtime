@@ -3,14 +3,23 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import threading
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
-from .domain import Message, ModelConfig, ToolCall, ToolDefinition
+import httpx
+
+from .domain import (
+    Message,
+    ModelConfig,
+    ProviderHTTPError,
+    ProviderProtocolError,
+    ProviderTransportError,
+    ToolCall,
+    ToolDefinition,
+)
 
 
 @dataclass(slots=True)
@@ -73,7 +82,10 @@ class StreamingModelProvider(Protocol):
     ) -> AsyncIterator[ModelTokenDelta]: ...
 
 
-ModelResponder = Callable[[list[Message], list[ToolDefinition], ModelConfig], ModelResponse | Awaitable[ModelResponse]]
+ModelResponder = Callable[
+    [list[Message], list[ToolDefinition], ModelConfig],
+    ModelResponse | Awaitable[ModelResponse],
+]
 
 
 class MockProvider:
@@ -86,9 +98,9 @@ class MockProvider:
         self, messages: list[Message], tools: list[ToolDefinition], config: ModelConfig
     ) -> ModelResponse:
         result = self._responder(messages, tools, config)
-        if asyncio.iscoroutine(result):
-            return await result
-        return result
+        if isinstance(result, ModelResponse):
+            return result
+        return await result
 
 
 class MockStreamingProvider:
@@ -126,77 +138,121 @@ class MockStreamingProvider:
 
 
 class OpenAICompatibleProvider:
-    """Chat Completions-compatible provider with complete and SSE streaming modes."""
+    """Managed async Chat Completions client with cancellable SSE streaming."""
 
     def __init__(
         self,
         base_url: str = "https://api.openai.com/v1",
         api_key: str | None = None,
         timeout_seconds: float = 60.0,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        max_sse_event_bytes: int = 1_048_576,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.timeout_seconds = timeout_seconds
+        self.max_sse_event_bytes = max_sse_event_bytes
+        self._transport = transport
+        self._client: httpx.AsyncClient | None = None
+        self._closed = False
 
     async def complete(
         self, messages: list[Message], tools: list[ToolDefinition], config: ModelConfig
     ) -> ModelResponse:
-        if not self.api_key:
-            raise ValueError("An API key is required for OpenAICompatibleProvider.")
-        response = await asyncio.to_thread(self._post, self._request_body(messages, tools, config))
+        body = self._request_body(messages, tools, config)
         try:
-            choice = response["choices"][0]
-            message = choice["message"]
-        except (KeyError, IndexError, TypeError) as error:
-            raise ValueError("Provider returned an unexpected response format.") from error
-        tool_calls = [
-            ToolCall(
-                id=item["id"],
-                name=item["function"]["name"],
-                arguments=json.loads(item["function"].get("arguments") or "{}"),
+            response = await self._get_client().post(
+                "/chat/completions",
+                json=body,
+                headers=self._headers(stream=False),
             )
-            for item in message.get("tool_calls", [])
-        ]
-        return ModelResponse(
-            content=message.get("content"),
-            tool_calls=tool_calls,
-            finish_reason=choice.get("finish_reason"),
-            usage=response.get("usage", {}),
-            raw_response=response,
-        )
+        except httpx.TimeoutException as error:
+            raise ProviderTransportError(f"Model API request timed out: {error}") from error
+        except httpx.TransportError as error:
+            raise ProviderTransportError(f"Model API request failed: {error}") from error
+        self._raise_for_status(response)
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as error:
+            raise ProviderProtocolError("Provider returned invalid JSON.") from error
+        return _parse_complete_response(payload)
 
     async def stream(
         self, messages: list[Message], tools: list[ToolDefinition], config: ModelConfig
     ) -> AsyncIterator[ModelTokenDelta]:
-        if not self.api_key:
-            raise ValueError("An API key is required for OpenAICompatibleProvider.")
         body = self._request_body(messages, tools, config)
         body["stream"] = True
         body.setdefault("stream_options", {"include_usage": True})
-        queue: asyncio.Queue[dict[str, Any] | object] = asyncio.Queue()
-        sentinel = object()
-        errors: list[BaseException] = []
-        loop = asyncio.get_running_loop()
+        saw_terminal = False
+        try:
+            async with self._get_client().stream(
+                "POST",
+                "/chat/completions",
+                json=body,
+                headers=self._headers(stream=True),
+            ) as response:
+                self._raise_for_status(response)
+                data_lines: list[str] = []
+                event_bytes = 0
+                async for line in response.aiter_lines():
+                    if line.startswith("data:"):
+                        value = line[5:].lstrip()
+                        event_bytes += len(value.encode("utf-8"))
+                        if event_bytes > self.max_sse_event_bytes:
+                            raise ProviderProtocolError(
+                                "Provider SSE event exceeded the configured size limit."
+                            )
+                        data_lines.append(value)
+                        continue
+                    if line or not data_lines:
+                        continue
+                    payload = "\n".join(data_lines)
+                    data_lines.clear()
+                    event_bytes = 0
+                    if payload == "[DONE]":
+                        saw_terminal = True
+                        break
+                    delta = _parse_sse_delta(payload)
+                    if delta.finish_reason is not None:
+                        saw_terminal = True
+                    yield delta
+                if data_lines:
+                    payload = "\n".join(data_lines)
+                    if payload == "[DONE]":
+                        saw_terminal = True
+                    else:
+                        delta = _parse_sse_delta(payload)
+                        if delta.finish_reason is not None:
+                            saw_terminal = True
+                        yield delta
+        except httpx.TimeoutException as error:
+            raise ProviderTransportError(f"Model API stream timed out: {error}") from error
+        except httpx.TransportError as error:
+            raise ProviderTransportError(f"Model API stream failed: {error}") from error
+        if not saw_terminal:
+            raise ProviderProtocolError(
+                "Provider stream ended before a finish reason or [DONE] marker."
+            )
 
-        def worker() -> None:
-            try:
-                for payload in self._post_stream(body):
-                    loop.call_soon_threadsafe(queue.put_nowait, payload)
-            except BaseException as error:  # propagate provider errors to the async consumer
-                errors.append(error)
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
-        threading.Thread(target=worker, name="agent-runtime-model-stream", daemon=True).start()
-        while True:
-            item = await queue.get()
-            if item is sentinel:
-                if errors:
-                    raise errors[0]
-                return
-            delta = _parse_sse_delta(item)
-            if delta is not None:
-                yield delta
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._closed:
+            raise ProviderTransportError("Model provider is closed.")
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=httpx.Timeout(self.timeout_seconds),
+                transport=self._transport,
+            )
+        return self._client
 
     def _request_body(
         self, messages: list[Message], tools: list[ToolDefinition], config: ModelConfig
@@ -224,83 +280,148 @@ class OpenAICompatibleProvider:
         body.update(config.extra)
         return body
 
-    def _post(self, body: dict[str, Any]) -> dict[str, Any]:
-        request = self._request(body)
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as result:  # noqa: S310 - configurable endpoint.
-                return json.loads(result.read().decode("utf-8"))
-        except HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Model API returned HTTP {error.code}: {detail}") from error
-        except URLError as error:
-            raise RuntimeError(f"Model API request failed: {error.reason}") from error
+    def _headers(self, *, stream: bool) -> dict[str, str]:
+        if not self.api_key:
+            raise ValueError("An API key is required for OpenAICompatibleProvider.")
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream" if stream else "application/json",
+        }
 
-    def _post_stream(self, body: dict[str, Any]) -> Iterator[dict[str, Any] | str]:
-        request = self._request(body)
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as result:  # noqa: S310 - configurable endpoint.
-                data_lines: list[str] = []
-                for raw_line in result:
-                    line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-                    if line.startswith("data:"):
-                        data_lines.append(line[5:].lstrip())
-                    elif not line and data_lines:
-                        payload = "\n".join(data_lines)
-                        data_lines.clear()
-                        if payload:
-                            yield payload
-                if data_lines:
-                    yield "\n".join(data_lines)
-        except HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Model API returned HTTP {error.code}: {detail}") from error
-        except URLError as error:
-            raise RuntimeError(f"Model API request failed: {error.reason}") from error
-
-    def _request(self, body: dict[str, Any]) -> Request:
-        return Request(
-            url=f"{self.base_url}/chat/completions",
-            data=json.dumps(body).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream" if body.get("stream") else "application/json",
-            },
-            method="POST",
+    @staticmethod
+    def _raise_for_status(response: httpx.Response) -> None:
+        if response.is_success:
+            return
+        status_code = response.status_code
+        retryable = status_code in {408, 429} or 500 <= status_code <= 599
+        detail = response.text[:2000]
+        retry_after = _parse_retry_after(response.headers.get("Retry-After"))
+        raise ProviderHTTPError(
+            status_code,
+            f"Model API returned HTTP {status_code}: {detail}",
+            retryable=retryable,
+            retry_after_seconds=retry_after,
         )
 
 
-def _parse_sse_delta(payload: dict[str, Any] | str) -> ModelTokenDelta | None:
-    if payload == "[DONE]":
-        return None
+def _parse_complete_response(payload: Any) -> ModelResponse:
+    if not isinstance(payload, dict):
+        raise ProviderProtocolError("Provider response root must be a JSON object.")
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ProviderProtocolError("Provider response must contain at least one choice.")
+    choice = choices[0]
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        raise ProviderProtocolError("Provider choice must contain a message object.")
+    tool_calls = [_parse_complete_tool_call(item) for item in message.get("tool_calls") or []]
+    usage_value = payload.get("usage", {})
+    usage = {} if usage_value is None else usage_value
+    if not isinstance(usage, dict):
+        raise ProviderProtocolError("Provider usage must be an object.")
+    content = message.get("content")
+    if content is not None and not isinstance(content, str):
+        raise ProviderProtocolError("Provider message content must be a string or null.")
+    finish_reason = choice.get("finish_reason")
+    if finish_reason is not None and not isinstance(finish_reason, str):
+        raise ProviderProtocolError("Provider finish_reason must be a string or null.")
+    return ModelResponse(
+        content=content,
+        tool_calls=tool_calls,
+        finish_reason=finish_reason,
+        usage=_integer_usage(usage),
+        raw_response=payload,
+    )
+
+
+def _parse_complete_tool_call(item: Any) -> ToolCall:
+    if not isinstance(item, dict):
+        raise ProviderProtocolError("Provider tool call must be an object.")
+    function = item.get("function")
+    if not isinstance(function, dict):
+        raise ProviderProtocolError("Provider tool call must contain a function object.")
+    call_id = item.get("id")
+    name = function.get("name")
+    arguments_value = function.get("arguments", "{}")
+    raw_arguments = "{}" if arguments_value is None or arguments_value == "" else arguments_value
+    if not isinstance(call_id, str) or not isinstance(name, str):
+        raise ProviderProtocolError("Provider tool call id and name must be strings.")
+    if not isinstance(raw_arguments, str):
+        raise ProviderProtocolError("Provider tool arguments must be a JSON string.")
+    try:
+        arguments = json.loads(raw_arguments)
+    except json.JSONDecodeError as error:
+        raise ProviderProtocolError("Provider tool arguments contain invalid JSON.") from error
+    if not isinstance(arguments, dict):
+        raise ProviderProtocolError("Provider tool arguments must decode to an object.")
+    return ToolCall(id=call_id, name=name, arguments=arguments)
+
+
+def _parse_sse_delta(payload: dict[str, Any] | str) -> ModelTokenDelta:
     try:
         data = json.loads(payload) if isinstance(payload, str) else payload
-    except json.JSONDecodeError:
-        return None
-    choices = data.get("choices") or []
-    choice = choices[0] if choices else {}
-    raw_delta = choice.get("delta") or {}
-    tool_call_deltas = [
-        ToolCallDelta(
-            index=item.get("index", 0),
-            id=item.get("id"),
-            name=(item.get("function") or {}).get("name"),
-            arguments=(item.get("function") or {}).get("arguments") or "",
-        )
-        for item in raw_delta.get("tool_calls", [])
-    ]
+    except json.JSONDecodeError as error:
+        raise ProviderProtocolError("Provider SSE data contains invalid JSON.") from error
+    if not isinstance(data, dict):
+        raise ProviderProtocolError("Provider SSE data must be a JSON object.")
+    choices_value = data.get("choices", [])
+    choices = [] if choices_value is None else choices_value
+    if not isinstance(choices, list):
+        raise ProviderProtocolError("Provider SSE choices must be a list.")
+    choice: dict[str, Any] = {}
+    if choices:
+        if not isinstance(choices[0], dict):
+            raise ProviderProtocolError("Provider SSE choice must be an object.")
+        choice = choices[0]
+    delta_value = choice.get("delta", {})
+    raw_delta = {} if delta_value is None else delta_value
+    if not isinstance(raw_delta, dict):
+        raise ProviderProtocolError("Provider SSE delta must be an object.")
+    tool_calls_value = raw_delta.get("tool_calls", [])
+    raw_tool_calls = [] if tool_calls_value is None else tool_calls_value
+    if not isinstance(raw_tool_calls, list):
+        raise ProviderProtocolError("Provider streamed tool_calls must be a list.")
+    tool_call_deltas = [_parse_tool_delta(item) for item in raw_tool_calls]
     content = raw_delta.get("content")
+    if content is not None and not isinstance(content, str):
+        raise ProviderProtocolError("Provider SSE content must be a string or null.")
     finish_reason = choice.get("finish_reason")
-    usage = data.get("usage") or {}
-    if content is None and not tool_call_deltas and finish_reason is None and not usage:
-        return None
+    if finish_reason is not None and not isinstance(finish_reason, str):
+        raise ProviderProtocolError("Provider SSE finish_reason must be a string or null.")
+    usage_value = data.get("usage", {})
+    usage = {} if usage_value is None else usage_value
+    if not isinstance(usage, dict):
+        raise ProviderProtocolError("Provider SSE usage must be an object.")
     return ModelTokenDelta(
         content=content,
         tool_call_deltas=tool_call_deltas,
         finish_reason=finish_reason,
-        usage=usage,
+        usage=_integer_usage(usage),
         raw_delta=data,
     )
+
+
+def _parse_tool_delta(item: Any) -> ToolCallDelta:
+    if not isinstance(item, dict):
+        raise ProviderProtocolError("Provider streamed tool call must be an object.")
+    index = item.get("index", 0)
+    if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+        raise ProviderProtocolError("Provider streamed tool call index must be non-negative.")
+    function_value = item.get("function", {})
+    function = {} if function_value is None else function_value
+    if not isinstance(function, dict):
+        raise ProviderProtocolError("Provider streamed function must be an object.")
+    call_id = item.get("id")
+    name = function.get("name")
+    arguments = function.get("arguments") or ""
+    if call_id is not None and not isinstance(call_id, str):
+        raise ProviderProtocolError("Provider streamed tool call id must be a string.")
+    if name is not None and not isinstance(name, str):
+        raise ProviderProtocolError("Provider streamed tool name must be a string.")
+    if not isinstance(arguments, str):
+        raise ProviderProtocolError("Provider streamed tool arguments must be text.")
+    return ToolCallDelta(index=index, id=call_id, name=name, arguments=arguments)
 
 
 def _response_from_accumulated(
@@ -312,17 +433,50 @@ def _response_from_accumulated(
     tool_calls: list[ToolCall] = []
     for index in sorted(calls):
         item = calls[index]
+        if not item.name:
+            raise ProviderProtocolError(f"Streamed tool call {index} has no function name.")
         try:
             arguments = json.loads(item.arguments or "{}")
         except json.JSONDecodeError as error:
-            raise ValueError(f"Invalid streamed tool arguments for index {index}.") from error
-        tool_calls.append(ToolCall(item.id or f"streamed_call_{index}", item.name or "", arguments))
+            raise ProviderProtocolError(
+                f"Invalid streamed tool arguments for index {index}."
+            ) from error
+        if not isinstance(arguments, dict):
+            raise ProviderProtocolError(
+                f"Streamed tool arguments for index {index} must be an object."
+            )
+        tool_calls.append(
+            ToolCall(item.id or f"streamed_call_{index}", item.name, arguments)
+        )
     return ModelResponse(
         content="".join(content) or None,
         tool_calls=tool_calls,
         finish_reason=finish_reason,
         usage=usage,
     )
+
+
+def _integer_usage(usage: dict[str, Any]) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for key, value in usage.items():
+        if isinstance(key, str) and isinstance(value, int) and not isinstance(value, bool):
+            result[key] = value
+    return result
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return max(0.0, (parsed - datetime.now(UTC)).total_seconds())
 
 
 def _message_to_wire(message: Message) -> dict[str, Any]:
@@ -338,7 +492,10 @@ def _message_to_wire(message: Message) -> dict[str, Any]:
             {
                 "id": call.id,
                 "type": "function",
-                "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(call.arguments),
+                },
             }
             for call in message.tool_calls
         ]
@@ -349,15 +506,32 @@ def arithmetic_demo_responder(
     messages: list[Message], tools: list[ToolDefinition], config: ModelConfig
 ) -> ModelResponse:
     """Simple deterministic demo: ask calculator for arithmetic-looking user input."""
+    del config
     last = messages[-1]
     if last.role == "tool":
-        return ModelResponse(content=f"The result is {last.content}.", finish_reason="stop")
+        return ModelResponse(
+            content=f"The result is {last.content}.", finish_reason="stop"
+        )
     user_text = last.content or ""
     expression = user_text.removeprefix("calculate").strip()
     calculator_is_available = any(tool.name == "calculator" for tool in tools)
-    if calculator_is_available and expression and all(c in "0123456789+-*/(). %" for c in expression):
+    if calculator_is_available and expression and all(
+        character in "0123456789+-*/(). %" for character in expression
+    ):
         return ModelResponse(
-            tool_calls=[ToolCall(id="demo_calculator", name="calculator", arguments={"expression": expression})],
+            tool_calls=[
+                ToolCall(
+                    id="demo_calculator",
+                    name="calculator",
+                    arguments={"expression": expression},
+                )
+            ],
             finish_reason="tool_calls",
         )
-    return ModelResponse(content="Demo provider: please enter a basic arithmetic expression, such as `19 * 23`.", finish_reason="stop")
+    return ModelResponse(
+        content=(
+            "Demo provider: please enter a basic arithmetic expression, "
+            "such as `19 * 23`."
+        ),
+        finish_reason="stop",
+    )

@@ -3,15 +3,26 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
-from ..domain import AgentRun, Approval, MemoryScope, RunNotFound, RuntimeEvent
+from ..domain import (
+    AgentRun,
+    Approval,
+    MemoryScope,
+    RunNotFound,
+    RuntimeClosedError,
+    RuntimeEvent,
+    StoreBusyError,
+    StoreError,
+)
 from ..observability import ObservabilityService
 from ..runtime import Runtime
 from ..sdk import create_local_runtime, demo_agent
 
 try:
     from fastapi import FastAPI, HTTPException, Query, Request, status
+    from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
     from pydantic import BaseModel, Field
 except ImportError as error:  # pragma: no cover - exercised when the optional extra is absent
@@ -54,6 +65,8 @@ class ApprovalResolutionRequest(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+    code: str | None = None
+    retryable: bool = False
 
 
 def _run_payload(run: AgentRun) -> dict[str, Any]:
@@ -93,31 +106,124 @@ def create_app(
     *,
     default_agent: str = "demo",
     enable_learning_console: bool = False,
+    shutdown_runtime: bool = False,
 ) -> FastAPI:
     """Create a FastAPI adapter around an existing Runtime instance.
 
     The adapter owns HTTP concerns only. It delegates persistence, lifecycle,
     approvals and execution to Runtime and SQLiteStore.
     """
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        try:
+            runtime.store.health_check()
+            yield
+        finally:
+            if shutdown_runtime:
+                await runtime.shutdown()
+
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.7.2",
+        version="0.7.6",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
+        lifespan=lifespan,
     )
     app.state.runtime = runtime
     app.state.default_agent = default_agent
 
+    @app.exception_handler(HTTPException)
+    async def handle_http_error(_: Request, error: HTTPException) -> JSONResponse:
+        code_by_status = {
+            400: "invalid_request",
+            401: "unauthorized",
+            403: "forbidden",
+            404: "not_found",
+            409: "conflict",
+            422: "validation_error",
+            429: "rate_limited",
+            503: "service_unavailable",
+        }
+        return JSONResponse(
+            status_code=error.status_code,
+            content={
+                "detail": error.detail,
+                "code": code_by_status.get(error.status_code, "http_error"),
+                "retryable": error.status_code in {408, 429} or error.status_code >= 500,
+            },
+            headers=error.headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_request_validation(
+        _: Request, error: RequestValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": error.errors(),
+                "code": "validation_error",
+                "retryable": False,
+            },
+        )
+
     @app.exception_handler(KeyError)
     async def handle_key_error(_: Request, error: KeyError) -> JSONResponse:
-        return JSONResponse(status_code=404, content={"detail": str(error)})
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": str(error),
+                "code": "not_found",
+                "retryable": False,
+            },
+        )
 
     @app.exception_handler(RunNotFound)
     async def handle_run_not_found(_: Request, error: RunNotFound) -> JSONResponse:
-        return JSONResponse(status_code=404, content={"detail": str(error)})
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": str(error),
+                "code": "run_not_found",
+                "retryable": False,
+            },
+        )
+
+    @app.exception_handler(StoreError)
+    async def handle_store_error(_: Request, error: StoreError) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": str(error),
+                "code": "store_busy" if isinstance(error, StoreBusyError) else "store_unavailable",
+                "retryable": isinstance(error, StoreBusyError),
+            },
+        )
+
+    @app.exception_handler(RuntimeClosedError)
+    async def handle_runtime_closed(_: Request, error: RuntimeClosedError) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": str(error),
+                "code": "runtime_unavailable",
+                "retryable": True,
+            },
+        )
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok", "runtime": "agent-runtime", "version": "0.7.2"}
+    async def health() -> dict[str, Any]:
+        if not runtime.is_accepting:
+            raise HTTPException(
+                status_code=503,
+                detail="Runtime is shutting down or closed.",
+            )
+        store = runtime.store.health_check()
+        return {
+            "status": "ok",
+            "runtime": "agent-runtime",
+            "version": "0.7.6",
+            "store": store,
+        }
 
     @app.post("/sessions", status_code=status.HTTP_201_CREATED)
     async def create_session(request: CreateSessionRequest) -> dict[str, Any]:
@@ -220,13 +326,10 @@ def create_app(
     async def get_run_relations(run_id: str) -> dict[str, Any]:
         try:
             root_run_id = runtime.store.root_run_id(run_id)
+            parent_relation = runtime.store.get_run_relation(run_id)
             return {
                 "root_run_id": root_run_id,
-                "parent_relation": (
-                    runtime.store.get_run_relation(run_id).to_dict()
-                    if runtime.store.get_run_relation(run_id)
-                    else None
-                ),
+                "parent_relation": parent_relation.to_dict() if parent_relation else None,
                 "children": [
                     relation.to_dict()
                     for relation in runtime.store.child_relations(run_id)
@@ -287,20 +390,65 @@ def create_app(
         return [event.to_dict() for event in runtime.store.events_since(run_id, after_sequence)]
 
     @app.get("/runs/{run_id}/events/stream")
-    async def stream_events(run_id: str, after_sequence: int = Query(0, ge=0)) -> StreamingResponse:
+    async def stream_events(
+        request: Request,
+        run_id: str,
+        after_sequence: int = Query(0, ge=0),
+    ) -> StreamingResponse:
         try:
             runtime.store.get_run(run_id)
         except (KeyError, RunNotFound) as error:
             raise _not_found(error) from error
+        last_event_id = request.headers.get("Last-Event-ID")
+        if after_sequence == 0 and last_event_id:
+            try:
+                after_sequence = max(0, int(last_event_id))
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=400, detail="Last-Event-ID must be an integer."
+                ) from error
 
         async def generate() -> AsyncIterator[str]:
-            async for event in runtime.stream(run_id, after_sequence=after_sequence):
-                yield encode_sse(event)
+            iterator = runtime.stream(run_id, after_sequence=after_sequence).__aiter__()
+            pending: asyncio.Task[RuntimeEvent] | None = None
+
+            async def next_event() -> RuntimeEvent:
+                return await anext(iterator)
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        return
+                    if pending is None:
+                        pending = asyncio.create_task(next_event())
+                    done, _ = await asyncio.wait(
+                        {pending}, timeout=runtime.config.sse_heartbeat_seconds
+                    )
+                    if not done:
+                        yield ": heartbeat\n\n"
+                        continue
+                    try:
+                        event = pending.result()
+                    except StopAsyncIteration:
+                        return
+                    finally:
+                        pending = None
+                    yield encode_sse(event)
+            finally:
+                if pending is not None and not pending.done():
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+                close_iterator = getattr(iterator, "aclose", None)
+                if callable(close_iterator):
+                    await close_iterator()
 
         return StreamingResponse(
             generate(),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     @app.post("/runs/{run_id}/pause")
@@ -375,7 +523,11 @@ def create_demo_app(
     """Create a ready-to-run API backed by the deterministic demo agent."""
     runtime = create_local_runtime(workspace, state_dir)
     runtime.register_agent(demo_agent())
-    return create_app(runtime, enable_learning_console=enable_learning_console)
+    return create_app(
+        runtime,
+        enable_learning_console=enable_learning_console,
+        shutdown_runtime=True,
+    )
 
 
 async def run_until_complete(runtime: Runtime, run_id: str) -> AgentRun:

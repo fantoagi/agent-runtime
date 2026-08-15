@@ -9,16 +9,16 @@ import pytest
 
 from agent_runtime.api import create_app, encode_sse
 from agent_runtime.domain import AgentDefinition, ModelConfig, RuntimeEvent
+from agent_runtime.orchestration import SequentialWorkflow
 from agent_runtime.providers import (
-    ModelResponse,
-    ModelTokenDelta,
     MockProvider,
     MockStreamingProvider,
+    ModelResponse,
+    ModelTokenDelta,
 )
-from agent_runtime.orchestration import SequentialWorkflow
 from agent_runtime.runtime import Runtime, RuntimeConfig
-from agent_runtime.tools import ToolRegistry, register_builtin_tools
 from agent_runtime.sdk import demo_agent
+from agent_runtime.tools import ToolRegistry, register_builtin_tools
 
 
 def make_api_runtime(workspace: Path) -> Runtime:
@@ -47,7 +47,14 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.7.2"
+        assert health.json()["version"] == "0.7.6"
+        assert health.json()["store"]["schema_version"] == 5
+
+        invalid = await client.post("/runs", json={"input": ""})
+        assert invalid.status_code == 422
+        assert invalid.json()["detail"]
+        assert invalid.json()["code"] == "validation_error"
+        assert invalid.json()["retryable"] is False
 
         created = await client.post(
             "/runs", json={"agent_name": "demo", "input": "hello", "metadata": {"source": "test"}}
@@ -94,6 +101,16 @@ async def test_sse_contains_durable_events_and_closes_after_completion(workspace
         resumed = await client.get(f"/runs/{run_id}/events/stream?after_sequence=1")
         assert "id: 1\n" not in resumed.text
 
+        invalid_cursor = await client.get(
+            f"/runs/{run_id}/events/stream", headers={"Last-Event-ID": "invalid"}
+        )
+        assert invalid_cursor.status_code == 400
+        assert invalid_cursor.json() == {
+            "detail": "Last-Event-ID must be an integer.",
+            "code": "invalid_request",
+            "retryable": False,
+        }
+
 
 @pytest.mark.asyncio
 async def test_lifecycle_endpoints_and_unknown_run(workspace: Path) -> None:
@@ -103,6 +120,9 @@ async def test_lifecycle_endpoints_and_unknown_run(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         missing = await client.get("/runs/run_missing")
         assert missing.status_code == 404
+        assert missing.json()["detail"]
+        assert missing.json()["code"] == "not_found"
+        assert missing.json()["retryable"] is False
 
         created = await client.post("/runs", json={"input": "control"})
         run_id = created.json()["id"]

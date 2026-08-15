@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
 - **最近更新**：2026-08-15
-- **当前版本**：v0.7.2
-- **当前阶段**：多 Agent 独立泳道与流程语义连线完成，下一阶段进入 Sandbox、Tool Capability 与 Secret 安全
+- **当前版本**：v0.7.6
+- **当前阶段**：v0.7.x Reliability / Hardening 完成；v0.8 Sandbox 暂停，等待发布门禁持续稳定
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -33,7 +33,11 @@
 | v0.7 | ✅ completed | Context、Session 与长期记忆 | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
 | v0.7.1 | ✅ completed | Learning Console 覆盖多 Agent、Context、Memory 与 Artifact | [E2026-08-15-002](./CHANGELOG.md#e2026-08-15-002) |
 | v0.7.2 | ✅ completed | 多 Agent 独立泳道、委派分叉与结果汇聚连线 | [E2026-08-15-003](./CHANGELOG.md#e2026-08-15-003) |
-| v0.8 | 📋 planned | Sandbox、Tool Capability 与 Secret 安全 | — |
+| v0.7.3 | ✅ completed | 质量基线、行为合同与跨平台门禁 | [E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004) |
+| v0.7.4 | ✅ completed | Tool 隔离、UNKNOWN 与 Provider 异步传输 | [E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005) |
+| v0.7.5 | ✅ completed | Runtime 生命周期、SQLite durability 与恢复 | [E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006) |
+| v0.7.6 | ✅ completed | FastAPI/SSE 长稳与发布验证 | [E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007) |
+| v0.8 | 📋 planned | Sandbox、Tool Capability 与 Secret 安全（后置） | — |
 | v0.9 | 📋 planned | 分布式 Worker、Queue 与 Lease | — |
 | v0.10 | 📋 planned | 多租户、权限、预算和生产治理 | — |
 | v1.0 | 📋 planned | 稳定 Runtime Contract 与生产发布 | — |
@@ -130,6 +134,28 @@
 
 - [ADR-0011](./adr/0011-context-session-memory.md)：Context Window、Session 与 Scoped Long-term Memory 边界。
 
+## v0.7.x：Reliability / Hardening Train
+
+- **状态**：✅ completed
+- **基线版本**：v0.7.2
+- **目标**：不增加业务能力，把现有 Runtime 提升到可在单机环境长期、稳定、可恢复运行。
+
+### 完成范围
+
+- v0.7.3：Ruff、Mypy strict、coverage、跨平台 CI、Wheel 安装合同。
+- v0.7.4：同步 Tool 有界隔离、UNKNOWN、异步 Provider、协议校验和精确重试。
+- v0.7.5：shutdown/context manager、pause/resume、SQLite durability、checksum 和 Workflow 快照。
+- v0.7.6：FastAPI ownership/lifespan、SSE heartbeat/reconnect、stress/soak 和发布验证。
+
+### 发布约束
+
+- PR 通过 20 并发、core 90/80 覆盖率和 Wheel smoke。
+- Nightly 执行 100 并发、故障测试重复、30 分钟 soak 和性能基线。
+- v0.7.6 门禁未稳定前，不开始 v0.8。
+
+### 关联 ADR
+
+- [ADR-0012](./adr/0012-quality-gates.md) 至 [ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)。
 ## v0.8：Sandbox、Tool Capability 与 Secret 安全
 
 - **状态**：📋 planned
@@ -160,7 +186,7 @@
 
 ### 预计 ADR
 
-- `ADR-0012`：Sandbox、Tool Capability 与 Secret 安全边界。
+- `ADR-0017`：Sandbox、Tool Capability 与 Secret 安全边界。
 
 ## v0.9：分布式 Worker、Queue 与 Lease
 
@@ -194,7 +220,7 @@
 
 ### 预计 ADR
 
-- `ADR-0013`：Worker Queue、Lease 与分布式恢复模型。
+- `ADR-0018`：Worker Queue、Lease 与分布式恢复模型。
 
 ## v0.10：多租户、权限、预算和生产治理
 
@@ -228,7 +254,7 @@
 
 ### 预计 ADR
 
-- `ADR-0014`：多租户、权限、预算与审计模型。
+- `ADR-0019`：多租户、权限、预算与审计模型。
 
 ## v1.0：稳定 Runtime Contract 与生产发布
 

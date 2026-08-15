@@ -613,11 +613,14 @@ function renderArtifactInspector() {
 }
 function renderSqliteInspector() {
   const persistence = state.snapshot.persistence;
+  const reliability = state.snapshot.reliability || {};
+  const sqlite = reliability.sqlite || {};
   return `
+    <section class="detail-block"><span class="detail-label">RELIABILITY STATUS</span><div class="kv-grid">${kv("Run", reliability.run_health)}${kv("Runtime 接受请求", reliability.runtime_accepting ? "yes" : "no")}${kv("SQLite", sqlite.status)}${kv("UNKNOWN Tool", reliability.unknown_tool_executions ?? 0)}</div><p>${escapeHtml(reliability.guidance || "")}</p></section>
     <section class="detail-block"><span class="detail-label">PERSISTENCE SOURCE</span><pre class="json-view">${escapeHtml(persistence.database)}</pre></section>
-    <section class="detail-block"><span class="detail-label">SCHEMA VERSION</span><div class="kv-grid">${kv("Migration", persistence.schema_version)}${kv("事实来源", "SQLite")}</div></section>
+    <section class="detail-block"><span class="detail-label">SCHEMA VERSION</span><div class="kv-grid">${kv("Migration", persistence.schema_version)}${kv("Journal", sqlite.journal_mode)}${kv("事实来源", "SQLite")}</div></section>
     <section class="detail-block"><span class="detail-label">本次 RUN 相关记录</span><div class="kv-grid">${Object.entries(persistence.tables).map(([key, value]) => kv(key, value)).join("")}</div></section>
-    <section class="detail-block"><span class="detail-label">理解重点</span><p>Learning Console 不维护第二份运行状态。页面展示的 Run、Event、Step、ToolExecution、Approval 和 Checkpoint 都来自 Runtime 的持久化事实。</p></section>
+    <section class="detail-block"><span class="detail-label">????</span><p>Learning Console ???????????????? Run?Event?Step?ToolExecution?Approval ? Checkpoint ??? Runtime 接受请求???failed?cancelled ? UNKNOWN ??????????</p></section>
   `;
 }
 

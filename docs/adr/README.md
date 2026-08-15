@@ -26,6 +26,11 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
+| [ADR-0016](./0016-fastapi-runtime-ownership-sse.md) | Accepted | 2026-08-15 | FastAPI Runtime 所有权、Lifespan 与 SSE 长稳 | E2026-08-15-007 |
+| [ADR-0015](./0015-runtime-shutdown-sqlite-recovery.md) | Accepted | 2026-08-15 | Runtime Shutdown、SQLite Durability 与进程恢复 | E2026-08-15-006 |
+| [ADR-0014](./0014-provider-async-transport-retry.md) | Accepted | 2026-08-15 | Provider 异步传输、协议校验与重试 | E2026-08-15-005 |
+| [ADR-0013](./0013-tool-isolation-unknown-outcome.md) | Accepted | 2026-08-15 | 同步 Tool 隔离与 UNKNOWN Outcome | E2026-08-15-005 |
+| [ADR-0012](./0012-quality-gates.md) | Accepted | 2026-08-15 | 可靠性质量门禁与发布合同 | E2026-08-15-004 |
 | [ADR-0011](./0011-context-session-memory.md) | Accepted | 2026-08-15 | Context Window、Session 与 Scoped Long-term Memory 边界 | E2026-08-15-001 |
 | [ADR-0010](./0010-parent-child-run-delegation.md) | Accepted | 2026-08-14 | Parent/Child Run 与持久化多 Agent 委派模型 | E2026-08-14-007 |
 | [ADR-0009](./0009-learning-console.md) | Accepted | 2026-08-14 | Learning Console 作为 Runtime 外部教学 Adapter | E2026-08-15-003、E2026-08-15-002、E2026-08-14-006、E2026-08-14-005、E2026-08-14-004 |

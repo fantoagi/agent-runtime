@@ -5,7 +5,6 @@ from typing import Any
 
 from ..domain import RuntimeEvent
 
-
 EVENT_EXPLANATIONS: dict[str, dict[str, Any]] = {
     "run.created": {
         "title": "创建持久化 Run",

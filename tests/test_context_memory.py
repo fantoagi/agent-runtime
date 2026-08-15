@@ -167,7 +167,7 @@ async def test_memory_lifecycle_source_trace_metrics_and_eval(workspace: Path) -
     runtime.forget_memory(active.id)
     assert runtime.search_memory("Recovery", session_id=session.id) == []
 
-    kept = runtime.remember(
+    runtime.remember(
         "SQLite checkpoints support recovery.",
         scope="session",
         scope_id=session.id,

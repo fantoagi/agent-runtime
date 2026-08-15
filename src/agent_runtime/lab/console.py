@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import re
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -12,8 +11,10 @@ from ..orchestration import AggregationStrategy, ParallelWorkflow, SequentialWor
 from ..providers import (
     MockProvider,
     MockStreamingProvider,
+    ModelProvider,
     ModelResponse,
     ModelTokenDelta,
+    StreamingModelProvider,
     arithmetic_demo_responder,
 )
 from ..runtime import Runtime
@@ -94,6 +95,7 @@ class LearningConsole:
         return self._runtimes[scenario_id]
 
     def snapshot(self, run_id: str) -> dict[str, Any]:
+        runtime = self.runtime_for_run(run_id)
         selected = self.store.get_run(run_id)
         root_run_id = self.store.root_run_id(run_id)
         root = self.store.get_run(root_run_id)
@@ -150,16 +152,16 @@ class LearningConsole:
         decorated_events.sort(
             key=lambda item: (item["timestamp"], item["run_id"], item["local_sequence"])
         )
-        for timeline_sequence, event in enumerate(decorated_events, start=1):
-            event["timeline_sequence"] = timeline_sequence
+        for timeline_sequence, decorated in enumerate(decorated_events, start=1):
+            decorated["timeline_sequence"] = timeline_sequence
 
         session = self.store.session_for_run(root_run_id)
         session_runs = self.store.session_runs(session.id) if session else []
         memory_ids = list(root.metadata.get("learning_memory_ids", []))
-        for event in decorated_events:
-            memory_ids.extend(event["payload"].get("memory_ids", []))
-            if event["payload"].get("memory_id"):
-                memory_ids.append(event["payload"]["memory_id"])
+        for decorated in decorated_events:
+            memory_ids.extend(decorated["payload"].get("memory_ids", []))
+            if decorated["payload"].get("memory_id"):
+                memory_ids.append(decorated["payload"]["memory_id"])
         memories = []
         for memory_id in dict.fromkeys(memory_ids):
             try:
@@ -225,6 +227,25 @@ class LearningConsole:
             "context_builds": context_builds,
             "artifacts": artifacts,
             "acceptance": acceptance,
+            "reliability": {
+                "runtime_accepting": runtime.is_accepting,
+                "sqlite": self.store.health_check(),
+                "run_health": (
+                    "failed"
+                    if root.status.value == "failed"
+                    else "needs_attention"
+                    if any(item.status.value == "unknown" for item in executions)
+                    else "healthy"
+                ),
+                "unknown_tool_executions": sum(
+                    item.status.value == "unknown" for item in executions
+                ),
+                "guidance": (
+                    "UNKNOWN 表示副作用结果无法确认，必须人工核对后再恢复。"
+                    if any(item.status.value == "unknown" for item in executions)
+                    else "页面状态来自 SQLite 持久化事实；SSE 断线后可按 sequence 恢复。"
+                ),
+            },
             "persistence": {
                 "database": str(self.store.path),
                 "schema_version": self.store.schema_version,
@@ -249,6 +270,7 @@ class LearningConsole:
         for scenario in self.scenarios.list():
             tools = ToolRegistry()
             agent_definitions: list[AgentDefinition] = []
+            provider: ModelProvider | StreamingModelProvider
             config = replace(
                 self.base_runtime.config,
                 metadata={

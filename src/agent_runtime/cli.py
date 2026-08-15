@@ -132,7 +132,8 @@ async def async_main(arguments: argparse.Namespace) -> int:
                 await asyncio.sleep(0.8)
                 await asyncio.to_thread(webbrowser.open, url)
 
-            asyncio.create_task(open_browser())
+            browser_task = asyncio.create_task(open_browser())
+            del browser_task
         print(f"Learning Console: {url}")
         server = uvicorn.Server(
             uvicorn.Config(app, host=arguments.host, port=arguments.port, log_level="info")
@@ -226,7 +227,7 @@ async def async_main(arguments: argparse.Namespace) -> int:
         return 0
 
     if arguments.command == "resolve-unknown":
-        execution = runtime.resolve_unknown_tool(
+        unknown_execution = runtime.resolve_unknown_tool(
             arguments.execution_id,
             arguments.outcome,
             result_content=arguments.result,
@@ -234,11 +235,11 @@ async def async_main(arguments: argparse.Namespace) -> int:
         )
         _print(
             {
-                "id": execution.id,
-                "run_id": execution.run_id,
-                "status": execution.status,
-                "result": execution.result_content,
-                "error": execution.error,
+                "id": unknown_execution.id,
+                "run_id": unknown_execution.run_id,
+                "status": unknown_execution.status,
+                "result": unknown_execution.result_content,
+                "error": unknown_execution.error,
             }
         )
         return 0

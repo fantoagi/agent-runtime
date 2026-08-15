@@ -2,18 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .domain import AgentDefinition, AgentRun, RunRelationType, RunStatus, TERMINAL_STATUSES
+from .domain import TERMINAL_STATUSES, AgentDefinition, AgentRun, RunRelationType, RunStatus
+
+if TYPE_CHECKING:
+    from .runtime import Runtime
 
 
 class AgentRegistry:
     """In-memory catalog of Agent definitions that may receive delegated work."""
 
-    def __init__(self, validator=None) -> None:
+    def __init__(
+        self, validator: Callable[[AgentDefinition], object] | None = None
+    ) -> None:
         self._agents: dict[str, AgentDefinition] = {}
         self._validator = validator
 
@@ -84,25 +89,38 @@ class SequentialWorkflow:
 
     async def run(
         self,
-        runtime,
+        runtime: Runtime,
         input_text: str,
         *,
         metadata: dict[str, Any] | None = None,
         parent_run_id: str | None = None,
     ) -> WorkflowExecution:
+        steps = tuple(_coerce_step(step) for step in self.steps)
         parent = runtime.begin_workflow(
             self.name,
             input_text,
             metadata=metadata,
             parent_run_id=parent_run_id,
             workflow_type="sequential",
+            workflow_definition={
+                "name": self.name,
+                "type": "sequential",
+                "steps": [
+                    {
+                        "agent_name": step.agent_name,
+                        "name": step.name,
+                        "input_prefix": step.input_prefix,
+                    }
+                    for step in steps
+                ],
+            },
         )
         if parent.status in TERMINAL_STATUSES:
             return WorkflowExecution(parent, runtime.store.child_runs(parent.id))
         children: list[AgentRun] = []
         current_input = input_text
         try:
-            for index, step in enumerate(self.steps):
+            for index, step in enumerate(steps):
                 if runtime.store.get_run(parent.id).status is RunStatus.CANCELLED:
                     break
                 child = await runtime.delegate(
@@ -142,7 +160,7 @@ class SequentialWorkflow:
                 children,
             )
 
-    def start(self, runtime, input_text: str, *, metadata: dict[str, Any] | None = None) -> AgentRun:
+    def start(self, runtime: Runtime, input_text: str, *, metadata: dict[str, Any] | None = None) -> AgentRun:
         parent = runtime.create_workflow_run(
             self.name, input_text, metadata=metadata, workflow_type="sequential"
         )
@@ -177,18 +195,34 @@ class ParallelWorkflow:
 
     async def run(
         self,
-        runtime,
+        runtime: Runtime,
         input_text: str,
         *,
         metadata: dict[str, Any] | None = None,
         parent_run_id: str | None = None,
     ) -> WorkflowExecution:
+        steps = tuple(_coerce_step(step) for step in self.steps)
         parent = runtime.begin_workflow(
             self.name,
             input_text,
             metadata=metadata,
             parent_run_id=parent_run_id,
             workflow_type="parallel",
+            workflow_definition={
+                "name": self.name,
+                "type": "parallel",
+                "aggregation": self.aggregation.value,
+                "max_concurrency": self.max_concurrency,
+                "timeout_seconds": self.timeout_seconds,
+                "steps": [
+                    {
+                        "agent_name": step.agent_name,
+                        "name": step.name,
+                        "input_prefix": step.input_prefix,
+                    }
+                    for step in steps
+                ],
+            },
         )
         if parent.status in TERMINAL_STATUSES:
             return WorkflowExecution(parent, runtime.store.child_runs(parent.id))
@@ -210,7 +244,7 @@ class ParallelWorkflow:
                     },
                 )
 
-        tasks = [asyncio.create_task(execute(index, step)) for index, step in enumerate(self.steps)]
+        tasks = [asyncio.create_task(execute(index, step)) for index, step in enumerate(steps)]
         try:
             if self.aggregation is AggregationStrategy.FIRST_SUCCESS:
                 children = await self._first_success(runtime, parent.id, tasks)
@@ -250,8 +284,13 @@ class ParallelWorkflow:
                 runtime.store.child_runs(parent.id),
             )
 
-    async def _first_success(self, runtime, parent_run_id: str, tasks: list[asyncio.Task]) -> list[AgentRun]:
-        pending: set[asyncio.Task] = set(tasks)
+    async def _first_success(
+        self,
+        runtime: Runtime,
+        parent_run_id: str,
+        tasks: list[asyncio.Task[AgentRun]],
+    ) -> list[AgentRun]:
+        pending: set[asyncio.Task[AgentRun]] = set(tasks)
         completed: list[AgentRun] = []
         deadline = None
         if self.timeout_seconds is not None:
@@ -276,7 +315,7 @@ class ParallelWorkflow:
                     return runtime.store.child_runs(parent_run_id)
         return completed
 
-    def _finish(self, runtime, parent_run_id: str, children: list[AgentRun]) -> WorkflowExecution:
+    def _finish(self, runtime: Runtime, parent_run_id: str, children: list[AgentRun]) -> WorkflowExecution:
         children = runtime.store.child_runs(parent_run_id)
         successes = [child for child in children if child.status is RunStatus.COMPLETED]
         failures = [child for child in children if child.status is not RunStatus.COMPLETED]
@@ -307,7 +346,7 @@ class ParallelWorkflow:
             parent = runtime.finish_workflow(parent_run_id, result=output)
         return WorkflowExecution(parent, children)
 
-    def start(self, runtime, input_text: str, *, metadata: dict[str, Any] | None = None) -> AgentRun:
+    def start(self, runtime: Runtime, input_text: str, *, metadata: dict[str, Any] | None = None) -> AgentRun:
         parent = runtime.create_workflow_run(
             self.name, input_text, metadata=metadata, workflow_type="parallel"
         )

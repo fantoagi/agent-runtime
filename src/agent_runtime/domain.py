@@ -544,3 +544,62 @@ class ToolValidationError(ToolExecutionError):
 
 class RunLimitExceeded(RuntimeErrorBase):
     pass
+
+
+class RuntimeLifecycleError(RuntimeErrorBase):
+    """The runtime cannot accept an operation in its current lifecycle state."""
+
+
+class RuntimeClosedError(RuntimeLifecycleError):
+    """The runtime or one of its owned resources has already been closed."""
+
+
+class ProviderError(RuntimeErrorBase):
+    """Base class for model provider failures with stable retry semantics."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+class ProviderTransportError(ProviderError):
+    """A retryable network transport failure."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=True)
+
+
+class ProviderHTTPError(ProviderError):
+    """An HTTP failure returned by a model provider."""
+
+    def __init__(
+        self,
+        status_code: int,
+        message: str,
+        *,
+        retryable: bool,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(message, retryable=retryable)
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
+
+
+class ProviderProtocolError(ProviderError):
+    """The provider returned a malformed or incomplete response."""
+
+
+class StoreError(RuntimeErrorBase):
+    """Base class for persistent store failures."""
+
+
+class StoreBusyError(StoreError):
+    """SQLite remained locked after the configured retry budget."""
+
+
+class StoreCorruptionError(StoreError):
+    """SQLite integrity validation failed."""
+
+
+class MigrationError(StoreError):
+    """A schema migration is missing, changed, or could not be applied."""

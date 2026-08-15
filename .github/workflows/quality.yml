@@ -7,11 +7,28 @@ on:
       - master
       - main
 
+permissions:
+  contents: read
+
 jobs:
-  docs-and-tests:
-    runs-on: ubuntu-latest
+  quality:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.13"
     env:
       BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,22 +38,44 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python }}
+          cache: pip
 
-      - name: Install project and test dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install pytest pytest-asyncio
+      - name: Install project and quality dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[api,quality]"
 
       - name: Validate evolution documentation
-        run: |
-          if [ -z "$BASE_REF" ] || [[ "$BASE_REF" =~ ^0+$ ]]; then
-            echo "Bootstrapping the repository: commit hashes will be backfilled after the first commit."
-            python scripts/check_docs.py
-          else
-            python scripts/check_docs.py --require-commit-hash --base-ref "$BASE_REF"
-          fi
+        run: python scripts/check_docs.py --require-commit-hash --base-ref "$env:BASE_REF"
+        if: runner.os == 'Windows'
 
-      - name: Run tests
-        run: pytest
+      - name: Validate evolution documentation
+        run: python scripts/check_docs.py --require-commit-hash --base-ref "$BASE_REF"
+        if: runner.os != 'Windows'
+
+      - name: Ruff
+        run: python -m ruff check src tests scripts
+
+      - name: Mypy strict
+        run: python -m mypy src/agent_runtime
+
+      - name: Unit, integration, concurrency, and coverage gates
+        run: >-
+          python -m pytest
+          --cov=agent_runtime
+          --cov-branch
+          --cov-report=term-missing
+          --cov-report=json:coverage.json
+          -p no:cacheprovider
+
+      - name: Enforce core line and branch coverage
+        run: python scripts/check_coverage.py coverage.json
+
+      - name: Fast 20-run concurrency gate
+        run: python scripts/run_reliability.py --stress-runs 20 --concurrency 20
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Verify clean wheel installation and CLI/API/SSE smokes
+        if: matrix.python == '3.13'
+        run: python scripts/verify_distribution.py dist/agent_runtime-0.7.6-py3-none-any.whl

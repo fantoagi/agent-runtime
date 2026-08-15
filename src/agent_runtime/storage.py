@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import random
 import sqlite3
+import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from threading import RLock
-from typing import Any, Callable
+from typing import Any
 
 from .domain import (
     AgentRun,
@@ -15,13 +19,18 @@ from .domain import (
     MemoryScope,
     MemorySearchResult,
     Message,
+    MigrationError,
     RunNotFound,
     RunRelation,
     RunRelationType,
+    RuntimeClosedError,
     RuntimeEvent,
     Session,
     Step,
     StepStatus,
+    StoreBusyError,
+    StoreCorruptionError,
+    StoreError,
     ToolCall,
     ToolExecution,
     ToolExecutionStatus,
@@ -182,25 +191,97 @@ MIGRATIONS: tuple[Migration, ...] = (
         );
         """,
     ),
+    (
+        5,
+        "runtime_reliability_metadata",
+        """
+        CREATE TABLE IF NOT EXISTS workflow_snapshots (
+            run_id TEXT PRIMARY KEY REFERENCES runs(id),
+            definition_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_tool_executions_running
+            ON tool_executions(run_id, status, side_effecting);
+        """,
+    ),
 )
 
 
 class SQLiteStore:
-    """Durable SQLite store with explicit schema migrations and atomic write bundles."""
+    """Durable SQLite store with explicit migrations and bounded lock waits."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        busy_timeout_seconds: float = 5.0,
+        synchronous: str = "FULL",
+        lock_retry_attempts: int = 3,
+    ) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(self.path, check_same_thread=False)
+        self.busy_timeout_seconds = busy_timeout_seconds
+        self.lock_retry_attempts = lock_retry_attempts
+        normalized_synchronous = synchronous.upper()
+        if normalized_synchronous not in {"OFF", "NORMAL", "FULL", "EXTRA"}:
+            raise ValueError("synchronous must be OFF, NORMAL, FULL, or EXTRA.")
+        self._connection = sqlite3.connect(
+            self.path,
+            check_same_thread=False,
+            timeout=busy_timeout_seconds,
+        )
         self._connection.row_factory = sqlite3.Row
         self._lock = RLock()
-        self._connection.execute("PRAGMA journal_mode=WAL")
-        self._connection.execute("PRAGMA foreign_keys=ON")
+        self._closed = False
+        try:
+            self._connection.execute("PRAGMA journal_mode=WAL")
+            self._connection.execute("PRAGMA foreign_keys=ON")
+            self._connection.execute(
+                f"PRAGMA busy_timeout={int(busy_timeout_seconds * 1000)}"
+            )
+            self._connection.execute(f"PRAGMA synchronous={normalized_synchronous}")
+        except sqlite3.DatabaseError as error:
+            self._connection.close()
+            self._closed = True
+            message = str(error).lower()
+            if "not a database" in message or "malformed" in message:
+                raise StoreCorruptionError(
+                    f"SQLite initialization detected a corrupt database: {error}"
+                ) from error
+            raise StoreError(f"SQLite initialization failed: {error}") from error
+        self._quick_check()
         self._migrate()
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeClosedError(f"SQLite store is closed: {self.path}")
+
+    def _quick_check(self) -> None:
+        try:
+            row = self._connection.execute("PRAGMA quick_check").fetchone()
+        except sqlite3.DatabaseError as error:
+            raise StoreCorruptionError(f"SQLite quick_check failed: {error}") from error
+        if row is None or str(row[0]).lower() != "ok":
+            detail = row[0] if row is not None else "no result"
+            raise StoreCorruptionError(f"SQLite quick_check reported: {detail}")
+
+    def health_check(self) -> dict[str, Any]:
+        with self._lock:
+            self._ensure_open()
+            self._connection.execute("SELECT 1").fetchone()
+            self._quick_check()
+            return {
+                "status": "ok",
+                "schema_version": self.schema_version,
+                "journal_mode": str(
+                    self._connection.execute("PRAGMA journal_mode").fetchone()[0]
+                ).lower(),
+            }
 
     @property
     def schema_version(self) -> int:
         with self._lock:
+            self._ensure_open()
             row = self._connection.execute(
                 "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
             ).fetchone()
@@ -208,25 +289,50 @@ class SQLiteStore:
 
     def close(self) -> None:
         with self._lock:
-            self._connection.close()
+            if self._closed:
+                return
+            try:
+                self._connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                self._connection.close()
+                self._closed = True
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _migrate(self) -> None:
-        with self._lock, self._connection:
+        with self._lock:
             self._connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schema_migrations (
                     version INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
-                    applied_at TEXT NOT NULL
+                    applied_at TEXT NOT NULL,
+                    checksum TEXT
                 )
                 """
             )
-            applied = {
-                int(row["version"])
+            columns = {
+                row["name"]
                 for row in self._connection.execute(
-                    "SELECT version FROM schema_migrations"
+                    "PRAGMA table_info(schema_migrations)"
                 ).fetchall()
             }
+            if "checksum" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE schema_migrations ADD COLUMN checksum TEXT"
+                )
+            expected = {
+                version: (name, _migration_checksum(version, name, sql))
+                for version, name, sql in MIGRATIONS
+            }
+            applied_rows = self._connection.execute(
+                "SELECT version, name, checksum FROM schema_migrations"
+            ).fetchall()
+            applied = {int(row["version"]): row for row in applied_rows}
             existing_tables = {
                 row["name"]
                 for row in self._connection.execute(
@@ -234,19 +340,52 @@ class SQLiteStore:
                 ).fetchall()
             }
             if "runs" in existing_tables and 1 not in applied:
+                name, checksum = expected[1]
                 self._connection.execute(
-                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
-                    (1, "initial_runtime_schema", utc_now().isoformat()),
+                    "INSERT INTO schema_migrations(version, name, applied_at, checksum) "
+                    "VALUES (?, ?, ?, ?)",
+                    (1, name, utc_now().isoformat(), checksum),
                 )
-                applied.add(1)
+                applied[1] = self._connection.execute(
+                    "SELECT version, name, checksum FROM schema_migrations WHERE version=1"
+                ).fetchone()
+            for version, row in applied.items():
+                if version not in expected:
+                    raise MigrationError(f"Unknown applied migration version: {version}.")
+                expected_name, checksum = expected[version]
+                if row["name"] != expected_name:
+                    raise MigrationError(
+                        f"Migration {version} name changed from {row['name']!r} "
+                        f"to {expected_name!r}."
+                    )
+                if row["checksum"] is None:
+                    self._connection.execute(
+                        "UPDATE schema_migrations SET checksum=? WHERE version=?",
+                        (checksum, version),
+                    )
+                elif row["checksum"] != checksum:
+                    raise MigrationError(f"Migration {version} checksum mismatch.")
             for version, name, sql in MIGRATIONS:
                 if version in applied:
                     continue
-                self._connection.executescript(sql)
-                self._connection.execute(
-                    "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
-                    (version, name, utc_now().isoformat()),
+                checksum = expected[version][1]
+                applied_at = utc_now().isoformat().replace("'", "''")
+                escaped_name = name.replace("'", "''")
+                script = (
+                    "BEGIN IMMEDIATE;\n"
+                    + sql
+                    + "\nINSERT INTO schema_migrations(version, name, applied_at, checksum) "
+                    + f"VALUES ({version}, '{escaped_name}', '{applied_at}', '{checksum}');\n"
+                    + "COMMIT;"
                 )
+                try:
+                    self._connection.executescript(script)
+                except sqlite3.DatabaseError as error:
+                    if self._connection.in_transaction:
+                        self._connection.rollback()
+                    raise MigrationError(
+                        f"Failed to apply migration {version} ({name}): {error}"
+                    ) from error
 
         self._ensure_approval_columns()
 
@@ -714,6 +853,36 @@ class SQLiteStore:
             ).fetchone()
         return int(row["count"])
 
+    def save_workflow_snapshot(self, run_id: str, definition: dict[str, Any]) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO workflow_snapshots(run_id, definition_json, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET definition_json=excluded.definition_json
+                """,
+                (run_id, self._dump(definition), utc_now().isoformat()),
+            )
+
+    def workflow_snapshot(self, run_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT definition_json FROM workflow_snapshots WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+        return self._load(row["definition_json"]) if row is not None else None
+
+    def incomplete_runs(self) -> list[AgentRun]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM runs
+                WHERE status IN ('created', 'running', 'waiting_for_approval', 'paused')
+                ORDER BY created_at
+                """
+            ).fetchall()
+        return [self._run_from_row(row) for row in rows]
+
     def save_run(self, run: AgentRun) -> None:
         with self._lock, self._connection:
             self._update_run_locked(run)
@@ -758,8 +927,27 @@ class SQLiteStore:
         event_type: str,
         payload: dict[str, Any] | None = None,
     ) -> RuntimeEvent:
-        with self._lock, self._connection:
-            return self._append_event_locked(run_id, event_type, payload)
+        for attempt in range(self.lock_retry_attempts + 1):
+            with self._lock:
+                self._ensure_open()
+                try:
+                    self._connection.execute("BEGIN IMMEDIATE")
+                    event = self._append_event_locked(run_id, event_type, payload)
+                    self._connection.commit()
+                    return event
+                except sqlite3.OperationalError as error:
+                    self._connection.rollback()
+                    if "locked" not in str(error).lower() and "busy" not in str(error).lower():
+                        raise
+                except BaseException:
+                    self._connection.rollback()
+                    raise
+            if attempt >= self.lock_retry_attempts:
+                break
+            time.sleep(0.01 * (2**attempt) + random.uniform(0.0, 0.01))
+        raise StoreBusyError(
+            f"SQLite remained busy while appending event for run {run_id}."
+        )
 
     def _append_event_locked(
         self,
@@ -1465,6 +1653,11 @@ class SQLiteStore:
             else None,
             kind=row["kind"] if "kind" in keys else "tool",
         )
+
+
+def _migration_checksum(version: int, name: str, sql: str) -> str:
+    canonical = f"{version}:{name}:{sql.strip()}".encode()
+    return hashlib.sha256(canonical).hexdigest()
 
 
 class ArtifactStore:

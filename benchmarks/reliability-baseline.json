@@ -1,0 +1,7 @@
+{
+  "runner": "github-actions-ubuntu-latest",
+  "stress_runs": 100,
+  "stress_runs_per_second": 20.0,
+  "recorded_at": "2026-08-15",
+  "note": "Conservative initial v0.7.6 baseline; update only with reviewed fixed-runner evidence."
+}

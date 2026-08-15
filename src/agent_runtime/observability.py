@@ -358,7 +358,8 @@ class ObservabilityService:
         if kind == "model":
             start_type = "model.requested"
             terminal_types = {"model.completed"}
-            key = lambda event: str(event.payload.get("step", event.sequence))
+            def key(event: RuntimeEvent) -> str:
+                return str(event.payload.get("step", event.sequence))
         elif kind == "tool":
             start_type = "tool.requested"
             terminal_types = {
@@ -368,19 +369,21 @@ class ObservabilityService:
                 "tool.cancelled",
                 "tool.outcome_unknown",
             }
-            key = lambda event: str(
-                event.payload.get("tool_execution_id")
-                or event.payload.get("tool_call_id")
-                or event.sequence
-            )
+            def key(event: RuntimeEvent) -> str:
+                return str(
+                    event.payload.get("tool_execution_id")
+                    or event.payload.get("tool_call_id")
+                    or event.sequence
+                )
         else:
             start_type = "approval.requested"
             terminal_types = {"approval.resolved"}
-            key = lambda event: str(
-                event.payload.get("approval_id")
-                or event.payload.get("tool_execution_id")
-                or event.sequence
-            )
+            def key(event: RuntimeEvent) -> str:
+                return str(
+                    event.payload.get("approval_id")
+                    or event.payload.get("tool_execution_id")
+                    or event.sequence
+                )
 
         active: dict[str, RuntimeEvent] = {}
         spans: list[TraceSpan] = []

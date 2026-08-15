@@ -1,8 +1,8 @@
 # Agent Runtime 当前架构
 
 > 最近更新：2026-08-15
-> 关联记录：[E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001)
-> 关联决策：[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)、[ADR-0009](./adr/0009-learning-console.md)、[ADR-0008](./adr/0008-observability-evals.md)、[ADR-0007](./adr/0007-model-token-streaming.md)、[ADR-0006](./adr/0006-fastapi-sse-adapter.md)、[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
+> 关联记录：[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
+> 关联决策：[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
 
 ## 1. 系统目标和边界
 
@@ -359,6 +359,26 @@ Root 事件实时通知复用 `/runs/{run_id}/events/stream`。因为 Child Run 
 > 最近更新：2026-08-15
 > 关联记录：[E2026-08-15-003](./CHANGELOG.md#e2026-08-15-003)
 > 关联决策：[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)、[ADR-0009](./adr/0009-learning-console.md)
+## 9.5 Reliability、生命周期与发布门禁
+
+- `shutdown(timeout_seconds=30, cancel_running=False)` 先停止接收新工作，再排空任务；超时后协作取消，不能确认的副作用 Tool 保持 `UNKNOWN`。
+- `async with Runtime(...)` 自动执行相同关闭流程，重复关闭幂等。
+- 同步 Tool 进入 Runtime 独享有界线程池；Provider 复用 `httpx.AsyncClient` 并在关闭时释放连接池。
+- SQLite 使用 WAL、`synchronous=FULL`、`busy_timeout`、`quick_check` 和事务内 Event sequence；migration 带 checksum，只向前升级。
+- Workflow 创建时保存规范化定义快照；FastAPI 通过 `shutdown_runtime` 明确所有权；SSE heartbeat 不写 Event Log。
+
+```mermaid
+flowchart TD
+    Accept["Accepting"] --> Closing["Closing: reject new work"]
+    Closing --> Drain["Bounded task drain"]
+    Drain -->|timeout| Cancel["Cooperative cancel"]
+    Drain --> Close["Close Provider / Tool Pool / Store"]
+    Cancel --> Persist["Persist PAUSED / UNKNOWN"]
+    Persist --> Close
+    Close --> Closed["Closed (idempotent)"]
+```
+
+PR 执行静态检查、126 项测试、覆盖率、20 并发和 Wheel smoke；Nightly 执行 100 并发、故障测试重复、30 分钟 soak 和性能检查。
 ## 10. 安全边界
 
 当前默认安全策略：

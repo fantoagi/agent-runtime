@@ -21,10 +21,10 @@ from agent_runtime.domain import (
     utc_now,
 )
 from agent_runtime.providers import (
-    ModelResponse,
-    ModelTokenDelta,
     MockProvider,
     MockStreamingProvider,
+    ModelResponse,
+    ModelTokenDelta,
     ToolCallDelta,
 )
 from agent_runtime.runtime import Runtime, RuntimeConfig
@@ -425,7 +425,7 @@ def test_schema_migrates_existing_v01_database(workspace: Path) -> None:
     connection.close()
 
     store = SQLiteStore(database)
-    assert store.schema_version == 4
+    assert store.schema_version == 5
     columns = {
         row["name"]
         for row in store._connection.execute("PRAGMA table_info(approvals)").fetchall()

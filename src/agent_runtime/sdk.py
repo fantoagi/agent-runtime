@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .domain import AgentDefinition, ModelConfig, ToolDefinition
-from .providers import MockProvider, ModelResponse, arithmetic_demo_responder
+from .domain import AgentDefinition, Message, ModelConfig, ToolDefinition
 from .orchestration import SequentialWorkflow
+from .providers import MockProvider, ModelResponse, arithmetic_demo_responder
 from .runtime import Runtime, RuntimeConfig
 from .tools import ToolRegistry, register_builtin_tools
 
@@ -52,7 +52,11 @@ def create_multi_agent_demo_runtime(
     workspace_path = Path(workspace).resolve()
     runtime_dir = Path(state_dir or workspace_path / ".agent-runtime").resolve()
 
-    def responder(messages, tools, config):
+    def responder(
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        config: ModelConfig,
+    ) -> ModelResponse:
         del tools, config
         role = messages[0].content or "agent"
         value = messages[-1].content or ""
@@ -103,7 +107,11 @@ def create_memory_demo_runtime(
     workspace_path = Path(workspace).resolve()
     runtime_dir = Path(state_dir or workspace_path / ".agent-runtime").resolve()
 
-    def responder(messages, tools, config):
+    def responder(
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        config: ModelConfig,
+    ) -> ModelResponse:
         del tools, config
         memory = next(
             (

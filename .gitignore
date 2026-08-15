@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
@@ -8,3 +8,11 @@
 .runtime-test-data/
 .test-tmp/
 pytest-cache-files-*/
+
+.coverage
+coverage.json
+coverage.xml
+htmlcov/
+dist/
+build/
+reliability-result.json

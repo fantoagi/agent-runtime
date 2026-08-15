@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
+import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal
+from typing import Any, Literal, cast
 
 from .context import ContextBuilder, ContextBuildResult
 from .domain import (
+    TERMINAL_STATUSES,
     AgentDefinition,
     AgentRun,
     Approval,
@@ -17,12 +21,14 @@ from .domain import (
     MemoryScope,
     MemorySearchResult,
     Message,
+    ProviderError,
+    ProviderHTTPError,
     RunLimitExceeded,
     RunRelation,
     RunRelationType,
     RunStatus,
+    RuntimeClosedError,
     Session,
-    TERMINAL_STATUSES,
     Step,
     StepStatus,
     ToolCall,
@@ -54,7 +60,14 @@ class RuntimeConfig:
     run_timeout_seconds: float = 300.0
     model_timeout_seconds: float = 90.0
     event_poll_interval_seconds: float = 0.05
+    sse_heartbeat_seconds: float = 15.0
     max_model_retries: int = 2
+    shutdown_timeout_seconds: float = 30.0
+    max_sync_tool_workers: int = 8
+    max_pending_sync_tools: int = 32
+    sqlite_busy_timeout_seconds: float = 5.0
+    sqlite_synchronous: str = "FULL"
+    sqlite_lock_retry_attempts: int = 3
     context_token_budget: int = 4096
     context_recent_groups: int = 4
     context_summary_max_chars: int = 1000
@@ -72,6 +85,14 @@ class RuntimeConfig:
         ).resolve()
         if self.context_token_budget < 64:
             raise ValueError("context_token_budget must be at least 64.")
+        if self.max_sync_tool_workers < 1:
+            raise ValueError("max_sync_tool_workers must be at least 1.")
+        if self.max_pending_sync_tools < self.max_sync_tool_workers:
+            raise ValueError(
+                "max_pending_sync_tools must be at least max_sync_tool_workers."
+            )
+        if self.sqlite_busy_timeout_seconds < 0:
+            raise ValueError("sqlite_busy_timeout_seconds must not be negative.")
         if self.memory_search_limit < 0:
             raise ValueError("memory_search_limit must not be negative.")
         if self.large_tool_result_chars < 128:
@@ -90,8 +111,19 @@ class Runtime:
         self.config = config
         self.provider = provider
         self.tools = tools
-        self.store = store or SQLiteStore(config.database_path)
-        self.memory: MemoryStore = memory_store or self.store
+        self.tools.configure_execution(
+            max_sync_workers=config.max_sync_tool_workers,
+            max_pending_sync_tools=config.max_pending_sync_tools,
+        )
+        self._owns_store = store is None
+        self.store = store or SQLiteStore(
+            config.database_path,
+            busy_timeout_seconds=config.sqlite_busy_timeout_seconds,
+            synchronous=config.sqlite_synchronous,
+            lock_retry_attempts=config.sqlite_lock_retry_attempts,
+        )
+        self.memory = cast(MemoryStore, memory_store or self.store)
+        assert config.artifact_path is not None
         self.artifacts = ArtifactStore(config.artifact_path)
         self.context_builder = ContextBuilder(
             config.context_token_budget,
@@ -104,6 +136,89 @@ class Runtime:
         )
         self._tasks: dict[str, asyncio.Task[AgentRun]] = {}
         self._cancellation_tokens: dict[str, CancellationToken] = {}
+        self._closing = False
+        self._closed = False
+        self._shutdown_run_ids: set[str] = set()
+        self._pause_run_ids: set[str] = set()
+        self._reconcile_incomplete_runs()
+
+    @property
+    def is_accepting(self) -> bool:
+        return not self._closing and not self._closed
+
+    async def __aenter__(self) -> Runtime:
+        if self._closed:
+            raise RuntimeClosedError("Runtime is already closed.")
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        del exc_type, exc, traceback
+        await self.shutdown()
+
+    def _ensure_accepting(self) -> None:
+        if not self.is_accepting:
+            raise RuntimeClosedError("Runtime is shutting down or already closed.")
+
+    def _reconcile_incomplete_runs(self) -> None:
+        for run in self.store.incomplete_runs():
+            if run.status is not RunStatus.RUNNING:
+                continue
+            recovered = self.store.mark_running_tool_executions_unknown(run.id)
+            unknown = [item for item in recovered if item.status is ToolExecutionStatus.UNKNOWN]
+            if unknown:
+                run.transition_to(RunStatus.PAUSED)
+                self.store.save_run_with_event(
+                    run,
+                    "run.paused",
+                    {
+                        "reason": "startup_reconciliation",
+                        "tool_execution_ids": [item.id for item in unknown],
+                    },
+                )
+
+    async def shutdown(
+        self,
+        timeout_seconds: float | None = None,
+        cancel_running: bool = False,
+    ) -> None:
+        if self._closed:
+            return
+        self._closing = True
+        timeout = self.config.shutdown_timeout_seconds if timeout_seconds is None else timeout_seconds
+        deadline = time.monotonic() + max(0.0, timeout)
+        tasks = {run_id: task for run_id, task in self._tasks.items() if not task.done()}
+        if cancel_running:
+            for run_id, task in tasks.items():
+                self._shutdown_run_ids.add(run_id)
+                token = self._cancellation_tokens.get(run_id)
+                if token is not None:
+                    token.cancel()
+                task.cancel()
+        if tasks:
+            done, pending = await asyncio.wait(tasks.values(), timeout=max(0.0, timeout))
+            del done
+            if pending:
+                for run_id, task in tasks.items():
+                    if task not in pending:
+                        continue
+                    self._shutdown_run_ids.add(run_id)
+                    token = self._cancellation_tokens.get(run_id)
+                    if token is not None:
+                        token.cancel()
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+        close_provider = getattr(self.provider, "aclose", None)
+        if callable(close_provider):
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                await asyncio.wait_for(close_provider(), timeout=remaining)
+            except TimeoutError:
+                pass
+        remaining = max(0.0, deadline - time.monotonic())
+        await self.tools.aclose(timeout_seconds=remaining)
+        if self._owns_store:
+            self.store.close()
+        self._closed = True
 
     def register_agent(self, agent: AgentDefinition) -> None:
         self.agent_registry.register(agent)
@@ -235,6 +350,7 @@ class Runtime:
         *,
         session_id: str | None = None,
     ) -> AgentRun:
+        self._ensure_accepting()
         definition = self._resolve_agent(agent)
         run_metadata = {**self.config.metadata, **(metadata or {})}
         session_id = session_id or run_metadata.get("session_id")
@@ -269,7 +385,9 @@ class Runtime:
         *,
         metadata: dict[str, Any] | None = None,
         workflow_type: str,
+        workflow_definition: dict[str, Any] | None = None,
     ) -> AgentRun:
+        self._ensure_accepting()
         run_metadata = {**self.config.metadata, **(metadata or {})}
         run_metadata.update(
             {
@@ -300,6 +418,8 @@ class Runtime:
                 else None
             ),
         )
+        if workflow_definition is not None:
+            self.store.save_workflow_snapshot(run.id, workflow_definition)
         return run
 
     def begin_workflow(
@@ -310,14 +430,22 @@ class Runtime:
         metadata: dict[str, Any] | None = None,
         parent_run_id: str | None = None,
         workflow_type: str,
+        workflow_definition: dict[str, Any] | None = None,
     ) -> AgentRun:
+        self._ensure_accepting()
         run = (
             self.store.get_run(parent_run_id)
             if parent_run_id is not None
             else self.create_workflow_run(
-                workflow_name, input_text, metadata=metadata, workflow_type=workflow_type
+                workflow_name,
+                input_text,
+                metadata=metadata,
+                workflow_type=workflow_type,
+                workflow_definition=workflow_definition,
             )
         )
+        if workflow_definition is not None:
+            self.store.save_workflow_snapshot(run.id, workflow_definition)
         if run.status is RunStatus.CREATED:
             run.transition_to(RunStatus.RUNNING)
             self.store.save_run_with_event(
@@ -517,13 +645,28 @@ class Runtime:
         self.track_task(run.id, asyncio.create_task(self._execute(run.id)))
         return run
 
-    async def wait(self, run_id: str) -> AgentRun:
-        task = self._tasks.get(run_id)
-        if task is not None:
-            return await task
-        return self.store.get_run(run_id)
+    async def wait(
+        self, run_id: str, timeout_seconds: float | None = None
+    ) -> AgentRun:
+        async def wait_persisted() -> AgentRun:
+            task = self._tasks.get(run_id)
+            if task is not None:
+                return await asyncio.shield(task)
+            while True:
+                run = self.store.get_run(run_id)
+                if run.status in TERMINAL_STATUSES or run.status in {
+                    RunStatus.PAUSED,
+                    RunStatus.WAITING_FOR_APPROVAL,
+                }:
+                    return run
+                await asyncio.sleep(self.config.event_poll_interval_seconds)
+
+        if timeout_seconds is None:
+            return await wait_persisted()
+        return await asyncio.wait_for(wait_persisted(), timeout=timeout_seconds)
 
     async def resume(self, run_id: str) -> AgentRun:
+        self._ensure_accepting()
         existing = self._tasks.get(run_id)
         if existing is not None and not existing.done():
             return await existing
@@ -557,7 +700,14 @@ class Runtime:
                 f"Only running runs can be paused; run {run_id} is {run.status}."
             )
         run.transition_to(RunStatus.PAUSED)
-        self.store.save_run_with_event(run, "run.paused")
+        self.store.save_run_with_event(run, "run.paused", {"reason": "user_requested"})
+        self._pause_run_ids.add(run_id)
+        token = self._cancellation_tokens.get(run_id)
+        if token is not None:
+            token.cancel()
+        task = self._tasks.get(run_id)
+        if task is not None and not task.done():
+            task.cancel()
         return run
 
     def cancel(self, run_id: str) -> AgentRun:
@@ -816,6 +966,28 @@ class Runtime:
                         return self.store.get_run(run.id)
         except asyncio.CancelledError:
             run = self.store.get_run(run_id)
+            interruption_reason = None
+            if run_id in self._shutdown_run_ids:
+                interruption_reason = "runtime_shutdown"
+            elif run_id in self._pause_run_ids:
+                interruption_reason = "user_requested"
+            if interruption_reason is not None:
+                recovered = self.store.mark_running_tool_executions_unknown(run_id)
+                if run.status is RunStatus.RUNNING:
+                    run.transition_to(RunStatus.PAUSED)
+                    self.store.save_run_with_event(
+                        run,
+                        "run.paused",
+                        {
+                            "reason": interruption_reason,
+                            "tool_execution_ids": [
+                                item.id
+                                for item in recovered
+                                if item.status is ToolExecutionStatus.UNKNOWN
+                            ],
+                        },
+                    )
+                return run
             return self._mark_cancelled(run)
         except Exception as error:
             run = self.store.get_run(run_id)
@@ -836,6 +1008,8 @@ class Runtime:
         finally:
             self._tasks.pop(run_id, None)
             self._cancellation_tokens.pop(run_id, None)
+            self._shutdown_run_ids.discard(run_id)
+            self._pause_run_ids.discard(run_id)
 
     async def _process_step(
         self,
@@ -1183,8 +1357,13 @@ class Runtime:
                         },
                     )
                     return response
+                complete = getattr(self.provider, "complete", None)
+                if not callable(complete):
+                    raise ProviderError(
+                        "Model provider implements neither stream nor complete."
+                    )
                 return await asyncio.wait_for(
-                    self.provider.complete(
+                    complete(
                         model_messages,
                         self.tools.definitions_for(agent.tools),
                         agent.model,
@@ -1201,9 +1380,16 @@ class Runtime:
                         "model.stream.failed",
                         {"step": step_index, "attempt": attempt + 1, "error": str(error)},
                     )
-                if attempt >= self.config.max_model_retries:
+                retryable = not isinstance(error, ProviderError) or error.retryable
+                if attempt >= self.config.max_model_retries or not retryable:
                     break
-                await asyncio.sleep(0.25 * (2**attempt))
+                retry_after = (
+                    error.retry_after_seconds
+                    if isinstance(error, ProviderHTTPError)
+                    else None
+                )
+                delay = retry_after if retry_after is not None else 0.25 * (2**attempt)
+                await asyncio.sleep(delay + random.uniform(0.0, min(0.25, delay * 0.2)))
         assert last_error is not None
         raise last_error
 

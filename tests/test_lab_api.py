@@ -97,6 +97,9 @@ async def test_learning_scenarios_run_through_real_runtime(
         assert payload["trace_tree"]["root_run_id"] == run_id
         assert payload["trace_tree"]["node_count"] == 1
         assert payload["persistence"]["tables"]["events"] == len(payload["events"])
+        assert payload["reliability"]["runtime_accepting"] is True
+        assert payload["reliability"]["sqlite"]["status"] == "ok"
+        assert payload["reliability"]["run_health"] == "healthy"
         assert payload["acceptance"]["passed"] is True
 
 

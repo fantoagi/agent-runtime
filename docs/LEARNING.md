@@ -1,6 +1,6 @@
-# Agent Runtime Learning Console 使用指南
+﻿# Agent Runtime Learning Console 使用指南
 
-Learning Console v0.7.2 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context 和 Artifact 的真实执行事实放到同一个浏览器页面中。
+Learning Console v0.7.6 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context 和 Artifact 的真实执行事实放到同一个浏览器页面中。
 
 > 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。
 
@@ -43,7 +43,7 @@ uvicorn agent_runtime.api.app:app --reload
 
 ### 左侧：Learning Path
 
-选择确定性学习场景。v0.7.2 提供以下 9 个真实 Runtime 场景：
+选择确定性学习场景。v0.7.6 提供以下 9 个真实 Runtime 场景：
 
 1. 纯文本响应。
 2. Tool Calling。
@@ -275,3 +275,14 @@ python scripts/check_docs.py
 ```
 
 Learning Console 测试覆盖：9 个场景目录、真实 Runtime、Approval、串行/并行 Parent/Child、TraceTree、Session/Memory 检索、Context Compaction、Artifact 文件、聚合 Snapshot、SQLite 统计和自动验收；当前全量测试为 `55 passed`，并验证串行/并行 Child metadata 可稳定生成独立泳道顺序。
+
+## 可靠性状态怎么读
+
+从 v0.7.6 起，“SQLite”Inspector 同时显示 Runtime 是否接受请求、SQLite 健康、journal mode、Run health 和 `UNKNOWN Tool` 数量：
+
+- `failed` 是已确认失败；`cancelled` 是明确取消，但不表示副作用已回滚。
+- `UNKNOWN` 表示副作用 Tool 已开始但结果无法确认，必须人工核对后再恢复。
+- SSE 断线后仍按 SQLite event sequence 恢复，不维护第二份页面状态。
+- shutdown 会拒绝新工作并排空任务，无法确认的工作保存为 PAUSED/UNKNOWN，而不是误报 completed。
+
+这些信息不增加业务场景，而是帮助理解成功、失败、取消、审批和结果不确定的差异。

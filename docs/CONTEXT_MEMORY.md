@@ -1,6 +1,6 @@
 # Context、Session 与长期记忆
 
-> 当前版本：v0.7.2（Context/Memory 内核能力来自 v0.7，Learning Console 教学投影增强于 v0.7.1，并在 v0.7.2 优化多 Agent 泳道）
+> 当前版本：v0.7.6（Context/Memory 内核能力来自 v0.7，Learning Console 教学投影增强于 v0.7.1，并在 v0.7.2 优化多 Agent 泳道）
 > 最近更新：2026-08-15  
 > 关联记录：[E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001)  
 > 关联决策：[ADR-0011](./adr/0011-context-session-memory.md)

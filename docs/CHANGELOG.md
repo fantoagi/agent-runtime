@@ -4,6 +4,198 @@
 
 ---
 
+<a id="e2026-08-15-007"></a>
+## E2026-08-15-007：v0.7.6 FastAPI/SSE 长稳与发布验证
+
+- **完成时间**：2026-08-15
+- **状态**：✅ stable
+- **类型**：milestone
+- **影响范围**：
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/lab/console.py`
+  - `src/agent_runtime/lab/static/app.js`
+  - `scripts/run_reliability.py`
+  - `scripts/check_performance.py`
+  - `scripts/verify_distribution.py`
+  - `benchmarks/reliability-baseline.json`
+  - `.github/workflows/nightly-reliability.yml`
+  - `tests/test_api.py`
+  - `tests/test_reliability.py`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)
+
+### 变更摘要
+
+完成 HTTP、SSE、压力、长稳和安装产物验证，使现有能力可以反复启停和断线恢复。
+
+### 系统架构
+
+FastAPI lifespan 区分 Runtime 所有权；SSE 以 SQLite durable event 为事实来源；Nightly 负责长稳与性能门禁。
+
+### 实现方式
+
+保留 `shutdown_runtime=False` 兼容默认值；SSE 增加 heartbeat 和 Last-Event-ID；可靠性脚本混合单 Run、Tool、Workflow 和事件消费。
+
+### 当前功能
+
+支持真实 health、受控关闭、SSE 清理、20/100 并发、可配置 soak，以及干净环境 CLI/SDK/Uvicorn/SSE smoke。
+
+### 已知限制
+
+30 分钟 soak 由 Nightly 和发布前流水线执行。
+
+### 测试与验收
+
+```powershell
+python scripts/run_reliability.py --stress-runs 100 --concurrency 20
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.7.6-py3-none-any.whl
+```
+
+### 后续计划
+
+v0.7.6 门禁稳定前不启动 v0.8。
+
+<a id="e2026-08-15-006"></a>
+## E2026-08-15-006：v0.7.5 Runtime 生命周期、SQLite 与恢复语义
+
+- **完成时间**：2026-08-15
+- **状态**：✅ stable
+- **类型**：architecture
+- **影响范围**：
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/orchestration.py`
+  - `tests/test_runtime.py`
+  - `tests/test_orchestration.py`
+  - `tests/test_reliability.py`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)
+
+### 变更摘要
+
+定义 Runtime 安全启动、等待、暂停、恢复和关闭合同，并强化 SQLite durability、并发 sequence 和向前迁移。
+
+### 系统架构
+
+生命周期统一管理 Task、token、Provider、Tool executor 和 Store；schema 5 保存 Workflow 快照和 migration checksum。
+
+### 实现方式
+
+新增 `shutdown()`、async context manager 和带 timeout 的 `wait()`；SQLite 启用 WAL、FULL、busy retry、quick_check 和事务 sequence；pause 保持 PAUSED。
+
+### 当前功能
+
+shutdown 幂等；schema 1–4 升级到 5；多 Store sequence 唯一；启动协调 running Run 和副作用 Tool。
+
+### 已知限制
+
+不自动降级 schema，也不提供多进程调度。
+
+### 测试与验收
+
+```powershell
+python -m pytest tests/test_runtime.py tests/test_orchestration.py tests/test_reliability.py
+```
+
+### 后续计划
+
+所有 Adapter 统一使用生命周期合同。
+
+<a id="e2026-08-15-005"></a>
+## E2026-08-15-005：v0.7.4 Tool 与 Model Provider 执行安全
+
+- **完成时间**：2026-08-15
+- **状态**：✅ stable
+- **类型**：architecture
+- **影响范围**：
+  - `src/agent_runtime/tools.py`
+  - `src/agent_runtime/providers.py`
+  - `src/agent_runtime/runtime.py`
+  - `tests/test_providers.py`
+  - `tests/test_reliability.py`
+  - `tests/test_contract_edges.py`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)
+
+### 变更摘要
+
+隔离同步 Tool 和模型网络 I/O，修复 Event Loop 阻塞、资源无界、重试分类和副作用超时假成功。
+
+### 系统架构
+
+Runtime 使用有界 Tool 线程池；Provider 使用 `httpx.AsyncClient`；副作用不确定结果使用 `UNKNOWN`。
+
+### 实现方式
+
+默认 8 workers/32 pending，原子文件写入，严格校验响应/SSE，并按网络错误、408、429、5xx 和确定性 4xx 分类重试。
+
+### 当前功能
+
+长同步 Tool 不阻塞其他 Run；401/403 不重试；Retry-After 优先；取消关闭 HTTP stream；`aclose()` 幂等。
+
+### 已知限制
+
+同步 Python 线程不能安全强杀，迟到副作用结果必须人工确认。
+
+### 测试与验收
+
+```powershell
+python -m pytest tests/test_providers.py tests/test_reliability.py tests/test_contract_edges.py
+```
+
+### 后续计划
+
+保持 Tool Handler 和 Provider 公共协议兼容。
+
+<a id="e2026-08-15-004"></a>
+## E2026-08-15-004：v0.7.3 质量基线与行为合同
+
+- **完成时间**：2026-08-15
+- **状态**：✅ stable
+- **类型**：governance
+- **影响范围**：
+  - `pyproject.toml`
+  - `scripts/check_coverage.py`
+  - `.github/workflows/quality.yml`
+  - `tests/test_contract_edges.py`
+  - `tests/test_reliability.py`
+  - `docs/CHANGELOG.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0012](./adr/0012-quality-gates.md)
+
+### 变更摘要
+
+将既有行为固化为兼容性合同，建立 lint、typing、coverage、跨平台测试和安装产物门禁。
+
+### 系统架构
+
+CI 分为 PR 快速严格门禁和 Nightly 长稳门禁；异常增加稳定分类且 API 保持 `detail` 兼容。
+
+### 实现方式
+
+启用 Ruff、Mypy strict、pytest-cov；core line ≥ 90%、branch ≥ 80%，combined ≥ 80%；支持 unit/integration/stress/soak marker。
+
+### 当前功能
+
+126 个测试覆盖单/多 Agent、Workflow、Memory、Approval、Streaming、API、Learning Console 和可靠性边界。
+
+### 已知限制
+
+CLI/SDK/API Adapter 不计入 core 聚合，但仍受 combined coverage 和 smoke test 约束。
+
+### 测试与验收
+
+```powershell
+python -m ruff check src tests scripts
+python -m mypy src\agent_runtime
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json
+python scripts/check_coverage.py coverage.json
+```
+
+### 后续计划
+
+可靠性阈值只允许保持或提高。
 <a id="e2026-08-15-003"></a>
 ## E2026-08-15-003：Learning Console 多 Agent 独立泳道与流程语义连线
 

@@ -14,6 +14,7 @@ from agent_runtime.orchestration import (
     AggregationStrategy,
     ParallelWorkflow,
     SequentialWorkflow,
+    WorkflowStep,
 )
 from agent_runtime.providers import MockProvider, ModelResponse
 from agent_runtime.runtime import Runtime, RuntimeConfig
@@ -266,3 +267,87 @@ async def test_workflow_eval_records_parent_trace_and_child_count(workspace: Pat
     )
     assert report.artifact_path is not None
     assert Path(report.artifact_path).is_file()
+
+
+def test_orchestration_validation_and_value_objects() -> None:
+    validated: list[str] = []
+    registry = AgentRegistry(lambda agent: validated.append(agent.name))
+    with pytest.raises(ValueError, match="must not be empty"):
+        registry.register(make_agent(" "))
+    worker = make_agent("worker")
+    registry.register(worker)
+    assert validated == ["worker"]
+    assert "worker" in registry
+    assert "missing" not in registry
+    with pytest.raises(KeyError, match="not registered"):
+        registry.get("missing")
+
+    named = WorkflowStep(worker, name="named", input_prefix="prefix:")
+    plain = WorkflowStep("plain")
+    assert named.agent_name == "worker"
+    assert named.prepare_input("x") == "prefix:x"
+    assert plain.agent_name == "plain"
+    assert plain.prepare_input("x") == "x"
+
+    with pytest.raises(ValueError, match="at least one"):
+        SequentialWorkflow("empty", [])
+    with pytest.raises(ValueError, match="at least one"):
+        ParallelWorkflow("empty", [])
+    with pytest.raises(ValueError, match="max_concurrency"):
+        ParallelWorkflow("bad", ["worker"], max_concurrency=0)
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        ParallelWorkflow("bad", ["worker"], timeout_seconds=0)
+
+
+@pytest.mark.asyncio
+async def test_sequential_start_failure_and_terminal_reuse(workspace: Path) -> None:
+    def responder(messages, tools, config):
+        del tools, config
+        if messages[0].content == "failure":
+            raise RuntimeError("failed child")
+        return ModelResponse(content="ok")
+
+    runtime = make_runtime(workspace, responder)
+    runtime.register_agent(make_agent("ok"))
+    runtime.register_agent(make_agent("failure"))
+
+    started = SequentialWorkflow("started", ["ok"]).start(runtime, "input")
+    completed = await runtime.wait(started.id)
+    assert completed.status is RunStatus.COMPLETED
+    assert runtime.store.workflow_snapshot(started.id)["type"] == "sequential"
+
+    failed = await SequentialWorkflow("failed", ["failure"]).run(runtime, "input")
+    assert failed.parent.status is RunStatus.FAILED
+    terminal = await SequentialWorkflow("failed", ["failure"]).run(
+        runtime, "input", parent_run_id=failed.parent.id
+    )
+    assert terminal.parent.id == failed.parent.id
+    assert terminal.parent.status is RunStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_parallel_timeout_and_all_failed_first_success(workspace: Path) -> None:
+    async def responder(messages, tools, config):
+        del tools, config
+        if messages[0].content == "slow":
+            await asyncio.sleep(0.2)
+            return ModelResponse(content="late")
+        raise RuntimeError("failed")
+
+    runtime = make_runtime(workspace, responder)
+    runtime.register_agent(make_agent("slow"))
+    runtime.register_agent(make_agent("failure"))
+
+    timed = await ParallelWorkflow(
+        "timed", ["slow", "slow"], timeout_seconds=0.01
+    ).run(runtime, "input")
+    assert timed.parent.status is RunStatus.FAILED
+    assert "timed out" in (timed.parent.error or "")
+
+    failed = await ParallelWorkflow(
+        "no-success",
+        ["failure", "failure"],
+        aggregation=AggregationStrategy.FIRST_SUCCESS,
+    ).run(runtime, "input")
+    assert failed.parent.status is RunStatus.FAILED
+    assert "No parallel branch" in (failed.parent.error or "")

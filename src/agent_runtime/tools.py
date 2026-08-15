@@ -1,14 +1,23 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import inspect
 import json
+import os
+import tempfile
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .domain import ToolDefinition, ToolExecutionError, ToolValidationError
+from .domain import (
+    RuntimeClosedError,
+    ToolDefinition,
+    ToolExecutionError,
+    ToolOutcomeUnknown,
+    ToolValidationError,
+)
 
 ToolHandler = Callable[[dict[str, Any], "ToolContext"], Any | Awaitable[Any]]
 
@@ -73,8 +82,62 @@ class RegisteredTool:
 
 
 class ToolRegistry:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        max_sync_workers: int = 8,
+        max_pending_sync_tools: int = 32,
+    ) -> None:
+        if max_sync_workers < 1:
+            raise ValueError("max_sync_workers must be at least 1.")
+        if max_pending_sync_tools < max_sync_workers:
+            raise ValueError("max_pending_sync_tools must be at least max_sync_workers.")
         self._tools: dict[str, RegisteredTool] = {}
+        self._max_sync_workers = max_sync_workers
+        self._max_pending_sync_tools = max_pending_sync_tools
+        self._executor: ThreadPoolExecutor | None = None
+        self._capacity = asyncio.Semaphore(max_pending_sync_tools)
+        self._sync_futures: set[asyncio.Future[Any]] = set()
+        self._closed = False
+
+    def configure_execution(self, *, max_sync_workers: int, max_pending_sync_tools: int) -> None:
+        if self._executor is not None:
+            if (
+                max_sync_workers != self._max_sync_workers
+                or max_pending_sync_tools != self._max_pending_sync_tools
+            ):
+                raise RuntimeError("Tool execution cannot be reconfigured after first use.")
+            return
+        if max_sync_workers < 1 or max_pending_sync_tools < max_sync_workers:
+            raise ValueError("Invalid synchronous tool executor limits.")
+        self._max_sync_workers = max_sync_workers
+        self._max_pending_sync_tools = max_pending_sync_tools
+        self._capacity = asyncio.Semaphore(max_pending_sync_tools)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._executor is not None:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None
+
+    async def aclose(self, timeout_seconds: float = 30.0) -> None:
+        """Stop accepting work and wait a bounded time for running sync handlers."""
+        self.close()
+        pending = [future for future in self._sync_futures if not future.done()]
+        if pending:
+            await asyncio.wait(pending, timeout=max(0.0, timeout_seconds))
+
+    def _sync_executor(self) -> ThreadPoolExecutor:
+        if self._closed:
+            raise RuntimeClosedError("Tool registry is closed.")
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=self._max_sync_workers,
+                thread_name_prefix="agent-runtime-tool",
+            )
+        return self._executor
 
     def register(
         self,
@@ -106,20 +169,47 @@ class ToolRegistry:
     async def invoke(
         self, name: str, arguments: dict[str, Any], context: ToolContext
     ) -> ToolResult:
+        if self._closed:
+            raise RuntimeClosedError("Tool registry is closed.")
         tool = self.get(name)
         validate_input(arguments, tool.definition.input_schema)
         context.raise_if_cancelled()
+        started = False
         try:
-            produced = tool.handler(arguments, context)
-            if inspect.isawaitable(produced):
+            if inspect.iscoroutinefunction(tool.handler):
+                started = True
                 produced = await asyncio.wait_for(
-                    produced, timeout=tool.timeout_seconds
+                    tool.handler(arguments, context), timeout=tool.timeout_seconds
                 )
+            else:
+                async with self._capacity:
+                    context.raise_if_cancelled()
+                    started = True
+                    loop = asyncio.get_running_loop()
+                    future = loop.run_in_executor(
+                        self._sync_executor(), tool.handler, arguments, context
+                    )
+                    self._sync_futures.add(future)
+                    future.add_done_callback(self._sync_futures.discard)
+                    produced = await asyncio.wait_for(
+                        asyncio.shield(future), timeout=tool.timeout_seconds
+                    )
+            if inspect.isawaitable(produced):
+                produced = await asyncio.wait_for(produced, timeout=tool.timeout_seconds)
             context.raise_if_cancelled()
             return ToolResult.from_value(produced)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as error:
+            if started and tool.definition.side_effecting:
+                raise ToolOutcomeUnknown(
+                    f"Tool {name!r} was interrupted after invocation; its side effect is unknown."
+                ) from error
             raise
         except TimeoutError as error:
+            if started and tool.definition.side_effecting:
+                raise ToolOutcomeUnknown(
+                    f"Tool {name!r} timed out after {tool.timeout_seconds}s; "
+                    "its side effect is unknown."
+                ) from error
             raise ToolExecutionError(
                 f"Tool {name!r} timed out after {tool.timeout_seconds}s."
             ) from error
@@ -237,7 +327,7 @@ def _calculator(arguments: dict[str, Any], context: ToolContext) -> str:
     try:
         return str(
             eval(expression, {"__builtins__": {}}, {})
-        )  # noqa: S307 - grammar is constrained above.
+        )
     except Exception as error:
         raise ToolValidationError(
             f"Invalid arithmetic expression: {error}"
@@ -258,5 +348,18 @@ def _write_text_file(
     context.raise_if_cancelled()
     path = confined_path(context.workspace_path, arguments["path"])
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(arguments["content"], encoding="utf-8")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            handle.write(arguments["content"])
+            handle.flush()
+            os.fsync(handle.fileno())
+        context.raise_if_cancelled()
+        os.replace(temporary_path, path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
     return {"path": str(path), "status": "written"}

@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -151,7 +151,7 @@ def parse_entries(validation: Validation) -> list[ChangeEntry]:
 
     entries: list[ChangeEntry] = []
     seen: set[str] = set()
-    today = (datetime.now(timezone.utc) + timedelta(hours=8)).date()
+    today = (datetime.now(UTC) + timedelta(hours=8)).date()
 
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
@@ -278,7 +278,7 @@ def validate_roadmap(validation: Validation, known_ids: set[str]) -> None:
         return
 
     text = read_text(ROADMAP)
-    today = (datetime.now(timezone.utc) + timedelta(hours=8)).date()
+    today = (datetime.now(UTC) + timedelta(hours=8)).date()
 
     headings = re.findall(r"^## (?P<title>.+?)\s*$", text, re.MULTILINE)
     for required in ROADMAP_REQUIRED_SECTIONS:
