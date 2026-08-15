@@ -4,7 +4,7 @@
 - **当前里程碑**：Learning Console 多 Agent 独立泳道 v0.7.2
 - **Runtime 构建完成时间**：2026-08-15（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`
+- **当前代码基线 commit**：`5e779a7`
 - **最近演进记录**：[E2026-08-15-003](./CHANGELOG.md#e2026-08-15-003)
 
 ## 状态定义
