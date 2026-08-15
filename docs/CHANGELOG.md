@@ -23,7 +23,7 @@
   - `tests/test_crash_recovery.py`
   - `.github/workflows/quality.yml`
   - `.github/workflows/nightly-reliability.yml`
-- **关联 commit**：`pending`
+- **关联 commit**：`0025941`
 - **关联 ADR**：[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0019](./adr/0019-runtime-doctor.md)
 
 ### 变更摘要
