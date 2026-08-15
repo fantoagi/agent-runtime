@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.6.0`
-- **当前里程碑**：持久化多 Agent 编排基础 v0.6
-- **Runtime 构建完成时间**：2026-08-14（Asia/Shanghai）
+- **当前版本**：`0.7.0`
+- **当前里程碑**：Context、Session 与长期记忆 v0.7
+- **Runtime 构建完成时间**：2026-08-15（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`e7ab51a`
-- **最近演进记录**：[E2026-08-14-007](./CHANGELOG.md#e2026-08-14-007)
+- **当前代码基线 commit**：`pending`
+- **最近演进记录**：[E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001)
 
 ## 状态定义
 
@@ -22,6 +22,12 @@
 | 状态 | 能力 | 当前说明 | 追溯记录 |
 | --- | --- | --- | --- |
 | ✅ stable | 单 Agent Runtime Kernel | 完成有界模型/工具循环、结果和失败收敛 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
+| ✅ stable | ContextBuilder | 每次模型调用前按 token budget 选择消息、保持 Tool Call 组并生成可追溯 Summary | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
+| ✅ stable | 大 Tool Result Artifact 化 | 超过阈值的完整结果写入 Artifact，Checkpoint 只保留引用和预览 | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
+| ✅ stable | Session | 持久化多个 Run 的 Session 关系，Child Run 继承 Parent Session | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
+| ✅ stable | Scoped Long-term Memory | 支持 session / agent Scope、TTL、软删除、source Run 与 source Trace | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
+| ✅ stable | SQLite FTS5 Memory Search | 在显式 Scope 内执行关键词检索并过滤删除或过期记录 | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
+| ✅ stable | Memory Trace / Metrics / Eval | 搜索与 Context 事件可追溯，指标和 MemoryEvalRunner 可验证检索结果 | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
 | ✅ stable | Agent Registry | 注册、发现并校验可委派 Agent；拒绝同名冲突定义 | [E2026-08-14-007](./CHANGELOG.md#e2026-08-14-007) |
 | ✅ stable | Parent / Child RunRelation | SQLite 持久化 Parent、Child、Root、关系类型和稳定 delegation key | [E2026-08-14-007](./CHANGELOG.md#e2026-08-14-007) |
 | ✅ stable | Runtime 委派 | `Runtime.delegate()` 通过正式 Runtime 路径执行 Child Run，并支持幂等复用 | [E2026-08-14-007](./CHANGELOG.md#e2026-08-14-007) |
@@ -35,7 +41,7 @@
 | ✅ stable | OpenAI-compatible Provider | 支持 Chat Completions 非流式与 SSE 流式调用；真实端点仍需按部署环境验证 | [E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001) |
 | ✅ stable | Tool Registry | 支持工具注册、查找和执行 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
 | ✅ stable | 工具参数校验 | 支持基础 JSON-schema 风格 required/type/enum 校验 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
-| ✅ stable | SQLite 持久化 | 通过 schema migration 保存 Run、RunRelation、Event、Checkpoint、Approval、Step 和 ToolExecution | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
+| ✅ stable | SQLite 持久化 | schema version 4 保存 Run、Relation、Event、Checkpoint、Session、Memory、Step 和 ToolExecution | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
 | ✅ stable | Event Log | 每个 Run 使用单调递增 sequence，并支持状态和事件原子提交 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | Model Token Streaming | Provider 可按增量输出文本和 Tool Call，Runtime 持久化 `model.delta` 并最终合并为完整响应 | [E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001) |
 | ✅ stable | FastAPI / SSE API | HTTP Run lifecycle、持久化 Runtime Event 和模型增量 SSE | [E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002) |
@@ -55,7 +61,7 @@
 
 | 状态 | 能力 | 当前说明 | 追溯记录 |
 | --- | --- | --- | --- |
-| 🚧 partial | Artifact Store | 可以受限写入文本产物，但尚未集成通用大结果转存策略 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
+| ✅ stable | Artifact Store | 支持受限文本产物和大 Tool Result 自动转存、预览与 provenance | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
 | ✅ stable | 事件流消费 | `Runtime.stream()` 轮询持久化事件；模型 token 增量通过 `model.delta` 事件输出 | [E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001) |
 | 🧪 experimental | 崩溃恢复 | 支持未完成 Step 恢复、完成工具跳过和未知副作用暂停；尚无 Worker 租约 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 
@@ -64,7 +70,6 @@
 | 状态 | 能力 | 当前说明 | 追溯记录 |
 | --- | --- | --- | --- |
 | 📋 planned | 分布式 Worker | 队列、租约、幂等和跨节点恢复 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
-| 📋 planned | 长期记忆 | 检索、记忆生命周期和数据治理 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
 | 📋 planned | Docker 代码沙箱 | 隔离代码、终端和依赖执行 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
 | 📋 planned | 多租户和权限 | 身份、RBAC、配额和审计隔离 | [E2026-08-11-001](./CHANGELOG.md#e2026-08-11-001) |
 
@@ -78,6 +83,11 @@
 
 ## 当前已知限制
 
+- Context token 估算是 Provider-neutral 近似值，不是具体模型的精确 tokenizer。
+- Context Summary 是确定性文本摘要，不是模型生成的语义摘要。
+- Memory 当前只提供 SQLite FTS5 关键词检索，不提供 Embedding、向量检索或 global Scope。
+- Memory 必须显式创建；Runtime 不会自动永久保存全部对话。
+- Learning Console 暂无 Session/Memory 专用画布，但可以在 Event Log 中看到 `context.built` 与 Memory Search 事件。
 - `OpenAICompatibleProvider` 的 SSE 流式解析已实现，但不同厂商的 Tool Call 增量格式仍需持续兼容验证。
 - `Runtime.stream()` 通过轮询 SQLite 事件工作，不是跨进程消息总线。
 - 当前仅实现 SQLite 基础迁移，尚未提供在线回滚和多节点迁移协调。
@@ -93,9 +103,9 @@
 
 ## 当前测试状态
 
-- **最近验证日期**：2026-08-14
-- **结果**：`44 passed`
-- **覆盖范围**：状态机、工具安全、审批、恢复与幂等、FastAPI / SSE、Token Streaming、Parent/Child RunRelation、顺序/并行 Workflow、并发限制、汇聚策略、取消传播、Trace Tree、Multi-Agent Metrics、Workflow Eval、Learning Console Snapshot 和自动验收。
+- **最近验证日期**：2026-08-15
+- **结果**：`50 passed`
+- **覆盖范围**：状态机、工具安全、审批、恢复与幂等、FastAPI / SSE、Token Streaming、多 Agent Workflow、Context 裁剪、Tool Call 分组、Session、Memory Scope 隔离、FTS5、TTL、软删除、大 Tool Result Artifact、Metrics、Memory Eval、Learning Console Snapshot 和自动验收。
 - **文档检查**：使用 `python scripts/check_docs.py`。
 
 ## 当前运行方式
@@ -109,6 +119,7 @@ agent-runtime lab
 
 agent-runtime demo "19 * 23"
 agent-runtime workflow demo "设计一个可靠的恢复机制"
+agent-runtime memory demo "Which Python language do I prefer?" --remember "The user prefers Python for examples."
 python scripts/check_docs.py
 pytest
 ```
@@ -123,7 +134,7 @@ python -m pip install -e .[api]
 uvicorn agent_runtime.api.app:app --reload
 ```
 
-主要接口：`GET /health`、`GET /agents`、`POST /runs`、`GET /runs/{run_id}`、`GET /runs/{run_id}/events`、`GET /runs/{run_id}/events/stream`、`GET /runs/{run_id}/relations`、`GET /runs/{run_id}/trace/tree`、Run 生命周期控制、委派和审批处理。v0.4 的模型增量使用 `model.delta` 事件进入同一 SSE 流。
+主要接口：`GET /health`、`GET /agents`、`POST /runs`、Run 生命周期与事件接口、Session/Memory API、关系查询、Trace Tree、委派和审批处理。v0.4 的模型增量使用 `model.delta` 事件进入同一 SSE 流；v0.7 的 Context 与 Memory 事件也进入同一持久化 Event Log。
 
 
 ### Observability / Evals
@@ -144,6 +155,15 @@ agent-runtime observe trace-tree <parent-or-child-run-id>
 ```
 
 详细使用方式见 [MULTI_AGENT.md](./MULTI_AGENT.md)。
+
+### Context / Session / Memory
+
+```powershell
+agent-runtime memory demo "Which Python language do I prefer?" --remember "The user prefers Python for examples."
+```
+
+Python API 可以使用 `Runtime.create_session()`、`remember()`、`search_memory()`、`forget_memory()` 和 `purge_expired_memories()`。详细使用和处理逻辑见 [CONTEXT_MEMORY.md](./CONTEXT_MEMORY.md)。
+
 ### Learning Console
 
 安装 API 依赖后一条命令启动：
@@ -153,4 +173,4 @@ python -m pip install -e .[api]
 agent-runtime lab
 ```
 
-默认地址：`http://127.0.0.1:8000/lab`。首批提供纯文本、Tool Calling、Token Streaming 和 Human Approval 四个确定性场景。详细操作见 [LEARNING.md](./LEARNING.md)。
+默认地址：`http://127.0.0.1:8000/lab`。当前仍提供纯文本、Tool Calling、Token Streaming 和 Human Approval 四个确定性场景；v0.7 可在事件泳道中观察 `context.built`，专用 Session/Memory 场景暂未实现。详细操作见 [LEARNING.md](./LEARNING.md)。

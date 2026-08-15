@@ -86,3 +86,46 @@ def create_multi_agent_demo_runtime(
 
 def multi_agent_demo_workflow() -> SequentialWorkflow:
     return SequentialWorkflow("planner-worker-reviewer", ["planner", "worker", "reviewer"])
+
+def memory_demo_agent() -> AgentDefinition:
+    return AgentDefinition(
+        name="memory-demo",
+        system_prompt="Answer using relevant scoped memory when it is available.",
+        tools=[],
+        model=ModelConfig(provider="mock", model="memory-demo"),
+    )
+
+
+def create_memory_demo_runtime(
+    workspace: str | Path, state_dir: str | Path | None = None
+) -> Runtime:
+    """Create a deterministic runtime that exposes injected session memory."""
+    workspace_path = Path(workspace).resolve()
+    runtime_dir = Path(state_dir or workspace_path / ".agent-runtime").resolve()
+
+    def responder(messages, tools, config):
+        del tools, config
+        memory = next(
+            (
+                message.content
+                for message in messages
+                if message.role == "system" and message.name == "memory"
+            ),
+            None,
+        )
+        if memory:
+            remembered = memory.splitlines()[-1].split(") ", 1)[-1]
+            return ModelResponse(content=f"MEMORY USED: {remembered}")
+        return ModelResponse(content="NO RELEVANT MEMORY")
+
+    runtime = Runtime(
+        RuntimeConfig(
+            workspace_path=workspace_path,
+            database_path=runtime_dir / "runtime.sqlite3",
+            artifact_path=runtime_dir / "artifacts",
+        ),
+        provider=MockProvider(responder),
+        tools=ToolRegistry(),
+    )
+    runtime.register_agent(memory_demo_agent())
+    return runtime

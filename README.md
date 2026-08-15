@@ -2,7 +2,7 @@
 
 A small, durable single-agent and multi-agent runtime with model-provider abstraction, structured tool
 execution, SQLite migrations, durable steps, idempotent recovery, event streaming, token streaming,
-checkpoints, approval gates, cooperative cancellation, persistent Parent/Child delegation, sequential and parallel workflows, trace trees, metrics, evals, a CLI, and a visual Learning Console.
+checkpoints, approval gates, cooperative cancellation, persistent Parent/Child delegation, sequential and parallel workflows, budgeted context building, sessions, scoped long-term memory, trace trees, metrics, evals, a CLI, and a visual Learning Console.
 
 ## Quick start
 
@@ -27,7 +27,7 @@ OpenAI-compatible provider in application code when connecting to a real model.
 agent-runtime lab
 ```
 
-浏览器会打开 `http://127.0.0.1:8000/lab`。v0.6.0 内置纯文本、Tool Calling、Token Streaming 和 Human Approval 四个确定性场景，并提供：
+浏览器会打开 `http://127.0.0.1:8000/lab`。v0.7.0 继续内置纯文本、Tool Calling、Token Streaming 和 Human Approval 四个确定性场景，并提供：
 
 - 按 Run / Model / Tool / Approval / State 分组的动态泳道图。
 - 从头回放、逐事件前进和自动播放。
@@ -54,6 +54,25 @@ v0.6 为每个 Parent 和 Child 分配独立 Run ID、Trace ID、Event 与 Check
 - `WorkflowEvalRunner`。
 
 详细示例见 [Multi-Agent 使用指南](./docs/MULTI_AGENT.md)。
+
+## Context、Session 与 Memory
+
+运行确定性的 Memory Demo：
+
+```powershell
+agent-runtime memory demo "Which Python language do I prefer?" --remember "The user prefers Python for examples."
+```
+
+v0.7 在模型调用前通过 `ContextBuilder` 构造受 token budget 约束的输入，并支持：
+
+- System Prompt、未完成 Tool Call 组和最近消息优先保留。
+- 旧消息确定性 Summary 与 `context.built` / `context.compacted` 事件。
+- 多个 Run 归入持久化 Session，Child Run 继承 Session。
+- `session` / `agent` 两种 Memory Scope、SQLite FTS5、TTL 和软删除。
+- 大 Tool Result 自动写入 Artifact Store。
+- Session/Memory API、Metrics 和 `MemoryEvalRunner`。
+
+详细示例见 [Context、Session 与 Memory 指南](./docs/CONTEXT_MEMORY.md)。
 
 ## FastAPI / SSE
 
@@ -120,6 +139,7 @@ The project treats documentation as part of the implementation contract:
 - [Roadmap](./docs/ROADMAP.md): planned versions, scope boundaries, dependencies, and acceptance direction.
 - [Learning Console guide](./docs/LEARNING.md): visual scenarios, event replay, inspectors, and source-code mapping.
 - [Multi-Agent guide](./docs/MULTI_AGENT.md): delegation, workflows, trace trees, cancellation, recovery, and evals.
+- [Context and memory guide](./docs/CONTEXT_MEMORY.md): context budgets, sessions, scoped memory, FTS5, lifecycle, and APIs.
 - [Evolution log](./docs/CHANGELOG.md): feature and architecture changes in reverse completion-time order.
 - [Architecture Decision Records](./docs/adr/README.md): why important public, data, reliability, or security decisions were made.
 - [Documentation workflow](./docs/README.md): Change IDs, templates, update rules, and quality gates.
@@ -134,8 +154,9 @@ boundaries must also add or update an ADR.
 - **Runtime kernel**: bounded agent loop with cancellation, retry-safe checkpoints, approvals, and durable delegation.
 - **Providers**: normalized text/tool-call responses, optional token streaming, a deterministic Mock, and an OpenAI-compatible implementation.
 - **Tools**: JSON-schema-inspired argument validation, timeout handling, and workspace confinement.
-- **Storage**: SQLite event log plus file-backed artifacts.
+- **Storage**: SQLite schema v4 for runs, relations, sessions, memories, event log, checkpoints, FTS5, and file-backed artifacts.
 - **Orchestration**: AgentRegistry, RunRelation, sequential/parallel workflows, aggregation, timeout, cancellation propagation, and idempotent recovery.
+- **Context and memory**: ContextBuilder, Session, scoped MemoryStore search, lifecycle, provenance, and large Tool Result artifactization.
 - **Observability**: per-Run trace, Parent/Child trace tree, and metrics derived from persisted runs/events/relations, with JSON and Prometheus outputs.
 - **Evals**: deterministic suites that execute through the real Runtime path and persist reports.
 - **Interfaces**: Python SDK, CLI, FastAPI/SSE, and a local Learning Console; the core has no UI dependency.

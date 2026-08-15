@@ -1,6 +1,17 @@
 """Durable single-agent and multi-agent runtime primitives."""
 
-from .domain import AgentDefinition, AgentRun, RunRelation, RunRelationType, RunStatus
+from .context import ContextBuilder, ContextBuildResult
+from .domain import (
+    AgentDefinition,
+    AgentRun,
+    MemoryRecord,
+    MemoryScope,
+    MemorySearchResult,
+    RunRelation,
+    RunRelationType,
+    RunStatus,
+    Session,
+)
 from .evals import (
     ContainsEvaluator,
     EvalAssertion,
@@ -10,6 +21,7 @@ from .evals import (
     EvalSuite,
     ExactMatchEvaluator,
     ExpectedStatusEvaluator,
+    MemoryEvalRunner,
     WorkflowEvalRunner,
 )
 from .observability import (
@@ -37,7 +49,12 @@ from .providers import (
     ToolCallDelta,
 )
 from .runtime import Runtime, RuntimeConfig
-from .sdk import create_multi_agent_demo_runtime, multi_agent_demo_workflow
+from .sdk import (
+    create_memory_demo_runtime,
+    create_multi_agent_demo_runtime,
+    memory_demo_agent,
+    multi_agent_demo_workflow,
+)
 from .tools import ToolDefinition, ToolRegistry
 
 __all__ = [
@@ -45,9 +62,16 @@ __all__ = [
     "AggregationStrategy",
     "AgentDefinition",
     "AgentRun",
+    "ContextBuilder",
+    "ContextBuildResult",
+    "MemoryRecord",
+    "MemoryScope",
+    "MemorySearchResult",
+    "Session",
     "RunRelation",
     "RunRelationType",
     "ContainsEvaluator",
+    "create_memory_demo_runtime",
     "create_multi_agent_demo_runtime",
     "EvalAssertion",
     "EvalCase",
@@ -56,6 +80,8 @@ __all__ = [
     "EvalSuite",
     "ExactMatchEvaluator",
     "ExpectedStatusEvaluator",
+    "MemoryEvalRunner",
+    "memory_demo_agent",
     "MetricsSnapshot",
     "ModelProvider",
     "multi_agent_demo_workflow",

@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
-- **最近更新**：2026-08-14
-- **当前版本**：v0.6.0
-- **当前阶段**：多 Agent 编排基础完成，下一阶段进入 Context、Session 与长期记忆
+- **最近更新**：2026-08-15
+- **当前版本**：v0.7.0
+- **当前阶段**：Context、Session 与长期记忆完成，下一阶段进入 Sandbox、Tool Capability 与 Secret 安全
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -30,7 +30,7 @@
 | v0.5.2 | ✅ completed | Learning Console 动态事件泳道图 | [E2026-08-14-005](./CHANGELOG.md#e2026-08-14-005) |
 | v0.5.3 | ✅ completed | Learning Console 空状态显示与布局优化 | [E2026-08-14-006](./CHANGELOG.md#e2026-08-14-006) |
 | v0.6 | ✅ completed | 多 Agent 编排基础 | [E2026-08-14-007](./CHANGELOG.md#e2026-08-14-007) |
-| v0.7 | 📋 planned | Context、Session 与长期记忆 | — |
+| v0.7 | ✅ completed | Context、Session 与长期记忆 | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
 | v0.8 | 📋 planned | Sandbox、Tool Capability 与 Secret 安全 | — |
 | v0.9 | 📋 planned | 分布式 Worker、Queue 与 Lease | — |
 | v0.10 | 📋 planned | 多租户、权限、预算和生产治理 | — |
@@ -95,11 +95,12 @@
 
 ## v0.7：Context、Session 与长期记忆
 
-- **状态**：📋 planned
+- **状态**：✅ completed
 - **前置版本**：v0.6
+- **完成记录**：[E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001)
 - **目标**：管理模型上下文窗口，并让多个 Run 在受控范围内共享可检索记忆。
 
-### 计划范围
+### 完成范围
 
 - `ContextBuilder` 和模型输入 token budget。
 - 消息选择、旧消息裁剪和大 Tool Result Artifact 化。
@@ -123,9 +124,9 @@
 - 一次接入多个向量数据库。
 - 自动永久保存所有对话。
 
-### 预计 ADR
+### 关联 ADR
 
-- `ADR-0010`：Context Window、Session 与 Long-term Memory 边界。
+- [ADR-0011](./adr/0011-context-session-memory.md)：Context Window、Session 与 Scoped Long-term Memory 边界。
 
 ## v0.8：Sandbox、Tool Capability 与 Secret 安全
 
@@ -157,7 +158,7 @@
 
 ### 预计 ADR
 
-- `ADR-0011`：Sandbox、Tool Capability 与 Secret 安全边界。
+- `ADR-0012`：Sandbox、Tool Capability 与 Secret 安全边界。
 
 ## v0.9：分布式 Worker、Queue 与 Lease
 
@@ -191,7 +192,7 @@
 
 ### 预计 ADR
 
-- `ADR-0012`：Worker Queue、Lease 与分布式恢复模型。
+- `ADR-0013`：Worker Queue、Lease 与分布式恢复模型。
 
 ## v0.10：多租户、权限、预算和生产治理
 
@@ -225,7 +226,7 @@
 
 ### 预计 ADR
 
-- `ADR-0013`：多租户、权限、预算与审计模型。
+- `ADR-0014`：多租户、权限、预算与审计模型。
 
 ## v1.0：稳定 Runtime Contract 与生产发布
 
@@ -264,7 +265,7 @@
 
 ### 预计 ADR
 
-- `ADR-0014`：v1.0 Runtime Contract 与兼容性承诺。
+- `ADR-0015`：v1.0 Runtime Contract 与兼容性承诺。
 
 ## 明确暂不优先事项
 

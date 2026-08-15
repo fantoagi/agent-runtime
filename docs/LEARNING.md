@@ -1,6 +1,6 @@
 # Agent Runtime Learning Console 使用指南
 
-Learning Console 是 v0.6.0 继续提供的本地可视化学习入口。它把原本需要多条 PowerShell 命令才能观察的 Run、Event、Step、ToolExecution、Checkpoint、Approval、Trace 和 Metrics 放到同一个浏览器页面中。
+Learning Console 是 v0.7.0 继续提供的本地可视化学习入口。它把原本需要多条 PowerShell 命令才能观察的 Run、Event、Step、ToolExecution、Checkpoint、Approval、Trace 和 Metrics 放到同一个浏览器页面中。
 
 > 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。
 
@@ -43,7 +43,7 @@ uvicorn agent_runtime.api.app:app --reload
 
 ### 左侧：Learning Path
 
-选择确定性学习场景。v0.6.0 继续提供以下 4 个单 Run 场景：
+选择确定性学习场景。v0.7.0 继续提供以下 4 个单 Run 场景：
 
 1. 纯文本响应。
 2. Tool Calling。
@@ -61,7 +61,7 @@ uvicorn agent_runtime.api.app:app --reload
 | 泳道 | 领域 | 典型事件 |
 | --- | --- | --- |
 | Run | Run 生命周期 | `run.created`、`run.started`、`run.completed` |
-| Model | 模型请求与流式输出 | `model.requested`、`model.delta`、`model.completed` |
+| Model | 模型请求与流式输出 | `context.built`、`model.requested`、`model.delta`、`model.completed` |
 | Tool | 工具执行 | `tool.requested`、`tool.started`、`tool.completed` |
 | Approval | 人工审批 | `approval.requested`、`approval.resolved` |
 | State | Step / Checkpoint | `checkpoint.created`、`step.completed` |
@@ -105,6 +105,7 @@ uvicorn agent_runtime.api.app:app --reload
 run.created
 → run.started
 → checkpoint.created
+→ context.built
 → model.requested
 → model.completed
 → run.completed
@@ -123,7 +124,8 @@ run.created
 重点观察：
 
 ```text
-第一次 model.requested
+context.built
+→ 第一次 model.requested
 → 模型产生 ToolCall
 → ToolExecution 持久化
 → tool.requested
@@ -225,7 +227,8 @@ flowchart LR
 
 ## 6. 当前限制
 
-- v0.6.0 的 Learning Console 仍只提供 4 个单 Run 确定性场景；多 Agent 可先通过 `agent-runtime workflow demo` 学习。
+- v0.7.0 的 Learning Console 仍只提供 4 个单 Run 确定性场景；可以看到 `context.built`，但 Session/Memory 专用场景和管理画布尚未实现。
+- 多 Agent 可先通过 `agent-runtime workflow demo` 学习，Memory 可通过 `agent-runtime memory demo` 学习。
 - “逐步回放”是对已持久化事件的展示控制，不是单步暂停 Python 协程。
 - Learning Console 面向本地单用户学习，没有身份认证和多租户隔离。
 - 页面使用 Vanilla JavaScript，无前端构建工具；复杂 Workflow Designer 不在当前范围。

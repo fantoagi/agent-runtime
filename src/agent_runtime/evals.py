@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
-from .domain import AgentDefinition, AgentRun, new_id, utc_now
+from .domain import AgentDefinition, AgentRun, RunStatus, new_id, utc_now
 from .runtime import Runtime
 
 
@@ -18,6 +18,7 @@ class EvalCase:
     expected_status: str = "completed"
     metadata: dict[str, Any] = field(default_factory=dict)
     expected_child_count: int | None = None
+    expected_memory_count: int | None = None
 
 
 @dataclass(slots=True)
@@ -362,6 +363,108 @@ class WorkflowEvalRunner:
             path = self.runtime.artifacts.write_text(
                 report.id,
                 "workflow-eval-report.json",
+                json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
+            )
+            report.artifact_path = str(path)
+            path.write_text(
+                json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        return report
+
+class MemoryEvalRunner:
+    """Evaluate scoped memory retrieval with the regular Eval report format."""
+
+    def __init__(
+        self,
+        runtime: Runtime,
+        evaluators: list[Evaluator] | None = None,
+        *,
+        persist_report: bool = True,
+    ) -> None:
+        self.runtime = runtime
+        self.evaluators = evaluators or [
+            ExpectedStatusEvaluator(),
+            ExactMatchEvaluator(),
+            ContainsEvaluator(),
+        ]
+        self.persist_report = persist_report
+
+    async def run(
+        self,
+        suite: EvalSuite,
+        *,
+        session_id: str | None = None,
+        agent_name: str | None = None,
+    ) -> EvalReport:
+        report_id = new_id("eval")
+        started_at = utc_now()
+        results: list[EvalCaseResult] = []
+        for case in suite.cases:
+            case_started = utc_now()
+            matches = self.runtime.search_memory(
+                case.input,
+                session_id=session_id,
+                agent_name=agent_name,
+            )
+            run = AgentRun.create(
+                "memory-search",
+                case.input,
+                {
+                    "trace_id": new_id("trace"),
+                    "eval_report_id": report_id,
+                    "eval_kind": "memory",
+                },
+            )
+            run.transition_to(RunStatus.RUNNING)
+            run.result = "\n".join(match.record.content for match in matches)
+            run.transition_to(RunStatus.COMPLETED)
+            assertions = [
+                evaluator.evaluate(case, run)
+                for evaluator in self.evaluators
+                if evaluator.supports(case)
+            ]
+            if case.expected_memory_count is not None:
+                actual_count = len(matches)
+                assertions.append(
+                    EvalAssertion(
+                        evaluator="expected_memory_count",
+                        passed=actual_count == case.expected_memory_count,
+                        expected=case.expected_memory_count,
+                        actual=actual_count,
+                        message=(
+                            "Memory result count matched."
+                            if actual_count == case.expected_memory_count
+                            else "Memory result count did not match."
+                        ),
+                    )
+                )
+            results.append(
+                EvalCaseResult(
+                    case_name=case.name,
+                    run_id=run.id,
+                    trace_id=str(run.metadata["trace_id"]),
+                    status=run.status.value,
+                    output=run.result,
+                    passed=all(assertion.passed for assertion in assertions),
+                    duration_ms=round(
+                        max(0.0, (utc_now() - case_started).total_seconds() * 1000), 3
+                    ),
+                    assertions=assertions,
+                )
+            )
+        report = EvalReport(
+            id=report_id,
+            suite_name=suite.name,
+            started_at=started_at,
+            completed_at=utc_now(),
+            results=results,
+            metadata={**suite.metadata, "eval_kind": "memory"},
+        )
+        if self.persist_report:
+            path = self.runtime.artifacts.write_text(
+                report.id,
+                "memory-eval-report.json",
                 json.dumps(report.to_dict(), ensure_ascii=False, indent=2),
             )
             report.artifact_path = str(path)

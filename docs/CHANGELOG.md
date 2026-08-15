@@ -5,6 +5,113 @@
 ---
 
 
+<a id="e2026-08-15-001"></a>
+## E2026-08-15-001：完成 Context、Session 与长期记忆 v0.7
+
+- **完成时间**：2026-08-15
+- **状态**：✅ stable
+- **类型**：milestone
+- **影响范围**：
+  - `pyproject.toml`
+  - `src/agent_runtime/context.py`
+  - `src/agent_runtime/memory.py`
+  - `src/agent_runtime/domain.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/observability.py`
+  - `src/agent_runtime/evals.py`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/sdk.py`
+  - `src/agent_runtime/__init__.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_context_memory.py`
+  - `tests/test_runtime.py`
+  - `tests/test_api.py`
+  - `scripts/check_docs.py`
+  - `README.md`
+  - `docs/README.md`
+  - `docs/CONTEXT_MEMORY.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/LEARNING.md`
+  - `docs/ROADMAP.md`
+  - `docs/CHANGELOG.md`
+  - `docs/adr/0011-context-session-memory.md`
+  - `docs/adr/README.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0011](./adr/0011-context-session-memory.md)
+
+### 变更摘要
+
+完成 v0.7 Context、Session 与 Scoped Long-term Memory。Runtime 在每次模型调用前构建可追溯的受预算 Context；多个 Run 可以显式归入 Session，并在 Session 或 Agent Scope 内检索、注入、删除和过期 Memory。大 Tool Result 自动进入 Artifact Store，避免无限扩张 Checkpoint 和模型输入。
+
+### 系统架构
+
+- 新增 `ContextBuilder`，在完整 Checkpoint 与 Provider 请求之间建立受预算的 Context Build 层。
+- 新增 `Session`、`session_runs`、`MemoryRecord`、`MemoryScope` 和 `MemoryStore`。
+- SQLite schema 从 version 3 升级到 version 4，新增 Session、Memory 和 FTS5 索引表。
+- Runtime 在模型调用前检索允许 Scope 的 Memory，再构造 Context 并写入可审计事件。
+- 大 Tool Result 的完整内容写入 Artifact Store，ToolExecution 和 Checkpoint 保存引用与预览。
+- Observability 和 Eval 增加 Memory Search、Context Compaction 与 Memory 数量验证。
+
+### 实现方式
+
+- 使用 Provider-neutral 的确定性近似 token 估算，使 Context 行为不绑定某个模型 SDK。
+- System Prompt、最近消息和未完成 Tool Call 优先保留；Assistant Tool Call 与 Tool Result 作为不可拆分消息组。
+- 被省略的旧消息生成确定性 Summary，并通过 `context.compacted` 记录。
+- Memory 只允许 `session` 和 `agent` Scope，不提供 global Scope。
+- SQLite FTS5 提供关键词检索，并强制 Scope、TTL、软删除和 source provenance 过滤。
+- `source_run_id` 和 `source_trace_id` 使 Memory 可以反查来源执行。
+- `MemoryEvalRunner` 复用现有 Eval Report 和 Artifact 机制。
+
+### 当前功能
+
+- 支持 Context token budget、消息分组、裁剪和确定性 Summary。
+- 支持大 Tool Result Artifact 化和预览引用。
+- 支持创建 Session、关联多个 Run，并让 Child Run 继承 Session。
+- 支持 Session Memory 与 Agent Memory。
+- 支持 SQLite FTS5 搜索、TTL、软删除和过期清理。
+- 支持 `memory.search.started/completed`、`context.built/compacted` 和 `tool.result.artifactized` 事件。
+- 支持 Context/Memory Metrics、Prometheus 指标和 Memory Eval。
+- 支持 Session/Memory HTTP API 和 `agent-runtime memory demo`。
+
+### 已知限制
+
+- token 估算不是具体模型厂商的精确 tokenizer。
+- Summary 是确定性文本摘要，不是模型生成的语义摘要。
+- 当前只提供 SQLite FTS5，不提供 Embedding 或向量检索。
+- Memory 必须显式创建，不会自动永久保存所有对话。
+- 当前不提供 global Memory Scope。
+- Learning Console 暂无 Session/Memory 专用管理画布。
+
+### 测试与验收
+
+```powershell
+cd D:\AICoding\Agent
+$env:PYTHONPATH='src'
+python scripts/check_docs.py
+python -m pytest -p no:cacheprovider -o addopts= -q
+python -m compileall -q src tests
+node --check src\agent_runtime\lab\static\app.js
+agent-runtime memory demo "Which Python language do I prefer?" --remember "The user prefers Python for examples."
+```
+
+验收覆盖：
+
+- `50 passed`。
+- Context Change ID、日期顺序、路径和 ADR 关联通过文档门禁。
+- Session Scope 与 Agent Scope 隔离、TTL 和软删除行为正确。
+- Context 不拆分 Tool Call 组，并可对旧消息生成可追溯 Summary。
+- Memory 检索、source trace、Metrics 和 Eval 结果可查询。
+- 大 Tool Result 可写入 Artifact 并以引用进入 Checkpoint。
+- Memory CLI Demo 能检索并使用显式写入的偏好。
+
+### 后续计划
+
+进入 v0.8：实现 Sandbox、Tool Capability 与 Secret 安全边界。
+
+---
 <a id="e2026-08-14-007"></a>
 ## E2026-08-14-007：完成持久化多 Agent 编排基础 v0.6
 

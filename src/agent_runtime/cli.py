@@ -10,6 +10,7 @@ from .evals import EvalCase, EvalRunner, EvalSuite
 from .observability import ObservabilityService
 from .sdk import (
     create_local_runtime,
+    create_memory_demo_runtime,
     create_multi_agent_demo_runtime,
     demo_agent,
     multi_agent_demo_workflow,
@@ -47,6 +48,18 @@ def build_parser() -> argparse.ArgumentParser:
         "demo", help="Run Planner -> Worker -> Reviewer"
     )
     workflow_demo.add_argument("input", help="Task delegated through the three agents")
+
+    memory = subcommands.add_parser("memory", help="Explore Session and scoped memory")
+    memory_subcommands = memory.add_subparsers(dest="memory_command", required=True)
+    memory_demo = memory_subcommands.add_parser(
+        "demo", help="Create a Session, remember a fact, and retrieve it in a Run"
+    )
+    memory_demo.add_argument("input", help="Question answered with retrieved memory")
+    memory_demo.add_argument(
+        "--remember",
+        default="The user prefers Python for Agent Runtime examples.",
+        help="Session memory inserted before the demo Run",
+    )
 
     observe = subcommands.add_parser("observe", help="Inspect derived metrics and run traces")
     observe_subcommands = observe.add_subparsers(dest="observe_command", required=True)
@@ -126,6 +139,36 @@ async def async_main(arguments: argparse.Namespace) -> int:
         )
         await server.serve()
         return 0
+
+    if arguments.command == "memory":
+        runtime = create_memory_demo_runtime(
+            Path(arguments.workspace), arguments.state_dir
+        )
+        session = runtime.create_session({"demo": "memory"})
+        memory = runtime.remember(
+            arguments.remember,
+            scope="session",
+            scope_id=session.id,
+        )
+        run = await runtime.run(
+            "memory-demo",
+            arguments.input,
+            session_id=session.id,
+        )
+        _print(
+            {
+                "session": session.to_dict(),
+                "memory": memory.to_dict(),
+                "run": run.to_dict(),
+                "session_runs": [item.to_dict() for item in runtime.session_runs(session.id)],
+                "memory_events": [
+                    event.to_dict()
+                    for event in runtime.store.events_since(run.id)
+                    if event.type.startswith("memory.") or event.type.startswith("context.")
+                ],
+            }
+        )
+        return 0 if run.status == "completed" else 1
 
     if arguments.command == "workflow":
         runtime = create_multi_agent_demo_runtime(

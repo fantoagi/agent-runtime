@@ -22,6 +22,11 @@ class RunRelationType(StrEnum):
     WORKFLOW = "workflow"
 
 
+class MemoryScope(StrEnum):
+    SESSION = "session"
+    AGENT = "agent"
+
+
 class StepStatus(StrEnum):
     RUNNING = "running"
     WAITING_FOR_TOOLS = "waiting_for_tools"
@@ -249,6 +254,97 @@ class RunRelation:
             created_at=datetime.fromisoformat(value["created_at"]),
             metadata=value.get("metadata", {}),
         )
+
+
+@dataclass(slots=True)
+class Session:
+    id: str
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def create(cls, metadata: dict[str, Any] | None = None) -> Session:
+        return cls(id=new_id("session"), metadata=metadata or {})
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "metadata": self.metadata,
+        }
+
+
+@dataclass(slots=True)
+class MemoryRecord:
+    id: str
+    scope: MemoryScope
+    scope_id: str
+    content: str
+    source_run_id: str | None = None
+    source_trace_id: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    expires_at: datetime | None = None
+    deleted_at: datetime | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def create(
+        cls,
+        scope: MemoryScope,
+        scope_id: str,
+        content: str,
+        *,
+        source_run_id: str | None = None,
+        source_trace_id: str | None = None,
+        expires_at: datetime | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> MemoryRecord:
+        if not scope_id.strip():
+            raise ValueError("Memory scope_id must not be empty.")
+        if not content.strip():
+            raise ValueError("Memory content must not be empty.")
+        return cls(
+            id=new_id("memory"),
+            scope=MemoryScope(scope),
+            scope_id=scope_id,
+            content=content,
+            source_run_id=source_run_id,
+            source_trace_id=source_trace_id,
+            expires_at=expires_at,
+            metadata=metadata or {},
+        )
+
+    @property
+    def active(self) -> bool:
+        return self.deleted_at is None and (
+            self.expires_at is None or self.expires_at > utc_now()
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "scope": self.scope.value,
+            "scope_id": self.scope_id,
+            "content": self.content,
+            "source_run_id": self.source_run_id,
+            "source_trace_id": self.source_trace_id,
+            "created_at": self.created_at.isoformat(),
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
+            "active": self.active,
+            "metadata": self.metadata,
+        }
+
+
+@dataclass(slots=True)
+class MemorySearchResult:
+    record: MemoryRecord
+    rank: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"rank": self.rank, "record": self.record.to_dict()}
 
 
 @dataclass(slots=True)

@@ -24,6 +24,7 @@ REQUIRED_FILES = (
     "docs/ROADMAP.md",
     "docs/LEARNING.md",
     "docs/MULTI_AGENT.md",
+    "docs/CONTEXT_MEMORY.md",
     "docs/adr/README.md",
     "docs/templates/change-entry.md",
     "docs/templates/adr.md",
@@ -36,6 +37,8 @@ CORE_PATHS = {
     "src/agent_runtime/tools.py",
     "src/agent_runtime/storage.py",
     "src/agent_runtime/orchestration.py",
+    "src/agent_runtime/context.py",
+    "src/agent_runtime/memory.py",
     "src/agent_runtime/observability.py",
     "src/agent_runtime/evals.py",
 }

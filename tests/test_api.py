@@ -47,7 +47,7 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.6.0"
+        assert health.json()["version"] == "0.7.0"
 
         created = await client.post(
             "/runs", json={"agent_name": "demo", "input": "hello", "metadata": {"source": "test"}}
@@ -242,3 +242,49 @@ async def test_multi_agent_registry_relations_and_trace_tree_api(workspace: Path
     assert delegated.status_code == 200
     assert delegated.json()["relation"]["parent_run_id"] == manual_parent.id
     assert delegated_again.json()["run"]["id"] == delegated.json()["run"]["id"]
+
+
+@pytest.mark.asyncio
+async def test_session_and_memory_api(workspace: Path) -> None:
+    runtime = make_api_runtime(workspace)
+    app = create_app(runtime)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created_session = await client.post(
+            "/sessions", json={"metadata": {"user": "beginner"}}
+        )
+        session_id = created_session.json()["id"]
+        created_memory = await client.post(
+            "/memories",
+            json={
+                "content": "The preferred framework is FastAPI.",
+                "scope": "session",
+                "scope_id": session_id,
+            },
+        )
+        memory_id = created_memory.json()["id"]
+        created_run = await client.post(
+            "/runs",
+            json={
+                "agent_name": "demo",
+                "input": "Which FastAPI framework is preferred?",
+                "session_id": session_id,
+            },
+        )
+        await runtime.wait(created_run.json()["id"])
+        session_runs = await client.get(f"/sessions/{session_id}/runs")
+        search = await client.get(
+            "/memories/search",
+            params={"query": "FastAPI", "session_id": session_id},
+        )
+        deleted = await client.delete(f"/memories/{memory_id}")
+
+    assert created_session.status_code == 201
+    assert created_memory.status_code == 201
+    assert created_run.status_code == 202
+    assert session_runs.status_code == 200
+    assert [run["id"] for run in session_runs.json()] == [created_run.json()["id"]]
+    assert search.status_code == 200
+    assert search.json()[0]["record"]["id"] == memory_id
+    assert deleted.status_code == 200
+    assert deleted.json()["active"] is False

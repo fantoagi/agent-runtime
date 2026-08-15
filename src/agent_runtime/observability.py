@@ -103,6 +103,13 @@ class MetricsSnapshot:
     child_runs: int
     workflow_runs: int
     delegations: int
+    sessions: int
+    memories_total: int
+    memories_active: int
+    memories_deleted: int
+    memories_expired: int
+    memory_searches: int
+    context_compactions: int
     runs_by_status: dict[str, int]
     total_events: int
     events_by_type: dict[str, int]
@@ -126,6 +133,15 @@ class MetricsSnapshot:
                 "child_runs": self.child_runs,
                 "workflow_runs": self.workflow_runs,
                 "delegations": self.delegations,
+            },
+            "context_memory": {
+                "sessions": self.sessions,
+                "memories_total": self.memories_total,
+                "memories_active": self.memories_active,
+                "memories_deleted": self.memories_deleted,
+                "memories_expired": self.memories_expired,
+                "memory_searches": self.memory_searches,
+                "context_compactions": self.context_compactions,
             },
             "runs_by_status": self.runs_by_status,
             "total_events": self.total_events,
@@ -159,6 +175,13 @@ class MetricsSnapshot:
                 f"agent_runtime_child_runs_total {self.child_runs}",
                 f"agent_runtime_workflow_runs_total {self.workflow_runs}",
                 f"agent_runtime_delegations_total {self.delegations}",
+                f"agent_runtime_sessions_total {self.sessions}",
+                f"agent_runtime_memories_total {self.memories_total}",
+                f"agent_runtime_memories_active {self.memories_active}",
+                f"agent_runtime_memories_deleted_total {self.memories_deleted}",
+                f"agent_runtime_memories_expired_total {self.memories_expired}",
+                f"agent_runtime_memory_searches_total {self.memory_searches}",
+                f"agent_runtime_context_compactions_total {self.context_compactions}",
                 "# HELP agent_runtime_events_total Total persisted runtime events.",
                 "# TYPE agent_runtime_events_total gauge",
             ]
@@ -272,6 +295,7 @@ class ObservabilityService:
 
         if total_tokens == 0:
             total_tokens = prompt_tokens + completion_tokens
+        memory_counts = self.store.memory_counts()
         return MetricsSnapshot(
             generated_at=utc_now(),
             total_runs=len(runs),
@@ -279,6 +303,13 @@ class ObservabilityService:
             child_runs=child_runs,
             workflow_runs=workflow_runs,
             delegations=self.store.count_run_relations(),
+            sessions=self.store.count_sessions(),
+            memories_total=memory_counts["total"],
+            memories_active=memory_counts["active"],
+            memories_deleted=memory_counts["deleted"],
+            memories_expired=memory_counts["expired"],
+            memory_searches=event_counts["memory.search.completed"],
+            context_compactions=event_counts["context.compacted"],
             runs_by_status=dict(sorted(statuses.items())),
             total_events=sum(event_counts.values()),
             events_by_type=dict(sorted(event_counts.items())),

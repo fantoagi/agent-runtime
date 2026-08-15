@@ -11,11 +11,15 @@ from .domain import (
     AgentRun,
     Approval,
     Checkpoint,
+    MemoryRecord,
+    MemoryScope,
+    MemorySearchResult,
     Message,
     RunNotFound,
     RunRelation,
     RunRelationType,
     RuntimeEvent,
+    Session,
     Step,
     StepStatus,
     ToolCall,
@@ -139,6 +143,45 @@ MIGRATIONS: tuple[Migration, ...] = (
             ON run_relations(root_run_id, created_at);
         """,
     ),
+    (
+        4,
+        "sessions_context_and_memory",
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS session_runs (
+            session_id TEXT NOT NULL REFERENCES sessions(id),
+            run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(session_id, run_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_runs_session
+            ON session_runs(session_id, created_at);
+        CREATE TABLE IF NOT EXISTS memory_records (
+            id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL,
+            scope_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source_run_id TEXT REFERENCES runs(id),
+            source_trace_id TEXT,
+            created_at TEXT NOT NULL,
+            expires_at TEXT,
+            deleted_at TEXT,
+            metadata_json TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_scope_lifecycle
+            ON memory_records(scope, scope_id, deleted_at, expires_at, created_at);
+        CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+            memory_id UNINDEXED,
+            content,
+            tokenize='unicode61'
+        );
+        """,
+    ),
 )
 
 
@@ -225,15 +268,288 @@ class SQLiteStore:
                 "CREATE INDEX IF NOT EXISTS idx_approvals_execution ON approvals(tool_execution_id)"
             )
 
+    def create_session(self, session: Session) -> Session:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO sessions (id, created_at, updated_at, metadata_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    session.id,
+                    session.created_at.isoformat(),
+                    session.updated_at.isoformat(),
+                    self._dump(session.metadata),
+                ),
+            )
+        return session
+
+    def get_session(self, session_id: str) -> Session:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"Session {session_id} was not found.")
+        return self._session_from_row(row)
+
+    def list_sessions(self, limit: int = 50) -> list[Session]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [self._session_from_row(row) for row in rows]
+
+    def count_sessions(self) -> int:
+        with self._lock:
+            row = self._connection.execute("SELECT COUNT(*) AS count FROM sessions").fetchone()
+        return int(row["count"])
+
+    def attach_run_to_session(self, session_id: str, run_id: str) -> None:
+        with self._lock, self._connection:
+            self._require_session_locked(session_id)
+            self.get_run(run_id)
+            self._attach_run_to_session_locked(session_id, run_id)
+            self._append_event_locked(
+                run_id, "session.run.attached", {"session_id": session_id}
+            )
+
+    def _attach_run_to_session_locked(self, session_id: str, run_id: str) -> None:
+        self._connection.execute(
+            """
+            INSERT OR IGNORE INTO session_runs (session_id, run_id, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (session_id, run_id, utc_now().isoformat()),
+        )
+        self._connection.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (utc_now().isoformat(), session_id),
+        )
+
+    def _require_session_locked(self, session_id: str) -> None:
+        row = self._connection.execute(
+            "SELECT id FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Session {session_id} was not found.")
+
+    def session_runs(self, session_id: str) -> list[AgentRun]:
+        self.get_session(session_id)
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT runs.* FROM session_runs
+                JOIN runs ON runs.id = session_runs.run_id
+                WHERE session_runs.session_id = ?
+                ORDER BY session_runs.created_at, runs.id
+                """,
+                (session_id,),
+            ).fetchall()
+        return [self._run_from_row(row) for row in rows]
+
+    def session_for_run(self, run_id: str) -> Session | None:
+        self.get_run(run_id)
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT sessions.* FROM session_runs
+                JOIN sessions ON sessions.id = session_runs.session_id
+                WHERE session_runs.run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+        return self._session_from_row(row) if row else None
+
+    def save_memory(self, record: MemoryRecord) -> MemoryRecord:
+        with self._lock, self._connection:
+            if record.scope is MemoryScope.SESSION:
+                self._require_session_locked(record.scope_id)
+            if record.source_run_id is not None:
+                self.get_run(record.source_run_id)
+            self._connection.execute(
+                """
+                INSERT INTO memory_records (
+                    id, scope, scope_id, content, source_run_id, source_trace_id,
+                    created_at, expires_at, deleted_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.scope.value,
+                    record.scope_id,
+                    record.content,
+                    record.source_run_id,
+                    record.source_trace_id,
+                    record.created_at.isoformat(),
+                    record.expires_at.isoformat() if record.expires_at else None,
+                    record.deleted_at.isoformat() if record.deleted_at else None,
+                    self._dump(record.metadata),
+                ),
+            )
+            if record.deleted_at is None:
+                self._connection.execute(
+                    "INSERT INTO memory_fts(memory_id, content) VALUES (?, ?)",
+                    (record.id, record.content),
+                )
+        return record
+
+    def get_memory(self, memory_id: str) -> MemoryRecord:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM memory_records WHERE id = ?", (memory_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"Memory {memory_id} was not found.")
+        return self._memory_from_row(row)
+
+    def delete_memory(self, memory_id: str) -> MemoryRecord:
+        record = self.get_memory(memory_id)
+        if record.deleted_at is not None:
+            return record
+        record.deleted_at = utc_now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                "UPDATE memory_records SET deleted_at = ? WHERE id = ?",
+                (record.deleted_at.isoformat(), record.id),
+            )
+            self._connection.execute(
+                "DELETE FROM memory_fts WHERE memory_id = ?", (record.id,)
+            )
+        return record
+
+    def purge_expired_memories(self, now: datetime | None = None) -> int:
+        current = now or utc_now()
+        with self._lock, self._connection:
+            rows = self._connection.execute(
+                """
+                SELECT memory_records.id FROM memory_records
+                JOIN memory_fts ON memory_fts.memory_id = memory_records.id
+                WHERE memory_records.deleted_at IS NULL
+                  AND memory_records.expires_at IS NOT NULL
+                  AND memory_records.expires_at <= ?
+                """,
+                (current.isoformat(),),
+            ).fetchall()
+            ids = [str(row["id"]) for row in rows]
+            for memory_id in ids:
+                self._connection.execute(
+                    "DELETE FROM memory_fts WHERE memory_id = ?", (memory_id,)
+                )
+        return len(ids)
+
+    def search_memories(
+        self,
+        query: str,
+        scopes: list[tuple[MemoryScope, str]] | tuple[tuple[MemoryScope, str], ...],
+        *,
+        limit: int = 5,
+    ) -> list[MemorySearchResult]:
+        if limit < 1 or not scopes:
+            return []
+        scope_sql = " OR ".join("(memory_records.scope = ? AND memory_records.scope_id = ?)" for _ in scopes)
+        scope_values: list[str] = []
+        for scope, scope_id in scopes:
+            scope_values.extend([MemoryScope(scope).value, scope_id])
+        now = utc_now().isoformat()
+        fts_query = self._fts_query(query)
+        with self._lock:
+            if fts_query:
+                rows = self._connection.execute(
+                    f"""
+                    SELECT memory_records.*, bm25(memory_fts) AS search_rank
+                    FROM memory_fts
+                    JOIN memory_records ON memory_records.id = memory_fts.memory_id
+                    WHERE memory_fts MATCH ?
+                      AND ({scope_sql})
+                      AND memory_records.deleted_at IS NULL
+                      AND (memory_records.expires_at IS NULL OR memory_records.expires_at > ?)
+                    ORDER BY search_rank, memory_records.created_at DESC
+                    LIMIT ?
+                    """,
+                    [fts_query, *scope_values, now, limit],
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    f"""
+                    SELECT memory_records.*, 0.0 AS search_rank
+                    FROM memory_records
+                    WHERE ({scope_sql})
+                      AND deleted_at IS NULL
+                      AND (expires_at IS NULL OR expires_at > ?)
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    [*scope_values, now, limit],
+                ).fetchall()
+        return [
+            MemorySearchResult(self._memory_from_row(row), float(row["search_rank"]))
+            for row in rows
+        ]
+
+    def has_active_memories(
+        self,
+        scopes: list[tuple[MemoryScope, str]] | tuple[tuple[MemoryScope, str], ...],
+    ) -> bool:
+        if not scopes:
+            return False
+        scope_sql = " OR ".join("(scope = ? AND scope_id = ?)" for _ in scopes)
+        values: list[str] = []
+        for scope, scope_id in scopes:
+            values.extend([MemoryScope(scope).value, scope_id])
+        with self._lock:
+            row = self._connection.execute(
+                f"""
+                SELECT 1 FROM memory_records
+                WHERE ({scope_sql})
+                  AND deleted_at IS NULL
+                  AND (expires_at IS NULL OR expires_at > ?)
+                LIMIT 1
+                """,
+                [*values, utc_now().isoformat()],
+            ).fetchone()
+        return row is not None
+
+    def memory_counts(self) -> dict[str, int]:
+        now = utc_now().isoformat()
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?) THEN 1 ELSE 0 END) AS active,
+                    SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END) AS deleted,
+                    SUM(CASE WHEN deleted_at IS NULL AND expires_at IS NOT NULL AND expires_at <= ? THEN 1 ELSE 0 END) AS expired
+                FROM memory_records
+                """,
+                (now, now),
+            ).fetchone()
+        return {name: int(row[name] or 0) for name in ("total", "active", "deleted", "expired")}
+
+    @staticmethod
+    def _fts_query(query: str) -> str:
+        terms = [term.strip('"') for term in query.split() if term.strip('"')]
+        return " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
+
     def create_run_with_event(
         self,
         run: AgentRun,
         event_type: str,
         payload: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
     ) -> RuntimeEvent:
         with self._lock, self._connection:
+            if session_id is not None:
+                self._require_session_locked(session_id)
             self._insert_run(run)
-            return self._append_event_locked(run.id, event_type, payload)
+            event = self._append_event_locked(run.id, event_type, payload)
+            if session_id is not None:
+                self._attach_run_to_session_locked(session_id, run.id)
+                self._append_event_locked(
+                    run.id, "session.run.attached", {"session_id": session_id}
+                )
+            return event
 
     def create_run(self, run: AgentRun) -> None:
         with self._lock, self._connection:
@@ -276,12 +592,21 @@ class SQLiteStore:
     ) -> RunRelation:
         """Atomically persist a delegated child, its relation, and both event records."""
         with self._lock, self._connection:
+            session_id = child.metadata.get("session_id")
+            if session_id is not None:
+                self._require_session_locked(str(session_id))
             self._insert_run(child)
+            if session_id is not None:
+                self._attach_run_to_session_locked(str(session_id), child.id)
             self._insert_run_relation_locked(relation)
             self._append_event_locked(
                 relation.parent_run_id, "delegation.created", parent_event_payload
             )
             self._append_event_locked(child.id, "run.created", child_event_payload)
+            if session_id is not None:
+                self._append_event_locked(
+                    child.id, "session.run.attached", {"session_id": str(session_id)}
+                )
         return relation
 
     def _insert_run_relation_locked(self, relation: RunRelation) -> None:
@@ -1041,6 +1366,28 @@ class SQLiteStore:
     def _run_from_row(self, row: sqlite3.Row) -> AgentRun:
         return AgentRun.from_dict(
             {**dict(row), "metadata": self._load(row["metadata_json"])}
+        )
+
+    def _session_from_row(self, row: sqlite3.Row) -> Session:
+        return Session(
+            id=row["id"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            metadata=self._load(row["metadata_json"]),
+        )
+
+    def _memory_from_row(self, row: sqlite3.Row) -> MemoryRecord:
+        return MemoryRecord(
+            id=row["id"],
+            scope=MemoryScope(row["scope"]),
+            scope_id=row["scope_id"],
+            content=row["content"],
+            source_run_id=row["source_run_id"],
+            source_trace_id=row["source_trace_id"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            expires_at=datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None,
+            deleted_at=datetime.fromisoformat(row["deleted_at"]) if row["deleted_at"] else None,
+            metadata=self._load(row["metadata_json"]),
         )
 
     def _run_relation_from_row(self, row: sqlite3.Row) -> RunRelation:

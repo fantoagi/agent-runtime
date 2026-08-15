@@ -114,6 +114,7 @@ async def test_runtime_completes_tool_loop_and_persists_events(workspace: Path) 
         "run.started",
         "checkpoint.created",
         "model.requested",
+        "context.built",
         "model.completed",
         "checkpoint.created",
         "tool.requested",
@@ -123,6 +124,7 @@ async def test_runtime_completes_tool_loop_and_persists_events(workspace: Path) 
         "step.completed",
         "checkpoint.created",
         "model.requested",
+        "context.built",
         "model.completed",
         "model.delta",
         "step.completed",
@@ -423,7 +425,7 @@ def test_schema_migrates_existing_v01_database(workspace: Path) -> None:
     connection.close()
 
     store = SQLiteStore(database)
-    assert store.schema_version == 3
+    assert store.schema_version == 4
     columns = {
         row["name"]
         for row in store._connection.execute("PRAGMA table_info(approvals)").fetchall()

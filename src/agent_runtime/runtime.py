@@ -3,19 +3,25 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal
 
+from .context import ContextBuilder, ContextBuildResult
 from .domain import (
     AgentDefinition,
     AgentRun,
     Approval,
     Checkpoint,
+    MemoryRecord,
+    MemoryScope,
+    MemorySearchResult,
     Message,
     RunLimitExceeded,
     RunRelation,
     RunRelationType,
     RunStatus,
+    Session,
     TERMINAL_STATUSES,
     Step,
     StepStatus,
@@ -27,6 +33,7 @@ from .domain import (
     new_id,
     utc_now,
 )
+from .memory import MemoryStore
 from .orchestration import AgentRegistry
 from .providers import (
     ModelProvider,
@@ -48,6 +55,13 @@ class RuntimeConfig:
     model_timeout_seconds: float = 90.0
     event_poll_interval_seconds: float = 0.05
     max_model_retries: int = 2
+    context_token_budget: int = 4096
+    context_recent_groups: int = 4
+    context_summary_max_chars: int = 1000
+    memory_search_limit: int = 5
+    memory_token_budget: int = 512
+    large_tool_result_chars: int = 4000
+    large_tool_result_preview_chars: int = 400
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -56,6 +70,12 @@ class RuntimeConfig:
         self.artifact_path = Path(
             self.artifact_path or self.database_path.parent / "artifacts"
         ).resolve()
+        if self.context_token_budget < 64:
+            raise ValueError("context_token_budget must be at least 64.")
+        if self.memory_search_limit < 0:
+            raise ValueError("memory_search_limit must not be negative.")
+        if self.large_tool_result_chars < 128:
+            raise ValueError("large_tool_result_chars must be at least 128.")
 
 
 class Runtime:
@@ -65,12 +85,20 @@ class Runtime:
         provider: ModelProvider | StreamingModelProvider,
         tools: ToolRegistry,
         store: SQLiteStore | None = None,
+        memory_store: MemoryStore | None = None,
     ) -> None:
         self.config = config
         self.provider = provider
         self.tools = tools
         self.store = store or SQLiteStore(config.database_path)
+        self.memory: MemoryStore = memory_store or self.store
         self.artifacts = ArtifactStore(config.artifact_path)
+        self.context_builder = ContextBuilder(
+            config.context_token_budget,
+            recent_groups=config.context_recent_groups,
+            summary_max_chars=config.context_summary_max_chars,
+            memory_token_budget=config.memory_token_budget,
+        )
         self.agent_registry = AgentRegistry(
             validator=lambda agent: self.tools.definitions_for(agent.tools)
         )
@@ -83,14 +111,136 @@ class Runtime:
     def list_agents(self) -> list[AgentDefinition]:
         return self.agent_registry.list()
 
+    def create_session(self, metadata: dict[str, Any] | None = None) -> Session:
+        return self.store.create_session(Session.create(metadata))
+
+    def session_runs(self, session_id: str) -> list[AgentRun]:
+        return self.store.session_runs(session_id)
+
+    def remember(
+        self,
+        content: str,
+        *,
+        scope: MemoryScope | str,
+        scope_id: str,
+        source_run_id: str | None = None,
+        ttl_seconds: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> MemoryRecord:
+        memory_scope = MemoryScope(scope)
+        if memory_scope is MemoryScope.SESSION:
+            self.store.get_session(scope_id)
+        source_trace_id = None
+        if source_run_id is not None:
+            source_run = self.store.get_run(source_run_id)
+            source_trace_id = str(
+                source_run.metadata.get("trace_id") or source_run.id
+            )
+        expires_at = (
+            utc_now() + timedelta(seconds=ttl_seconds)
+            if ttl_seconds is not None
+            else None
+        )
+        if ttl_seconds is not None and ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive.")
+        record = MemoryRecord.create(
+            memory_scope,
+            scope_id,
+            content,
+            source_run_id=source_run_id,
+            source_trace_id=source_trace_id,
+            expires_at=expires_at,
+            metadata=metadata,
+        )
+        self.memory.save_memory(record)
+        if source_run_id is not None:
+            self._event(
+                source_run_id,
+                "memory.created",
+                {
+                    "memory_id": record.id,
+                    "scope": record.scope.value,
+                    "scope_id": record.scope_id,
+                    "expires_at": record.expires_at.isoformat()
+                    if record.expires_at
+                    else None,
+                },
+            )
+        return record
+
+    def search_memory(
+        self,
+        query: str,
+        *,
+        session_id: str | None = None,
+        agent_name: str | None = None,
+        limit: int | None = None,
+        run_id: str | None = None,
+    ) -> list[MemorySearchResult]:
+        scopes: list[tuple[MemoryScope, str]] = []
+        if session_id is not None:
+            self.store.get_session(session_id)
+            scopes.append((MemoryScope.SESSION, session_id))
+        if agent_name is not None:
+            scopes.append((MemoryScope.AGENT, agent_name))
+        if not scopes:
+            raise ValueError("Memory search requires session_id or agent_name.")
+        search_limit = self.config.memory_search_limit if limit is None else limit
+        if search_limit < 1:
+            return []
+        if run_id is not None:
+            self._event(
+                run_id,
+                "memory.search.started",
+                {
+                    "query": query,
+                    "scopes": [
+                        {"scope": scope.value, "scope_id": scope_id}
+                        for scope, scope_id in scopes
+                    ],
+                    "limit": search_limit,
+                },
+            )
+        results = self.memory.search_memories(query, scopes, limit=search_limit)
+        if run_id is not None:
+            self._event(
+                run_id,
+                "memory.search.completed",
+                {
+                    "query": query,
+                    "result_count": len(results),
+                    "memory_ids": [result.record.id for result in results],
+                },
+            )
+        return results
+
+    def forget_memory(self, memory_id: str) -> MemoryRecord:
+        record = self.memory.delete_memory(memory_id)
+        if record.source_run_id is not None:
+            self._event(
+                record.source_run_id,
+                "memory.deleted",
+                {"memory_id": record.id},
+            )
+        return record
+
+    def purge_expired_memories(self) -> int:
+        return self.memory.purge_expired_memories()
+
     def create_run(
         self,
         agent: AgentDefinition | str,
         input_text: str,
         metadata: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
     ) -> AgentRun:
         definition = self._resolve_agent(agent)
         run_metadata = {**self.config.metadata, **(metadata or {})}
+        session_id = session_id or run_metadata.get("session_id")
+        if session_id is not None:
+            self.store.get_session(str(session_id))
+            run_metadata["session_id"] = str(session_id)
         run_metadata.setdefault("trace_id", new_id("trace"))
         run = AgentRun.create(
             definition.name,
@@ -106,7 +256,9 @@ class Runtime:
                 "agent_name": definition.name,
                 "input": input_text,
                 "trace_id": run.metadata["trace_id"],
+                "session_id": session_id,
             },
+            session_id=str(session_id) if session_id is not None else None,
         )
         return run
 
@@ -140,7 +292,13 @@ class Runtime:
                 "run_kind": "workflow",
                 "workflow_name": workflow_name,
                 "workflow_type": workflow_type,
+                "session_id": run_metadata.get("session_id"),
             },
+            session_id=(
+                str(run_metadata["session_id"])
+                if run_metadata.get("session_id") is not None
+                else None
+            ),
         )
         return run
 
@@ -267,6 +425,8 @@ class Runtime:
         root_run_id = self.store.root_run_id(parent_run_id)
         root_run = self.store.get_run(root_run_id)
         child_metadata = {**self.config.metadata, **(metadata or {})}
+        if parent.metadata.get("session_id") is not None:
+            child_metadata.setdefault("session_id", parent.metadata["session_id"])
         child_metadata.update(
             {
                 "trace_id": child_metadata.get("trace_id") or new_id("trace"),
@@ -339,8 +499,10 @@ class Runtime:
         agent: AgentDefinition | str,
         input_text: str,
         metadata: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
     ) -> AgentRun:
-        run = self.create_run(agent, input_text, metadata)
+        run = self.create_run(agent, input_text, metadata, session_id=session_id)
         return await self._execute(run.id)
 
     def start(
@@ -348,8 +510,10 @@ class Runtime:
         agent: AgentDefinition | str,
         input_text: str,
         metadata: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
     ) -> AgentRun:
-        run = self.create_run(agent, input_text, metadata)
+        run = self.create_run(agent, input_text, metadata, session_id=session_id)
         self.track_task(run.id, asyncio.create_task(self._execute(run.id)))
         return run
 
@@ -910,8 +1074,11 @@ class Runtime:
             return
 
         execution.status = ToolExecutionStatus.COMPLETED
-        execution.result_content = result.content
-        execution.result_data = result.data
+        result_content, result_data = self._artifactize_tool_result(
+            run, execution, result.content, result.data
+        )
+        execution.result_content = result_content
+        execution.result_data = result_data
         execution.error = None
         execution.completed_at = utc_now()
         run.tool_call_count += 1
@@ -926,11 +1093,49 @@ class Runtime:
                 "tool_execution_id": execution.id,
                 "tool_call_id": call.id,
                 "tool_name": call.name,
-                "content": result.content,
+                "content": execution.result_content,
+                "artifact": (execution.result_data or {}).get("_artifact"),
             },
             run=run,
             checkpoint=checkpoint,
         )
+
+    def _artifactize_tool_result(
+        self,
+        run: AgentRun,
+        execution: ToolExecution,
+        content: str,
+        data: dict[str, Any] | None,
+    ) -> tuple[str, dict[str, Any] | None]:
+        if len(content) <= self.config.large_tool_result_chars:
+            return content, data
+        path = self.artifacts.write_text(
+            run.id,
+            f"tool-results/{execution.id}.txt",
+            content,
+        )
+        preview_chars = self.config.large_tool_result_preview_chars
+        preview = content[:preview_chars]
+        artifact = {
+            "path": str(path),
+            "characters": len(content),
+            "preview_characters": len(preview),
+        }
+        result_data = {**(data or {}), "_artifact": artifact}
+        replacement = (
+            f"[Tool result stored as artifact: {path}; characters={len(content)}]"
+            f"\nPreview:\n{preview}"
+        )
+        self._event(
+            run.id,
+            "tool.result.artifactized",
+            {
+                "tool_execution_id": execution.id,
+                "tool_call_id": execution.tool_call.id,
+                **artifact,
+            },
+        )
+        return replacement, result_data
 
     def _after_tool_handler(self, execution: ToolExecution) -> None:
         """Failure-injection seam: called after a handler returns, before durable completion."""
@@ -942,6 +1147,8 @@ class Runtime:
         agent: AgentDefinition,
         step_index: int,
     ) -> ModelResponse:
+        context = self._build_model_context(run, messages, agent)
+        model_messages = context.messages
         last_error: Exception | None = None
         for attempt in range(self.config.max_model_retries + 1):
             try:
@@ -956,7 +1163,7 @@ class Runtime:
                         self._consume_model_stream(
                             run,
                             stream(
-                                messages,
+                                model_messages,
                                 self.tools.definitions_for(agent.tools),
                                 agent.model,
                             ),
@@ -978,7 +1185,7 @@ class Runtime:
                     return response
                 return await asyncio.wait_for(
                     self.provider.complete(
-                        messages,
+                        model_messages,
                         self.tools.definitions_for(agent.tools),
                         agent.model,
                     ),
@@ -1054,6 +1261,43 @@ class Runtime:
             usage=usage,
             raw_response={"_streamed": True},
         )
+
+    def _build_model_context(
+        self,
+        run: AgentRun,
+        messages: list[Message],
+        agent: AgentDefinition,
+    ) -> ContextBuildResult:
+        session_id = run.metadata.get("session_id")
+        scopes: list[tuple[MemoryScope, str]] = [(MemoryScope.AGENT, agent.name)]
+        if session_id is not None:
+            scopes.insert(0, (MemoryScope.SESSION, str(session_id)))
+        memories: list[MemorySearchResult] = []
+        if self.config.memory_search_limit and self.memory.has_active_memories(scopes):
+            query = next(
+                (
+                    message.content
+                    for message in reversed(messages)
+                    if message.role == "user" and message.content
+                ),
+                run.input,
+            )
+            memories = self.search_memory(
+                query,
+                session_id=str(session_id) if session_id is not None else None,
+                agent_name=agent.name,
+                limit=self.config.memory_search_limit,
+                run_id=run.id,
+            )
+        result = self.context_builder.build(messages, memories=memories)
+        self._event(run.id, "context.built", result.to_event_payload())
+        if result.compacted:
+            self._event(
+                run.id,
+                "context.compacted",
+                result.to_event_payload(),
+            )
+        return result
 
     def _load_messages(self, run: AgentRun) -> list[Message]:
         checkpoint = self.store.latest_checkpoint(run.id)

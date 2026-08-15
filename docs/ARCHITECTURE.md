@@ -1,12 +1,12 @@
 # Agent Runtime 当前架构
 
-> 最近更新：2026-08-14
-> 关联记录：[E2026-08-14-007](./CHANGELOG.md#e2026-08-14-007)
-> 关联决策：[ADR-0010](./adr/0010-parent-child-run-delegation.md)、[ADR-0009](./adr/0009-learning-console.md)、[ADR-0008](./adr/0008-observability-evals.md)、[ADR-0007](./adr/0007-model-token-streaming.md)、[ADR-0006](./adr/0006-fastapi-sse-adapter.md)、[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
+> 最近更新：2026-08-15
+> 关联记录：[E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001)
+> 关联决策：[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)、[ADR-0009](./adr/0009-learning-console.md)、[ADR-0008](./adr/0008-observability-evals.md)、[ADR-0007](./adr/0007-model-token-streaming.md)、[ADR-0006](./adr/0006-fastapi-sse-adapter.md)、[ADR-0005](./adr/0005-tool-execution-idempotency.md)、[ADR-0001](./adr/0001-runtime-kernel.md)、[ADR-0002](./adr/0002-model-provider-protocol.md)、[ADR-0003](./adr/0003-sqlite-event-checkpoint.md)、[ADR-0004](./adr/0004-tool-security-boundary.md)
 
 ## 1. 系统目标和边界
 
-当前系统是一个面向开发者的、可持久化 Agent Runtime。它既支持单 Agent 模型/工具循环，也支持由 Parent Run 委派独立 Child Run 的单机多 Agent Workflow，并保留运行状态、父子关系、事件和 Checkpoint。
+当前系统是一个面向开发者的、可持久化 Agent Runtime。它既支持单 Agent 模型/工具循环，也支持由 Parent Run 委派独立 Child Run 的单机多 Agent Workflow，并通过 ContextBuilder、Session 和 Scoped Memory 管理模型输入与跨 Run 信息复用。
 
 当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。它不是分布式调度平台，也不是不可信代码沙箱。
 
@@ -21,6 +21,9 @@ flowchart TD
     Workflows["Sequential / Parallel Workflow"]
     Registry["AgentRegistry"]
     Runtime["Runtime Kernel"]
+    Context["ContextBuilder"]
+    Sessions["Session / session_runs"]
+    Memory["MemoryStore / SQLite FTS5"]
     Model["Model Provider"]
     Tools["Tool Registry / Executor"]
     State["SQLite State Store"]
@@ -39,7 +42,10 @@ flowchart TD
     Workflows --> Runtime
     Workflows --> Registry
     Registry --> Runtime
-    Runtime --> Model
+    Runtime --> Context
+    Context --> Model
+    Runtime --> Sessions
+    Runtime --> Memory
     Runtime --> Tools
     Runtime --> State
     Runtime --> Relations
@@ -49,6 +55,7 @@ flowchart TD
     Relations --> Observe
     Events --> Observe
     State --> Observe
+    Memory --> Observe
     Events --> LabAdapter
     Observe --> LabAdapter
     Evals --> Runtime
@@ -71,8 +78,11 @@ flowchart TD
 - 将关键动作写入持久化 Event Log。
 - 通过 `delegate()` 创建独立 Child Run，并使用稳定 delegation key 实现幂等委派。
 - Parent Cancel 递归传播到活动 Child Run。
+- 创建 Session、关联 Run，并让 Child Run 继承 Parent Session。
+- 在模型调用前检索 Scoped Memory，并通过 ContextBuilder 构造受预算输入。
+- 将大 Tool Result 转存到 Artifact Store。
 
-公开入口包括 `run()`、`start()`、`wait()`、`stream()`、`pause()`、`resume()`、`cancel()`、`delegate()`、`begin_workflow()`、`finish_workflow()` 和 `resolve_approval()`。
+公开入口包括 `run()`、`start()`、`wait()`、`stream()`、`pause()`、`resume()`、`cancel()`、`delegate()`、`begin_workflow()`、`finish_workflow()`、`resolve_approval()`、`create_session()`、`session_runs()`、`remember()`、`search_memory()`、`forget_memory()` 和 `purge_expired_memories()`。
 
 ## 3.1 Multi-Agent Orchestration
 
@@ -103,6 +113,50 @@ flowchart LR
 Parent 和 Child 都有独立 Run ID、Trace ID、Event 和 Checkpoint。Root Run 的 `root_run_id` / `root_trace_id` 负责把整棵树关联起来；Child 自己的 `trace_id` 不与 Parent 混用。
 
 首次委派在一个 SQLite 事务中写入 Child Run、RunRelation、Parent `delegation.created` 和 Child `run.created`。恢复时，如果稳定 delegation key 已存在，Runtime 复用原 Child；这避免 Parent 恢复后重复执行同一委派。
+
+## 3.2 Context、Session 与 Memory
+
+v0.7 在完整 Checkpoint 历史与 Model Provider 之间增加 Context Build 层：
+
+```mermaid
+flowchart LR
+    Checkpoint["Checkpoint History"]
+    Session["Session / Agent Scope"]
+    Search["MemoryStore Search"]
+    Builder["ContextBuilder"]
+    Budget["Budgeted Model Messages"]
+    Provider["Model Provider"]
+
+    Checkpoint --> Builder
+    Session --> Search
+    Search --> Builder
+    Builder --> Budget
+    Budget --> Provider
+```
+
+`ContextBuilder` 只构造模型输入副本，不修改 Checkpoint。它使用 Provider-neutral 近似 token 估算，并按以下优先级选择消息：System Prompt、未完成 Tool Call 组、最近消息组、预算允许的旧消息。Assistant Tool Call 与对应 Tool Result 作为不可拆分组；被省略的旧消息生成确定性 Summary。
+
+Session 是多个 Run 的显式持久化容器。`sessions` 保存 Session 本身，`session_runs` 保存一对多关系；一个 Run 最多属于一个 Session，Child Run 继承 Parent 的 Session。
+
+`MemoryStore` 协议隔离检索实现。当前 `SQLiteStore` 通过 FTS5 实现关键词搜索，只允许：
+
+- `session` Scope：仅指定 Session 可见。
+- `agent` Scope：仅指定 Agent 可见，可跨 Session。
+
+Memory Record 保存 content、Scope、source Run、source Trace、TTL、软删除时间和 metadata。Runtime 不自动保存全部对话，必须由应用显式调用 `remember()`。
+
+每次模型调用的处理顺序为：
+
+```text
+Checkpoint messages
++ allowed Session/Agent scopes
+→ memory.search.started/completed
+→ ContextBuilder.build()
+→ context.built / context.compacted
+→ Model Provider
+```
+
+Context 与 Memory 的完整说明见 [CONTEXT_MEMORY.md](./CONTEXT_MEMORY.md)。
 
 ## 4. Run 状态机
 
@@ -168,13 +222,17 @@ approvals
 steps
 tool_executions
 run_relations
+sessions
+session_runs
+memory_records
+memory_fts
 ```
 
-数据库启用 WAL 和 foreign keys，并通过编号 migration 初始化和升级 schema。v0.6 schema version 为 `3`；`run_relations` 对 `child_run_id` 和 `parent_run_id + delegation_key` 建立唯一约束。`Step` 表示一次模型决策，`ToolExecution` 表示该决策内有序的工具调用。
+数据库启用 WAL 和 foreign keys，并通过编号 migration 初始化和升级 schema。v0.7 schema version 为 `4`；`run_relations` 对 `child_run_id` 和 `parent_run_id + delegation_key` 建立唯一约束，`session_runs` 限制一个 Run 最多属于一个 Session，`memory_fts` 为活动 Memory 提供 FTS5 索引。`Step` 表示一次模型决策，`ToolExecution` 表示该决策内有序的工具调用。
 
 ToolExecution 保存参数、状态、结果、错误、审批关系、side-effect 标记和 idempotency key。工具完成状态、Run 计数、Checkpoint 和对应 Event 可以在同一 SQLite 事务中提交，降低半状态风险。
 
-Checkpoint 保存恢复所需的消息历史、模型步骤和工具调用计数。`ArtifactStore` 将大文本产物写入按 Run 隔离的目录，但通用大结果自动转存尚未接入执行循环。
+Checkpoint 保存恢复所需的消息历史、模型步骤和工具调用计数。`ArtifactStore` 将大文本产物写入按 Run 隔离的目录；当 Tool Result 超过配置阈值时，Runtime 自动保存完整 Artifact，并让 ToolExecution 与 Checkpoint 只保留路径、大小和预览。
 
 ## 8. Event Log
 
@@ -189,9 +247,12 @@ approval.requested / resolved
 step.completed
 workflow.started / recovered / resumed / completed / failed / cancelled
 delegation.created / completed / failed / cancelled
+memory.search.started / completed
+context.built / compacted
+tool.result.artifactized
 ```
 
-`Runtime.stream()` 轮询 SQLite 中的新事件并按 sequence 输出。Provider 层的 `ModelTokenDelta` 是短生命周期增量；Runtime 将它映射为可审计的 `model.delta` 事件。最终 assistant message、Tool Call 和工具结果仍通过 Step / Checkpoint 持久化。该接口为 SSE、WebSocket 或消息队列适配保留稳定消费边界。
+`Runtime.stream()` 轮询 SQLite 中的新事件并按 sequence 输出。Provider 层的 `ModelTokenDelta` 是短生命周期增量；Runtime 将它映射为可审计的 `model.delta` 事件。最终 assistant message、Tool Call 和工具结果仍通过 Step / Checkpoint 持久化。Context Build、Memory Search 和 Tool Result Artifactization 也进入同一 Event Log。该接口为 SSE、WebSocket 或消息队列适配保留稳定消费边界。
 
 ## 9. API、SDK 与 CLI
 
@@ -213,6 +274,7 @@ agent-runtime resolve-unknown
 agent-runtime observe metrics
 agent-runtime observe trace <run-id>
 agent-runtime eval demo
+agent-runtime memory demo
 ```
 
 核心 Runtime 不依赖 CLI 或 HTTP 框架。
@@ -221,7 +283,7 @@ agent-runtime eval demo
 
 FastAPI 位于 Application / Adapter Layer，只调用 Runtime、SQLiteStore 和 Runtime.stream()，不直接实现模型循环、工具执行或 SQLite 连接操作。
 
-- `POST /runs` 创建并异步启动 Run，返回 `202 Accepted`。
+- `POST /runs` 创建并异步启动 Run，返回 `202 Accepted`，并可接收 `session_id`。
 - `GET /runs/{run_id}` 查询持久化 Run 状态。
 - `GET /runs/{run_id}/events` 读取按 sequence 排序的历史事件。
 - `GET /runs/{run_id}/events/stream?after_sequence=N` 通过 SSE 轮询 `Runtime.stream()`，使用 Event sequence 作为 SSE id，支持断点续传。
@@ -231,6 +293,8 @@ FastAPI 位于 Application / Adapter Layer，只调用 Runtime、SQLiteStore 和
 - `POST /runs/{parent_run_id}/delegations` 通过正式 Runtime 路径创建或复用 Child Run。
 - `GET /runs/{run_id}/relations` 查询 Parent 和直接 Child 关系。
 - `GET /runs/{run_id}/trace/tree` 从 Parent 或任意 Child 查询完整 Trace Tree。
+- `/sessions` 与 `/sessions/{session_id}/runs` 创建和查询 Session。
+- `/memories` 与 `/memories/search` 提供显式写入、检索、删除和过期清理。
 
 v0.4 起，SSE 仍然只有一个事件流协议；客户端根据 `type` 区分 `model.delta`、`tool.completed` 等事件。`model.delta` 是持久化 Runtime Event，因此支持 `after_sequence` 断点续传；Provider 不支持 streaming 时，Runtime 会回退为一次性的完整响应事件。
 
@@ -240,7 +304,7 @@ v0.4 起，SSE 仍然只有一个事件流协议；客户端根据 `type` 区分
 
 - `RunTrace`：包含一个 Run root span，以及 Model、Tool、Approval 子 span。
 - `TraceTree`：使用 `RunRelation` 将多个独立 RunTrace 组合为 Parent/Child 树。
-- `MetricsSnapshot`：包含 Run 状态分布、Root/Child/Workflow/Delegation 计数、事件计数、模型/工具/审批次数、token usage、平均延迟和 p95 Run 延迟。
+- `MetricsSnapshot`：包含 Run 状态分布、Root/Child/Workflow/Delegation 计数、Session/Memory 数量、Memory Search、Context Compaction、事件计数、模型/工具/审批次数、token usage、平均延迟和 p95 Run 延迟。
 - Prometheus 文本：通过固定 `agent_runtime_*` 指标名称导出。
 
 每个新 Run 的 metadata 自动包含 `trace_id`。Trace Span 使用事件 sequence 和 timestamp 构造，因此可以回溯到原始事件，但当前没有修改 SQLite Event schema，也没有依赖 OpenTelemetry SDK。
@@ -255,6 +319,8 @@ FastAPI 暴露：
 ## 9.3 Eval Runner
 
 `EvalRunner` 使用与生产执行相同的 Runtime 路径逐个运行 `EvalCase`，不会绕过 Provider、Tool、Checkpoint 或 Event Log。每个 Eval Run 的 metadata 保存 `eval_report_id`、`eval_suite` 和 `eval_case`，因此评估结果可以反查完整 Trace 和事件。
+
+`MemoryEvalRunner` 复用相同 Eval Report 和 Artifact 机制，可验证关键词查询命中内容与 `expected_memory_count`。
 
 当前内置评估器：
 
@@ -286,9 +352,9 @@ Snapshot 使用 `SQLiteStore.steps_for_run()` 和 `tool_executions_for_run()` �
 
 事件“回放”只移动浏览器展示游标。它不会暂停 Runtime asyncio Task，也不会改变 Run 状态机、Event sequence 或恢复语义。该边界保证 Learning Console 可以随功能演进扩展，而 Runtime Kernel 不依赖 UI。
 
-> 最近更新：2026-08-14
-> 关联记录：[E2026-08-14-007](./CHANGELOG.md#e2026-08-14-007)
-> 关联决策：[ADR-0010](./adr/0010-parent-child-run-delegation.md)、[ADR-0009](./adr/0009-learning-console.md)
+> 最近更新：2026-08-15
+> 关联记录：[E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001)
+> 关联决策：[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)、[ADR-0009](./adr/0009-learning-console.md)
 
 ## 10. 安全边界
 
@@ -321,6 +387,7 @@ Snapshot 使用 `SQLiteStore.steps_for_run()` 和 `tool_executions_for_run()` �
 - 新增 `ModelProvider` 实现。
 - 注册新的受控工具。
 - 将 SQLite repository 替换为其他持久化实现。
+- 增加新的 `MemoryStore` 实现，例如 Embedding 或向量数据库检索，同时保留 Scope 和生命周期契约。
 - 在事件消费边界上增加 WebSocket、消息队列或 OpenTelemetry Exporter。
 - 增加独立 `SandboxExecutor`，而不是让 Runtime 直接执行 Shell。
 - 将当前单机 Workflow 调度替换为可插拔 Queue / Worker Adapter，同时保持 RunRelation 和 delegation key 契约。
@@ -329,7 +396,7 @@ Snapshot 使用 `SQLiteStore.steps_for_run()` 和 `tool_executions_for_run()` �
 
 - 分布式 Worker 和高可用调度。
 - 多租户、RBAC 和配额。
-- 向量数据库与长期记忆治理。
+- 向量数据库、自动 Memory 提取与 global Memory Scope。
 - 任意代码或 Shell 执行。
 - 面向生产的完整 Web 管理控制台（当前仅有本地 Learning Console）。
 - 外部 OpenTelemetry Collector、时序数据库和分布式 Trace Backend。

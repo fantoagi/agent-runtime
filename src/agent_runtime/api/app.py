@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from ..domain import AgentRun, Approval, RunNotFound, RuntimeEvent
+from ..domain import AgentRun, Approval, MemoryScope, RunNotFound, RuntimeEvent
 from ..observability import ObservabilityService
 from ..runtime import Runtime
 from ..sdk import create_local_runtime, demo_agent
@@ -23,6 +23,20 @@ except ImportError as error:  # pragma: no cover - exercised when the optional e
 class CreateRunRequest(BaseModel):
     agent_name: str = "demo"
     input: str = Field(min_length=1)
+    session_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CreateSessionRequest(BaseModel):
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CreateMemoryRequest(BaseModel):
+    content: str = Field(min_length=1)
+    scope: str
+    scope_id: str = Field(min_length=1)
+    source_run_id: str | None = None
+    ttl_seconds: float | None = Field(default=None, gt=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -87,7 +101,7 @@ def create_app(
     """
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.6.0",
+        version="0.7.0",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
     )
     app.state.runtime = runtime
@@ -103,7 +117,65 @@ def create_app(
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "runtime": "agent-runtime", "version": "0.6.0"}
+        return {"status": "ok", "runtime": "agent-runtime", "version": "0.7.0"}
+
+    @app.post("/sessions", status_code=status.HTTP_201_CREATED)
+    async def create_session(request: CreateSessionRequest) -> dict[str, Any]:
+        return runtime.create_session(request.metadata).to_dict()
+
+    @app.get("/sessions")
+    async def list_sessions(limit: int = Query(50, ge=1, le=1000)) -> list[dict[str, Any]]:
+        return [session.to_dict() for session in runtime.store.list_sessions(limit)]
+
+    @app.get("/sessions/{session_id}")
+    async def get_session(session_id: str) -> dict[str, Any]:
+        return runtime.store.get_session(session_id).to_dict()
+
+    @app.get("/sessions/{session_id}/runs")
+    async def get_session_runs(session_id: str) -> list[dict[str, Any]]:
+        return [run.to_dict() for run in runtime.session_runs(session_id)]
+
+    @app.post("/memories", status_code=status.HTTP_201_CREATED)
+    async def create_memory(request: CreateMemoryRequest) -> dict[str, Any]:
+        try:
+            return runtime.remember(
+                request.content,
+                scope=MemoryScope(request.scope),
+                scope_id=request.scope_id,
+                source_run_id=request.source_run_id,
+                ttl_seconds=request.ttl_seconds,
+                metadata=request.metadata,
+            ).to_dict()
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.get("/memories/search")
+    async def search_memories(
+        query: str = Query(min_length=1),
+        session_id: str | None = None,
+        agent_name: str | None = None,
+        limit: int = Query(5, ge=1, le=100),
+    ) -> list[dict[str, Any]]:
+        try:
+            return [
+                result.to_dict()
+                for result in runtime.search_memory(
+                    query,
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    limit=limit,
+                )
+            ]
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.delete("/memories/{memory_id}")
+    async def delete_memory(memory_id: str) -> dict[str, Any]:
+        return runtime.forget_memory(memory_id).to_dict()
+
+    @app.post("/memories/purge-expired")
+    async def purge_expired_memories() -> dict[str, int]:
+        return {"purged": runtime.purge_expired_memories()}
 
     @app.get("/agents")
     async def list_agents() -> list[dict[str, Any]]:
@@ -189,7 +261,12 @@ def create_app(
     async def create_run(request: CreateRunRequest) -> dict[str, Any]:
         agent_name = request.agent_name or app.state.default_agent
         try:
-            run = runtime.start(agent_name, request.input, request.metadata)
+            run = runtime.start(
+                agent_name,
+                request.input,
+                request.metadata,
+                session_id=request.session_id,
+            )
         except (KeyError, ValueError) as error:
             raise _not_found(error) from error
         return _run_payload(run)
