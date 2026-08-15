@@ -21,7 +21,7 @@
   - `.github/workflows/nightly-reliability.yml`
   - `tests/test_api.py`
   - `tests/test_reliability.py`
-- **关联 commit**：`pending`
+- **关联 commit**：`a16de5e`
 - **关联 ADR**：[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)
 
 ### 变更摘要
@@ -69,7 +69,7 @@ v0.7.6 门禁稳定前不启动 v0.8。
   - `tests/test_runtime.py`
   - `tests/test_orchestration.py`
   - `tests/test_reliability.py`
-- **关联 commit**：`pending`
+- **关联 commit**：`a16de5e`
 - **关联 ADR**：[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)
 
 ### 变更摘要
@@ -115,7 +115,7 @@ python -m pytest tests/test_runtime.py tests/test_orchestration.py tests/test_re
   - `tests/test_providers.py`
   - `tests/test_reliability.py`
   - `tests/test_contract_edges.py`
-- **关联 commit**：`pending`
+- **关联 commit**：`a16de5e`
 - **关联 ADR**：[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)
 
 ### 变更摘要
@@ -161,7 +161,7 @@ python -m pytest tests/test_providers.py tests/test_reliability.py tests/test_co
   - `tests/test_contract_edges.py`
   - `tests/test_reliability.py`
   - `docs/CHANGELOG.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`a16de5e`
 - **关联 ADR**：[ADR-0012](./adr/0012-quality-gates.md)
 
 ### 变更摘要
