@@ -8,6 +8,7 @@ from typing import Any
 
 from ..doctor import RuntimeDoctor
 from ..domain import (
+    AgentDefinitionUnavailable,
     AgentRun,
     Approval,
     IdempotencyConflict,
@@ -158,7 +159,7 @@ def create_app(
 
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.7.8",
+        version="0.7.9",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
         lifespan=lifespan,
     )
@@ -271,6 +272,19 @@ def create_app(
             },
         )
 
+    @app.exception_handler(AgentDefinitionUnavailable)
+    async def handle_agent_definition_unavailable(
+        _: Request, error: AgentDefinitionUnavailable
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": str(error),
+                "code": "agent_definition_unavailable",
+                "retryable": False,
+            },
+        )
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         if not runtime.is_accepting:
@@ -282,7 +296,7 @@ def create_app(
         return {
             "status": "ok",
             "runtime": "agent-runtime",
-            "version": "0.7.8",
+            "version": "0.7.9",
             "store": store,
             "capacity": runtime.capacity_snapshot(),
         }

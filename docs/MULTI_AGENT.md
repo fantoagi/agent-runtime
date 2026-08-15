@@ -208,3 +208,6 @@ v0.6 schema version 为 `3`。
 ## v0.7.7 Workflow 崩溃恢复
 
 Sequential/Parallel Workflow 创建时保存规范化 snapshot。进程重启后，`await runtime.resume(parent_run_id)` 会从 snapshot 重建 Workflow，并通过稳定 delegation key 复用已经创建或完成的 Child Run。应用仍需重新注册 snapshot 引用的 AgentDefinition。
+## v0.7.9 AgentDefinition 确切快照恢复
+
+Workflow snapshot 不再只保存 Agent 名称。每个 Step 同时保存 `agent_definition_checksum`，该 checksum 指向 SQLite 中不可变的 AgentDefinition JSON。恢复进程只需重新提供 Tool Handler 与 Model Provider，不需要重新构造或注册 AgentDefinition；即使同名 Agent 已升级，历史 Workflow 仍使用创建时的 Prompt、ModelConfig 和执行限制。

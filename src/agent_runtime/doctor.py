@@ -149,6 +149,13 @@ class RuntimeDoctor:
                     level="unhealthy",
                 ),
                 self._list_check(
+                    "agents.snapshots",
+                    snapshot["run_ids_missing_agent_snapshot"],
+                    "Active Runs without AgentDefinition snapshots require application registration.",
+                    "All active Agent Runs have durable AgentDefinition snapshots.",
+                    level="attention",
+                ),
+                self._list_check(
                     "storage.orphans",
                     snapshot["orphan_step_ids"]
                     + snapshot["orphan_tool_execution_ids"]

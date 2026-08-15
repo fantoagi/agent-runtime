@@ -57,7 +57,6 @@ async def recover(scenario: str, workspace: Path, barrier: dict[str, Any]) -> di
             MockProvider(lambda messages, tools, config: ModelResponse(content="model recovered")),
             ToolRegistry(),
         )
-        runtime.register_agent(definition())
         before = runtime.store.get_run(run_id)
         completed = await runtime.resume(run_id)
         result = {"before": before.status.value, "after": completed.status.value}
@@ -78,7 +77,6 @@ async def recover(scenario: str, workspace: Path, barrier: dict[str, Any]) -> di
             return ModelResponse(tool_calls=[ToolCall("crash-call", "side-effect", {})])
 
         runtime = runtime_for(workspace, MockProvider(responder), tools)
-        runtime.register_agent(definition(tools=[tool]))
         executions = runtime.store.tool_executions_for_run(run_id)
         assert len(executions) == 1 and executions[0].status is ToolExecutionStatus.UNKNOWN
         count_before = int((workspace / "side-effect-count.txt").read_text(encoding="utf-8"))
@@ -110,7 +108,6 @@ async def recover(scenario: str, workspace: Path, barrier: dict[str, Any]) -> di
             return ModelResponse(tool_calls=[ToolCall("approval-call", "approved-tool", {})])
 
         runtime = runtime_for(workspace, MockProvider(responder), tools)
-        runtime.register_agent(definition(tools=[tool]))
         pending = runtime.store.pending_approval(run_id)
         assert pending is not None and pending.id == barrier["approval_id"]
         runtime.resolve_approval(pending.id, True, "Crash Matrix approval")
@@ -122,13 +119,6 @@ async def recover(scenario: str, workspace: Path, barrier: dict[str, Any]) -> di
             return ModelResponse(content=f"{messages[0].content}({messages[-1].content})")
 
         runtime = runtime_for(workspace, MockProvider(responder), ToolRegistry())
-        names = (
-            ("researcher", "critic", "summarizer")
-            if scenario == "parallel_workflow"
-            else ("planner", "worker", "reviewer")
-        )
-        for name in names:
-            runtime.register_agent(definition(name))
         completed = await runtime.resume(run_id)
         children = runtime.store.child_runs(run_id)
         assert len(children) == 3 and children[0].id == barrier["first_child_id"]

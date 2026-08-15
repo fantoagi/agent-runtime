@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_runtime.doctor import RuntimeDoctor
-from agent_runtime.domain import AgentDefinition, ModelConfig, RunStatus
+from agent_runtime.domain import AgentDefinition, AgentRun, ModelConfig, RunStatus
 from agent_runtime.providers import MockProvider, ModelResponse
 from agent_runtime.runtime import Runtime, RuntimeConfig
 from agent_runtime.tools import ToolRegistry
@@ -48,3 +48,15 @@ def test_doctor_reports_active_run_attention(workspace: Path) -> None:
     assert report.exit_code == 1
     lifecycle = next(check for check in report.checks if check.name == "runs.lifecycle")
     assert lifecycle.details["active"] == {"running": 1}
+
+
+def test_doctor_reports_active_legacy_run_without_agent_snapshot(workspace: Path) -> None:
+    runtime = make_runtime(workspace)
+    legacy = AgentRun.create("legacy-agent", "legacy")
+    runtime.store.create_run(legacy)
+
+    report = RuntimeDoctor(runtime.store).run(legacy.id)
+
+    assert report.status == "attention_required"
+    snapshots = next(check for check in report.checks if check.name == "agents.snapshots")
+    assert snapshots.details["items"] == [legacy.id]

@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
 - **最近更新**：2026-08-15
-- **当前版本**：v0.7.8
-- **当前阶段**：v0.7.8 Durable Submission 完成；v0.7.9 Agent Definition Recovery 进入下一稳定化阶段
+- **当前版本**：v0.7.9
+- **当前阶段**：v0.7.9 AgentDefinition Snapshot Recovery 完成；继续观察 Nightly，v0.8 Sandbox 暂缓
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -39,7 +39,7 @@
 | v0.7.6 | ✅ completed | FastAPI/SSE 长稳与发布验证 | [E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007) |
 | v0.7.7 | ✅ completed | 崩溃恢复、UNKNOWN 闭环、Workflow 恢复与 Runtime Doctor | [E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008) |
 | v0.7.8 | ✅ completed | Run 提交幂等、容量背压与模型并发限制 | [E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009) |
-| v0.7.9 | 📋 planned | AgentDefinition 快照与无重新注册恢复 | — |
+| v0.7.9 | ✅ completed | AgentDefinition 快照与无重新注册恢复 | [E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010) |
 | v0.8 | 📋 planned | Sandbox、Tool Capability 与 Secret 安全（后置） | — |
 | v0.9 | 📋 planned | 分布式 Worker、Queue 与 Lease | — |
 | v0.10 | 📋 planned | 多租户、权限、预算和生产治理 | — |
@@ -155,7 +155,7 @@
 
 - PR 通过 20 并发、core 90/80 覆盖率和 Wheel smoke。
 - Nightly 执行 100 并发、故障测试重复、30 分钟 soak 和性能基线。
-- v0.7.9 完成前不开始 v0.8；先消除 AgentDefinition 重新注册这一恢复缺口。
+- v0.7.9 已消除 AgentDefinition 重新注册恢复缺口；v0.8 前继续执行 Nightly、备份恢复演练和运行手册完善。
 
 ### 关联 ADR
 

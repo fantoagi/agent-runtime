@@ -559,6 +559,10 @@ class IdempotencyConflict(RuntimeErrorBase):
     """An idempotency key was reused for a different logical request."""
 
 
+class AgentDefinitionUnavailable(RuntimeErrorBase):
+    """A persisted run cannot resolve the exact AgentDefinition it requires."""
+
+
 class RuntimeCapacityError(RuntimeErrorBase):
     """The runtime cannot admit more in-flight work right now."""
 

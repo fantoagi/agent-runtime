@@ -255,6 +255,7 @@ class LearningConsole:
                 "schema_version": self.store.schema_version,
                 "tables": {
                     "runs": len(runs),
+                    "agent_definitions": self.store.agent_definition_count(),
                     "run_relations": len(relations),
                     "events": len(decorated_events),
                     "steps": len(steps),

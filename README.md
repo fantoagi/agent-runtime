@@ -19,6 +19,10 @@ agent-runtime demo "19 * 23"
 The demo uses a deterministic local provider. Set `OPENAI_API_KEY` and select the
 OpenAI-compatible provider in application code when connecting to a real model.
 
+## v0.7.9 AgentDefinition Snapshot Recovery
+
+当前版本会持久化 System Prompt、ToolDefinition、ModelConfig 和执行上限的不可变快照。普通 Run 与串行/并行 Workflow 在进程重启后无需重新注册 AgentDefinition，并始终恢复创建时绑定的确切定义；Tool Handler 与 Provider 实现仍需由进程提供。
+
 ## v0.7.8 Durable Submission & Admission Control
 
 当前版本支持 `Idempotency-Key` 持久化去重、同 Key 冲突检测、顶层 Run 429 背压和模型请求并发限制；这些状态可在 `/health` 与 Learning Console SQLite Inspector 中直接查看。

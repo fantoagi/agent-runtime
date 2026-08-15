@@ -4,6 +4,7 @@ from .context import ContextBuilder, ContextBuildResult
 from .doctor import DoctorCheck, DoctorReport, RuntimeDoctor
 from .domain import (
     AgentDefinition,
+    AgentDefinitionUnavailable,
     AgentRun,
     IdempotencyConflict,
     MemoryRecord,
@@ -64,6 +65,7 @@ from .tools import ToolRegistry
 
 __all__ = [
     "AgentDefinition",
+    "AgentDefinitionUnavailable",
     "AgentRegistry",
     "AgentRun",
     "AggregationStrategy",

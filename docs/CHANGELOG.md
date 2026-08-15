@@ -4,6 +4,59 @@
 
 ---
 
+<a id="e2026-08-15-010"></a>
+## E2026-08-15-010：v0.7.9 AgentDefinition 快照与确定性恢复
+
+- **完成时间**：2026-08-15
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/domain.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/doctor.py`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/lab/console.py`
+  - `scripts/run_crash_recovery.py`
+  - `tests/test_agent_snapshots.py`
+  - `tests/test_crash_recovery.py`
+  - `tests/test_doctor.py`
+  - `tests/test_contract_edges.py`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0021](./adr/0021-agent-definition-snapshots.md)
+
+### 变更摘要
+
+持久化不可变 AgentDefinition 快照，并将普通 Run 与 Workflow Step 绑定到确切 checksum，使进程重启后无需应用重新注册 AgentDefinition，也不会因同名 Agent 后续升级而改变历史任务的恢复语义。
+
+### 系统架构
+
+schema 8 新增内容寻址的 `agent_definitions` 表和 `runs.agent_definition_checksum`；Runtime 在注册、创建 Run 和冻结 Workflow 时保存定义；恢复路径优先读取确切快照；Doctor 检查活动历史 Run 是否缺少定义绑定。
+
+### 实现方式
+
+AgentDefinition 被规范化为包含 System Prompt、ToolDefinition、ModelConfig、`max_steps` 和 `max_tool_calls` 的 JSON，并使用 SHA-256 去重；Workflow snapshot 为每个 Step 保存 checksum；若定义引用的 Tool Handler 在新进程不可用，则抛出 `AgentDefinitionUnavailable`，HTTP 返回不可重试的稳定 409 错误。
+
+### 当前功能
+
+支持普通 Run 无重新注册恢复、历史定义与最新同名定义隔离、串行/并行 Workflow 按 Step 快照恢复、缺失 Tool Handler 明确失败、Learning Console 显示定义快照数量，以及 schema 1–7 向 8 升级。
+
+### 已知限制
+
+Python Tool Handler 和 Provider 连接不能持久化，重启进程仍需提供对应实现；schema 7 以前已存在的活动 Run 没有定义 checksum，Doctor 会提示但不会自动猜测或修复；快照暂不自动清理。
+
+### 测试与验收
+
+```powershell
+python -m pytest
+python scripts/run_crash_recovery.py
+python scripts/run_reliability.py --stress-runs 100 --concurrency 20
+python scripts/check_coverage.py coverage.json
+```
+
+### 后续计划
+
+继续观察 v0.7.8/v0.7.9 Nightly 稳定性；在进入 v0.8 Sandbox 前，优先补充备份恢复演练和运行手册，不扩展新的 Agent 能力。
 <a id="e2026-08-15-009"></a>
 ## E2026-08-15-009：v0.7.8 Durable Submission 与过载保护
 

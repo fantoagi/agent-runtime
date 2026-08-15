@@ -56,8 +56,8 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.7.8"
-        assert health.json()["store"]["schema_version"] == 7
+        assert health.json()["version"] == "0.7.9"
+        assert health.json()["store"]["schema_version"] == 8
 
         invalid = await client.post("/runs", json={"input": ""})
         assert invalid.status_code == 422

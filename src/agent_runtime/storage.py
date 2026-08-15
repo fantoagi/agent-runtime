@@ -12,6 +12,7 @@ from threading import RLock
 from typing import Any
 
 from .domain import (
+    AgentDefinition,
     AgentRun,
     Approval,
     Checkpoint,
@@ -21,6 +22,7 @@ from .domain import (
     MemorySearchResult,
     Message,
     MigrationError,
+    ModelConfig,
     RunNotFound,
     RunRelation,
     RunRelationType,
@@ -33,6 +35,7 @@ from .domain import (
     StoreCorruptionError,
     StoreError,
     ToolCall,
+    ToolDefinition,
     ToolExecution,
     ToolExecutionStatus,
     UnknownToolResolution,
@@ -228,6 +231,24 @@ MIGRATIONS: tuple[Migration, ...] = (
             ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
         """,
     ),
+    (
+        8,
+        "agent_definition_snapshots",
+        """
+        CREATE TABLE IF NOT EXISTS agent_definitions (
+            checksum TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            definition_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_definitions_name_created
+            ON agent_definitions(name, created_at DESC);
+        ALTER TABLE runs ADD COLUMN agent_definition_checksum TEXT
+            REFERENCES agent_definitions(checksum);
+        CREATE INDEX IF NOT EXISTS idx_runs_agent_definition
+            ON runs(agent_definition_checksum);
+        """,
+    ),
 )
 
 
@@ -371,6 +392,16 @@ class SQLiteStore:
                 WHERE runs.id IS NULL
                 """
             ).fetchall()
+            missing_agent_snapshots = self._connection.execute(
+                """
+                SELECT id FROM runs
+                WHERE agent_definition_checksum IS NULL
+                  AND status IN ('created', 'running', 'waiting_for_approval', 'paused')
+                  AND COALESCE(json_extract(metadata_json, '$.run_kind'), 'agent') != 'workflow'
+                """
+                + (" AND id=?" if run_id is not None else ""),
+                filter_params,
+            ).fetchall()
             foreign_keys = int(self._connection.execute("PRAGMA foreign_keys").fetchone()[0])
             synchronous = int(self._connection.execute("PRAGMA synchronous").fetchone()[0])
         status_counts: dict[str, int] = {}
@@ -402,6 +433,7 @@ class SQLiteStore:
             "orphan_step_ids": [str(row["id"]) for row in orphan_steps],
             "orphan_tool_execution_ids": [str(row["id"]) for row in orphan_tools],
             "orphan_workflow_snapshot_run_ids": [str(row["run_id"]) for row in snapshot_orphans],
+            "run_ids_missing_agent_snapshot": [str(row["id"]) for row in missing_agent_snapshots],
             "foreign_keys": foreign_keys,
             "synchronous": synchronous,
         }
@@ -798,6 +830,90 @@ class SQLiteStore:
         terms = [term.strip('"') for term in query.split() if term.strip('"')]
         return " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
 
+    def save_agent_definition(self, agent: AgentDefinition) -> str:
+        payload = self._agent_definition_payload(agent)
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        checksum = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO agent_definitions(
+                    checksum, name, definition_json, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (checksum, agent.name, encoded, utc_now().isoformat()),
+            )
+        return checksum
+
+    def get_agent_definition(self, checksum: str) -> AgentDefinition:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT definition_json FROM agent_definitions WHERE checksum=?",
+                (checksum,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"AgentDefinition snapshot {checksum!r} was not found.")
+        return self._agent_definition_from_payload(self._load(row["definition_json"]))
+
+    def latest_agent_definition(self, name: str) -> AgentDefinition | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT definition_json FROM agent_definitions
+                WHERE name=? ORDER BY created_at DESC, rowid DESC LIMIT 1
+                """,
+                (name,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._agent_definition_from_payload(self._load(row["definition_json"]))
+
+    def agent_definition_count(self) -> int:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT COUNT(*) AS count FROM agent_definitions"
+            ).fetchone()
+        return int(row["count"])
+
+    @staticmethod
+    def _agent_definition_payload(agent: AgentDefinition) -> dict[str, Any]:
+        return {
+            "name": agent.name,
+            "system_prompt": agent.system_prompt,
+            "tools": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                    "requires_approval": tool.requires_approval,
+                    "side_effecting": tool.side_effecting,
+                }
+                for tool in agent.tools
+            ],
+            "model": {
+                "provider": agent.model.provider,
+                "model": agent.model.model,
+                "temperature": agent.model.temperature,
+                "max_tokens": agent.model.max_tokens,
+                "extra": agent.model.extra,
+            },
+            "max_steps": agent.max_steps,
+            "max_tool_calls": agent.max_tool_calls,
+        }
+
+    @staticmethod
+    def _agent_definition_from_payload(payload: dict[str, Any]) -> AgentDefinition:
+        return AgentDefinition(
+            name=str(payload["name"]),
+            system_prompt=str(payload["system_prompt"]),
+            tools=[ToolDefinition(**tool) for tool in payload.get("tools", [])],
+            model=ModelConfig(**payload.get("model", {})),
+            max_steps=int(payload.get("max_steps", 20)),
+            max_tool_calls=int(payload.get("max_tool_calls", 40)),
+        )
+
     def create_run_with_event(
         self,
         run: AgentRun,
@@ -911,10 +1027,15 @@ class SQLiteStore:
             INSERT INTO runs (
                 id, agent_name, input, status, created_at, updated_at, result, error,
                 step_count, tool_call_count, metadata_json, idempotency_key,
-                request_fingerprint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                request_fingerprint, agent_definition_checksum
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (*self._run_values(run), idempotency_key, request_fingerprint),
+            (
+                *self._run_values(run),
+                idempotency_key,
+                request_fingerprint,
+                run.metadata.get("agent_definition_checksum"),
+            ),
         )
 
     def get_run(self, run_id: str) -> AgentRun:

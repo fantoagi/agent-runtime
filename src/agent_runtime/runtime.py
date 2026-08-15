@@ -15,6 +15,7 @@ from .context import ContextBuilder, ContextBuildResult
 from .domain import (
     TERMINAL_STATUSES,
     AgentDefinition,
+    AgentDefinitionUnavailable,
     AgentRun,
     Approval,
     Checkpoint,
@@ -258,6 +259,7 @@ class Runtime:
 
     def register_agent(self, agent: AgentDefinition) -> None:
         self.agent_registry.register(agent)
+        self.store.save_agent_definition(agent)
 
     def list_agents(self) -> list[AgentDefinition]:
         return self.agent_registry.list()
@@ -402,7 +404,9 @@ class Runtime:
             existing = self.store.idempotent_run(normalized_key, fingerprint)
             if existing is not None:
                 return RunSubmission(existing, True)
+        agent_checksum = self.store.save_agent_definition(definition)
         run_metadata = dict(requested_metadata)
+        run_metadata["agent_definition_checksum"] = agent_checksum
         run_metadata.setdefault("trace_id", new_id("trace"))
         run = AgentRun.create(definition.name, input_text, run_metadata)
         run.metadata.setdefault("root_run_id", run.id)
@@ -490,7 +494,9 @@ class Runtime:
             ),
         )
         if workflow_definition is not None:
-            self.store.save_workflow_snapshot(run.id, workflow_definition)
+            self.store.save_workflow_snapshot(
+                run.id, self._freeze_workflow_definition(workflow_definition)
+            )
         return run
 
     def begin_workflow(
@@ -515,8 +521,10 @@ class Runtime:
                 workflow_definition=workflow_definition,
             )
         )
-        if workflow_definition is not None:
-            self.store.save_workflow_snapshot(run.id, workflow_definition)
+        if workflow_definition is not None and self.store.workflow_snapshot(run.id) is None:
+            self.store.save_workflow_snapshot(
+                run.id, self._freeze_workflow_definition(workflow_definition)
+            )
         if run.status is RunStatus.CREATED:
             run.transition_to(RunStatus.RUNNING)
             self.store.save_run_with_event(
@@ -628,6 +636,7 @@ class Runtime:
             child_metadata.setdefault("session_id", parent.metadata["session_id"])
         child_metadata.update(
             {
+                "agent_definition_checksum": self.store.save_agent_definition(definition),
                 "trace_id": child_metadata.get("trace_id") or new_id("trace"),
                 "root_trace_id": root_run.metadata.get("root_trace_id")
                 or root_run.metadata.get("trace_id")
@@ -829,15 +838,21 @@ class Runtime:
             WorkflowStep,
         )
 
-        steps = [
-            WorkflowStep(
-                str(step["agent_name"]),
-                name=step.get("name"),
-                input_prefix=str(step.get("input_prefix") or ""),
+        steps: list[WorkflowStep] = []
+        for step in raw_steps:
+            if not isinstance(step, dict) or not step.get("agent_name"):
+                continue
+            checksum = step.get("agent_definition_checksum")
+            agent_reference: AgentDefinition | str = str(step["agent_name"])
+            if isinstance(checksum, str) and checksum:
+                agent_reference = self._agent_from_checksum(checksum)
+            steps.append(
+                WorkflowStep(
+                    agent_reference,
+                    name=step.get("name"),
+                    input_prefix=str(step.get("input_prefix") or ""),
+                )
             )
-            for step in raw_steps
-            if isinstance(step, dict) and step.get("agent_name")
-        ]
         if len(steps) != len(raw_steps):
             raise ValueError(f"Workflow run {run_id} contains an invalid step definition.")
         name = str(snapshot.get("name") or run.metadata.get("workflow_name") or run.agent_name)
@@ -1011,7 +1026,7 @@ class Runtime:
 
     async def _execute(self, run_id: str) -> AgentRun:
         run = self.store.get_run(run_id)
-        agent = self._resolve_agent(run.agent_name)
+        agent = self._resolve_run_agent(run)
         token = CancellationToken()
         self._cancellation_tokens[run_id] = token
         messages: list[Message] = []
@@ -1693,7 +1708,7 @@ class Runtime:
             return [
                 Message(
                     role="system",
-                    content=self._resolve_agent(run.agent_name).system_prompt,
+                    content=self._resolve_run_agent(run).system_prompt,
                 ),
                 Message(role="user", content=run.input),
             ]
@@ -1751,6 +1766,43 @@ class Runtime:
                 return
         messages.append(step.assistant_message)
 
+    def _agent_from_checksum(self, checksum: str) -> AgentDefinition:
+        try:
+            agent = self.store.get_agent_definition(checksum)
+        except KeyError as error:
+            raise AgentDefinitionUnavailable(str(error)) from error
+        try:
+            self.tools.definitions_for(agent.tools)
+        except ToolExecutionError as error:
+            raise AgentDefinitionUnavailable(
+                f"AgentDefinition {agent.name!r} requires unavailable tool handlers: {error}"
+            ) from error
+        return agent
+
+    def _resolve_run_agent(self, run: AgentRun) -> AgentDefinition:
+        checksum = run.metadata.get("agent_definition_checksum")
+        if isinstance(checksum, str) and checksum:
+            return self._agent_from_checksum(checksum)
+        return self._resolve_agent(run.agent_name)
+
+    def _freeze_workflow_definition(
+        self, definition: dict[str, Any]
+    ) -> dict[str, Any]:
+        frozen = cast(
+            dict[str, Any], json.loads(json.dumps(definition, ensure_ascii=False))
+        )
+        raw_steps = frozen.get("steps")
+        if not isinstance(raw_steps, list):
+            return frozen
+        for step in raw_steps:
+            if not isinstance(step, dict) or not step.get("agent_name"):
+                continue
+            if step.get("agent_definition_checksum"):
+                continue
+            agent = self._resolve_agent(str(step["agent_name"]))
+            step["agent_definition_checksum"] = self.store.save_agent_definition(agent)
+        return frozen
+
     @staticmethod
     def _normalize_idempotency_key(value: str | None) -> str | None:
         if value is None:
@@ -1796,4 +1848,16 @@ class Runtime:
         if isinstance(agent, AgentDefinition):
             self.register_agent(agent)
             return agent
-        return self.agent_registry.get(agent)
+        try:
+            return self.agent_registry.get(agent)
+        except KeyError:
+            persisted = self.store.latest_agent_definition(agent)
+            if persisted is None:
+                raise
+            try:
+                self.register_agent(persisted)
+            except (ToolExecutionError, ValueError) as error:
+                raise AgentDefinitionUnavailable(
+                    f"Persisted AgentDefinition {agent!r} cannot be restored: {error}"
+                ) from error
+            return persisted
