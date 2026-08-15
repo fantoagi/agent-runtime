@@ -22,7 +22,7 @@
   - `tests/test_crash_recovery.py`
   - `tests/test_doctor.py`
   - `tests/test_contract_edges.py`
-- **关联 commit**：`pending`
+- **关联 commit**：`9167990`
 - **关联 ADR**：[ADR-0021](./adr/0021-agent-definition-snapshots.md)
 
 ### 变更摘要

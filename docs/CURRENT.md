@@ -4,7 +4,7 @@
 - **当前里程碑**：v0.7.9 AgentDefinition Snapshot Recovery
 - **Runtime 构建完成时间**：2026-08-15（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`
+- **当前代码基线 commit**：`9167990`
 - **最近演进记录**：[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)
 
 ## 状态定义
