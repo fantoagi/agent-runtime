@@ -435,7 +435,7 @@ def test_schema_migrates_existing_v01_database(workspace: Path) -> None:
     connection.close()
 
     store = SQLiteStore(database)
-    assert store.schema_version == 6
+    assert store.schema_version == 7
     columns = {
         row["name"]
         for row in store._connection.execute("PRAGMA table_info(approvals)").fetchall()

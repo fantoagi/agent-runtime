@@ -19,6 +19,10 @@ agent-runtime demo "19 * 23"
 The demo uses a deterministic local provider. Set `OPENAI_API_KEY` and select the
 OpenAI-compatible provider in application code when connecting to a real model.
 
+## v0.7.8 Durable Submission & Admission Control
+
+当前版本支持 `Idempotency-Key` 持久化去重、同 Key 冲突检测、顶层 Run 429 背压和模型请求并发限制；这些状态可在 `/health` 与 Learning Console SQLite Inspector 中直接查看。
+
 ## v0.7.7 Crash Recovery & Operational Closure
 
 当前版本继续暂停新增 Agent 智能能力，重点补齐真实进程崩溃恢复、UNKNOWN 人工确认审计、Workflow snapshot 自动恢复、Runtime Doctor，以及 Windows/Linux Crash Matrix。

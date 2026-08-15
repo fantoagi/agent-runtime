@@ -56,6 +56,8 @@ def test_cancellation_token_and_runtime_config_validation(workspace: Path) -> No
         {"context_token_budget": 63},
         {"max_sync_tool_workers": 0},
         {"max_sync_tool_workers": 2, "max_pending_sync_tools": 1},
+        {"max_inflight_runs": 0},
+        {"max_concurrent_model_requests": 0},
         {"sqlite_busy_timeout_seconds": -1},
         {"memory_search_limit": -1},
         {"large_tool_result_chars": 127},
@@ -251,7 +253,7 @@ async def test_provider_requires_key_closes_idempotently_and_rejects_invalid_jso
         provider._get_client()
 
 
-@pytest.mark.parametrize("legacy_version", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("legacy_version", [1, 2, 3, 4, 5, 6])
 def test_each_historical_schema_upgrades_to_latest(
     workspace: Path, legacy_version: int
 ) -> None:
@@ -275,7 +277,7 @@ def test_each_historical_schema_upgrades_to_latest(
     connection.commit()
     connection.close()
     store = SQLiteStore(database)
-    assert store.schema_version == 6
+    assert store.schema_version == 7
     assert store.health_check()["status"] == "ok"
     store.close()
     store.close()

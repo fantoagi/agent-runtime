@@ -1,6 +1,6 @@
 # Agent Runtime Learning Console 使用指南
 
-Learning Console v0.7.7 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context 和 Artifact 的真实执行事实放到同一个浏览器页面中。
+Learning Console v0.7.8 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context 和 Artifact 的真实执行事实放到同一个浏览器页面中。
 
 > 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。
 
@@ -277,6 +277,8 @@ python scripts/check_docs.py
 Learning Console 测试覆盖：9 个场景目录、真实 Runtime、Approval、串行/并行 Parent/Child、TraceTree、Session/Memory 检索、Context Compaction、Artifact 文件、聚合 Snapshot、SQLite 统计和自动验收；当前全量测试为 `55 passed`，并验证串行/并行 Child metadata 可稳定生成独立泳道顺序。
 
 ## 可靠性状态怎么读
+
+从 v0.7.8 起，“SQLite”Inspector 额外展示活动任务数、顶层 Run 容量和模型请求并发上限。
 
 从 v0.7.7 起，“SQLite”Inspector 同时显示 Runtime 是否接受请求、SQLite 健康、journal mode、Run health 和 `UNKNOWN Tool` 数量：
 

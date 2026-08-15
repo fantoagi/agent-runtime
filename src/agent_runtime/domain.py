@@ -555,6 +555,14 @@ class RunLimitExceeded(RuntimeErrorBase):
     pass
 
 
+class IdempotencyConflict(RuntimeErrorBase):
+    """An idempotency key was reused for a different logical request."""
+
+
+class RuntimeCapacityError(RuntimeErrorBase):
+    """The runtime cannot admit more in-flight work right now."""
+
+
 class RuntimeLifecycleError(RuntimeErrorBase):
     """The runtime cannot accept an operation in its current lifecycle state."""
 

@@ -4,6 +4,57 @@
 
 ---
 
+<a id="e2026-08-15-009"></a>
+## E2026-08-15-009：v0.7.8 Durable Submission 与过载保护
+
+- **完成时间**：2026-08-15
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/domain.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/lab/console.py`
+  - `src/agent_runtime/lab/static/app.js`
+  - `tests/test_api.py`
+  - `tests/test_reliability.py`
+  - `tests/test_contract_edges.py`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)
+
+### 变更摘要
+
+为顶层 Run 提交增加跨进程重启可保持的幂等键，并为活动 Run 和模型请求建立有界准入，避免客户端重试造成重复副作用，也避免突发请求无限消耗本机和 Provider 资源。
+
+### 系统架构
+
+schema 7 在 `runs` 表保存幂等键和规范化请求指纹；Runtime 新增 `RunSubmission`、活动任务容量快照和模型请求 Semaphore；FastAPI 将 `Idempotency-Key`、409 冲突、429 背压和 `Idempotent-Replayed` 映射为稳定 HTTP 合同。
+
+### 实现方式
+
+相同 Key 与相同 SHA-256 指纹在 SQLite `BEGIN IMMEDIATE` 事务内复用同一个 Run，多连接竞态由唯一索引收敛；同 Key 不同请求返回 `idempotency_conflict`；`max_inflight_runs` 达到上限时拒绝新顶层任务，`max_concurrent_model_requests` 同时约束普通和流式模型请求。
+
+### 当前功能
+
+支持 Python SDK 与 HTTP 幂等提交、并发提交去重、请求冲突检测、可重试容量错误、模型并发限制、Health/Learning Console 容量展示，以及 schema 1–6 向 7 升级。
+
+### 已知限制
+
+活动任务配额只覆盖当前 Runtime 进程，不是多进程全局队列；幂等重放只返回 durable Run，不会隐式 resume 崩溃后遗留任务；当前没有自动清理幂等键。
+
+### 测试与验收
+
+```powershell
+python -m pytest
+python -m pytest tests/test_api.py tests/test_reliability.py
+python -m ruff check src tests scripts
+python -m mypy src\agent_runtime
+```
+
+### 后续计划
+
+v0.7.9 持久化 AgentDefinition 快照，消除恢复 Workflow 时必须由应用重新注册 AgentDefinition 的限制。
 <a id="e2026-08-15-008"></a>
 ## E2026-08-15-008：v0.7.7 崩溃恢复与运维闭环
 

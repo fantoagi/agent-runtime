@@ -56,8 +56,8 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.7.7"
-        assert health.json()["store"]["schema_version"] == 6
+        assert health.json()["version"] == "0.7.8"
+        assert health.json()["store"]["schema_version"] == 7
 
         invalid = await client.post("/runs", json={"input": ""})
         assert invalid.status_code == 422
@@ -376,3 +376,102 @@ async def test_resolve_unknown_endpoint_records_audit_and_keeps_run_paused(
     assert response.json()["tool_execution"]["resolution"] == "confirmed_succeeded"
     assert response.json()["tool_execution"]["resolved_by"] == "api-test"
     assert retry.status_code == 409
+
+@pytest.mark.asyncio
+async def test_run_submission_idempotency_replays_without_duplicate_execution(
+    workspace: Path,
+) -> None:
+    calls = 0
+    release = asyncio.Event()
+
+    async def responder(messages, tools, config):
+        nonlocal calls
+        del messages, tools, config
+        calls += 1
+        await release.wait()
+        return ModelResponse(content="done")
+
+    tools = ToolRegistry()
+    register_builtin_tools(tools)
+    runtime = Runtime(
+        RuntimeConfig(
+            workspace_path=workspace,
+            database_path=workspace / "idempotency.sqlite3",
+        ),
+        MockProvider(responder),
+        tools,
+    )
+    runtime.register_agent(demo_agent())
+    app = create_app(runtime)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.post(
+            "/runs",
+            headers={"Idempotency-Key": "request-123"},
+            json={"agent_name": "demo", "input": "do it"},
+        )
+        second = await client.post(
+            "/runs",
+            headers={"Idempotency-Key": "request-123"},
+            json={"agent_name": "demo", "input": "do it"},
+        )
+        conflict = await client.post(
+            "/runs",
+            headers={"Idempotency-Key": "request-123"},
+            json={"agent_name": "demo", "input": "different"},
+        )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["id"] == second.json()["id"]
+    assert first.headers["Idempotent-Replayed"] == "false"
+    assert second.headers["Idempotent-Replayed"] == "true"
+    assert conflict.status_code == 409
+    assert conflict.json()["code"] == "idempotency_conflict"
+    assert conflict.json()["retryable"] is False
+    assert len(runtime.store.list_runs()) == 1
+    release.set()
+    await runtime.wait(first.json()["id"])
+    assert calls == 1
+    await runtime.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_api_returns_retryable_429_when_inflight_capacity_is_exhausted(
+    workspace: Path,
+) -> None:
+    release = asyncio.Event()
+
+    async def responder(messages, tools, config):
+        del messages, tools, config
+        await release.wait()
+        return ModelResponse(content="done")
+
+    tools = ToolRegistry()
+    register_builtin_tools(tools)
+    runtime = Runtime(
+        RuntimeConfig(
+            workspace_path=workspace,
+            database_path=workspace / "capacity.sqlite3",
+            max_inflight_runs=1,
+        ),
+        MockProvider(responder),
+        tools,
+    )
+    runtime.register_agent(demo_agent())
+    app = create_app(runtime)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.post("/runs", json={"input": "first"})
+        second = await client.post("/runs", json={"input": "second"})
+        health = await client.get("/health")
+
+    assert first.status_code == 202
+    assert second.status_code == 429
+    assert second.json()["code"] == "runtime_capacity_exhausted"
+    assert second.json()["retryable"] is True
+    assert second.headers["Retry-After"] == "1"
+    assert health.json()["capacity"]["max_inflight_runs"] == 1
+    release.set()
+    await runtime.wait(first.json()["id"])
+    await runtime.shutdown()

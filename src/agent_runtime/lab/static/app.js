@@ -616,8 +616,9 @@ function renderSqliteInspector() {
   const reliability = state.snapshot.reliability || {};
   const sqlite = reliability.sqlite || {};
   const doctor = reliability.doctor || {};
+  const capacity = reliability.capacity || {};
   return `
-    <section class="detail-block"><span class="detail-label">RELIABILITY STATUS</span><div class="kv-grid">${kv("Run", reliability.run_health)}${kv("Runtime 接受请求", reliability.runtime_accepting ? "yes" : "no")}${kv("SQLite", sqlite.status)}${kv("UNKNOWN Tool", reliability.unknown_tool_executions ?? 0)}${kv("Doctor", doctor.status || "unknown")}</div><p>${escapeHtml(reliability.guidance || "")}</p></section>
+    <section class="detail-block"><span class="detail-label">RELIABILITY STATUS</span><div class="kv-grid">${kv("Run", reliability.run_health)}${kv("Runtime 接受请求", reliability.runtime_accepting ? "yes" : "no")}${kv("活动任务", `${capacity.active_tasks ?? 0} / ${capacity.max_inflight_runs ?? "-"}`)}${kv("模型并发上限", capacity.max_concurrent_model_requests ?? "-")}${kv("SQLite", sqlite.status)}${kv("UNKNOWN Tool", reliability.unknown_tool_executions ?? 0)}${kv("Doctor", doctor.status || "unknown")}</div><p>${escapeHtml(reliability.guidance || "")}</p></section>
     <section class="detail-block"><span class="detail-label">PERSISTENCE SOURCE</span><pre class="json-view">${escapeHtml(persistence.database)}</pre></section>
     <section class="detail-block"><span class="detail-label">SCHEMA VERSION</span><div class="kv-grid">${kv("Migration", persistence.schema_version)}${kv("Journal", sqlite.journal_mode)}${kv("事实来源", "SQLite")}</div></section>
     <section class="detail-block"><span class="detail-label">本次 RUN 相关记录</span><div class="kv-grid">${Object.entries(persistence.tables).map(([key, value]) => kv(key, value)).join("")}</div></section>

@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.7.7`
-- **当前里程碑**：v0.7.7 Crash Recovery & Operational Closure
+- **当前版本**：`0.7.8`
+- **当前里程碑**：v0.7.8 Durable Submission & Admission Control
 - **Runtime 构建完成时间**：2026-08-15（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`0025941`
-- **最近演进记录**：[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)
+- **当前代码基线 commit**：`pending`
+- **最近演进记录**：[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)
 
 ## 状态定义
 
@@ -24,9 +24,9 @@
 | 单 Agent Kernel、Run 状态机、Checkpoint、Approval | ✅ stable | 支持持久化执行、暂停、恢复、取消和人工审批 | E2026-08-11-001、E2026-08-13-001 |
 | Model Provider 与 Token Streaming | ✅ stable | Mock、OpenAI-compatible、持久化 `model.delta` | E2026-08-11-001、E2026-08-14-001 |
 | Tool Registry 与安全执行 | ✅ stable | 参数校验、有界线程池、背压、超时、取消、UNKNOWN 与原子文件写入 | E2026-08-15-005 |
-| SQLite Event Log 与恢复 | ✅ stable | WAL、FULL、quick_check、busy retry、事务 sequence 和 schema 1–6 迁移 | E2026-08-15-006 |
-| Runtime 生命周期 | ✅ stable | `shutdown()`、async context manager、跨进程 `wait()`、启动协调、Workflow snapshot 恢复和幂等关闭 | E2026-08-15-006、E2026-08-15-008 |
-| FastAPI 与 SSE | ✅ stable | 健康检查、heartbeat、断线恢复、Runtime 所有权和 lifespan | E2026-08-15-007 |
+| SQLite Event Log 与恢复 | ✅ stable | WAL、FULL、quick_check、busy retry、事务 sequence 和 schema 1–7 迁移 | E2026-08-15-006、E2026-08-15-009 |
+| Runtime 生命周期与准入 | ✅ stable | `shutdown()`、跨进程 `wait()`、崩溃协调、顶层 Run 容量限制和模型请求并发限制 | E2026-08-15-006、E2026-08-15-008、E2026-08-15-009 |
+| FastAPI 与 SSE | ✅ stable | 健康检查、heartbeat、断线恢复、Runtime 所有权、幂等提交和 429 背压 | E2026-08-15-007、E2026-08-15-009 |
 | 多 Agent Workflow | ✅ stable | Parent/Child、串行/并行、幂等委派、取消传播和定义快照 | E2026-08-14-007、E2026-08-15-006 |
 | Context、Session、Memory 与 Artifact | ✅ stable | token budget、FTS5 scoped memory、TTL、软删除和大结果 Artifact 化 | E2026-08-15-001 |
 | Observability、Evals 与 Learning Console | ✅ stable | Trace Tree、Metrics、Eval、动态泳道和可靠性状态 | E2026-08-15-002、E2026-08-15-003、E2026-08-15-007 |
@@ -63,11 +63,11 @@
 - 同步副作用 Tool 超时后只能标记 `UNKNOWN` 并等待人工确认，不能保证回滚。
 - Workflow 从规范化定义快照重建，但应用仍需重新注册被引用的 AgentDefinition；不会反序列化任意 Python 可执行代码。
 - Nightly 的 30 分钟 soak 不作为每个 PR 的阻塞时长。
-- Learning Console 是教学与诊断 Adapter，不是生产运维控制台。
+- Learning Console 是教学与诊断 Adapter，不是生产运维控制台。`max_inflight_runs` 是单进程容量，不是分布式全局配额。
 
 ## 当前测试状态
 
-- 自动化测试：`134 passed`（2026-08-15，本地 Python 3.13），包含单元、集成、并发和真实进程强杀恢复测试。
+- 自动化测试：`139 passed`（2026-08-15，本地 Python 3.13），包含单元、集成、幂等并发、容量背压和真实进程强杀恢复测试。
 - Core line coverage：`92.35%`；core branch coverage：`80.43%`。
 - PR：Ubuntu Python 3.11/3.12/3.13、Windows Python 3.13。
 - Nightly：100 并发、20 轮 Crash Matrix、故障测试重复、30 分钟 soak 和性能回退检查。

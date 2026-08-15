@@ -231,6 +231,7 @@ class LearningConsole:
             "acceptance": acceptance,
             "reliability": {
                 "runtime_accepting": runtime.is_accepting,
+                "capacity": runtime.capacity_snapshot(),
                 "sqlite": self.store.health_check(),
                 "run_health": (
                     "failed"

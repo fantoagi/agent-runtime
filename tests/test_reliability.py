@@ -329,3 +329,73 @@ async def test_pause_interrupts_active_model_request_and_resume_completes(worksp
     assert resumed.result == "resumed"
     await runtime.shutdown()
 
+
+@pytest.mark.asyncio
+async def test_model_request_concurrency_is_bounded(workspace: Path) -> None:
+    active = 0
+    maximum = 0
+    lock = asyncio.Lock()
+
+    async def responder(messages, tools, config):
+        nonlocal active, maximum
+        del messages, tools, config
+        async with lock:
+            active += 1
+            maximum = max(maximum, active)
+        await asyncio.sleep(0.03)
+        async with lock:
+            active -= 1
+        return ModelResponse(content="done")
+
+    registry = ToolRegistry()
+    runtime = Runtime(
+        RuntimeConfig(
+            workspace_path=workspace,
+            database_path=workspace / "model-capacity.sqlite3",
+            max_inflight_runs=8,
+            max_concurrent_model_requests=1,
+        ),
+        MockProvider(responder),
+        registry,
+    )
+    runtime.register_agent(
+        AgentDefinition(
+            name="bounded",
+            system_prompt="test",
+            tools=[],
+            model=ModelConfig(model="test"),
+        )
+    )
+    runs = [runtime.start("bounded", f"run-{index}") for index in range(4)]
+    await asyncio.gather(*(runtime.wait(run.id) for run in runs))
+    assert maximum == 1
+    await runtime.shutdown()
+
+
+def test_idempotent_run_creation_is_atomic_across_store_connections(
+    workspace: Path,
+) -> None:
+    database = workspace / "idempotent.sqlite3"
+    stores = [SQLiteStore(database, busy_timeout_seconds=1) for _ in range(4)]
+
+    def create(index: int) -> tuple[str, bool]:
+        run = AgentRun.create("agent", "same request", {"index": index})
+        durable, replayed = stores[index].create_run_idempotently(
+            run,
+            "run.created",
+            {"input": "same request"},
+            idempotency_key="shared-key",
+            request_fingerprint="same-fingerprint",
+        )
+        return durable.id, replayed
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(create, range(4)))
+
+    assert len({run_id for run_id, _ in results}) == 1
+    assert sum(1 for _, replayed in results if not replayed) == 1
+    durable_run_id = results[0][0]
+    assert len(stores[0].events_since(durable_run_id)) == 1
+    assert len(stores[0].list_runs()) == 1
+    for store in stores:
+        store.close()

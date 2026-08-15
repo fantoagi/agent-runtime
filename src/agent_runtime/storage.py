@@ -15,6 +15,7 @@ from .domain import (
     AgentRun,
     Approval,
     Checkpoint,
+    IdempotencyConflict,
     MemoryRecord,
     MemoryScope,
     MemorySearchResult,
@@ -215,6 +216,16 @@ MIGRATIONS: tuple[Migration, ...] = (
         ALTER TABLE tool_executions ADD COLUMN resolved_at TEXT;
         CREATE INDEX IF NOT EXISTS idx_tool_executions_unknown
             ON tool_executions(status, run_id, created_at);
+        """,
+    ),
+    (
+        7,
+        "durable_run_submission_idempotency",
+        """
+        ALTER TABLE runs ADD COLUMN idempotency_key TEXT;
+        ALTER TABLE runs ADD COLUMN request_fingerprint TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key
+            ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
         """,
     ),
 )
@@ -807,19 +818,103 @@ class SQLiteStore:
                 )
             return event
 
+    def create_run_idempotently(
+        self,
+        run: AgentRun,
+        event_type: str,
+        payload: dict[str, Any] | None,
+        *,
+        idempotency_key: str,
+        request_fingerprint: str,
+        session_id: str | None = None,
+    ) -> tuple[AgentRun, bool]:
+        """Create a run once, or return the durable run bound to the same request."""
+        for attempt in range(self.lock_retry_attempts + 1):
+            with self._lock:
+                self._ensure_open()
+                try:
+                    self._connection.execute("BEGIN IMMEDIATE")
+                    existing = self._idempotent_run_locked(idempotency_key)
+                    if existing is not None:
+                        existing_run, existing_fingerprint = existing
+                        if existing_fingerprint != request_fingerprint:
+                            raise IdempotencyConflict(
+                                "Idempotency key is already bound to a different run request."
+                            )
+                        self._connection.commit()
+                        return existing_run, True
+                    if session_id is not None:
+                        self._require_session_locked(session_id)
+                    self._insert_run(
+                        run,
+                        idempotency_key=idempotency_key,
+                        request_fingerprint=request_fingerprint,
+                    )
+                    self._append_event_locked(run.id, event_type, payload)
+                    if session_id is not None:
+                        self._attach_run_to_session_locked(session_id, run.id)
+                        self._append_event_locked(
+                            run.id, "session.run.attached", {"session_id": session_id}
+                        )
+                    self._connection.commit()
+                    return run, False
+                except sqlite3.OperationalError as error:
+                    self._connection.rollback()
+                    if "locked" not in str(error).lower() and "busy" not in str(error).lower():
+                        raise
+                except BaseException:
+                    self._connection.rollback()
+                    raise
+            if attempt >= self.lock_retry_attempts:
+                break
+            time.sleep(0.01 * (2**attempt) + random.uniform(0.0, 0.01))
+        raise StoreBusyError("SQLite remained busy while admitting an idempotent run.")
+
+    def idempotent_run(
+        self, idempotency_key: str, request_fingerprint: str
+    ) -> AgentRun | None:
+        with self._lock:
+            self._ensure_open()
+            existing = self._idempotent_run_locked(idempotency_key)
+        if existing is None:
+            return None
+        run, existing_fingerprint = existing
+        if existing_fingerprint != request_fingerprint:
+            raise IdempotencyConflict(
+                "Idempotency key is already bound to a different run request."
+            )
+        return run
+
+    def _idempotent_run_locked(
+        self, idempotency_key: str
+    ) -> tuple[AgentRun, str] | None:
+        row = self._connection.execute(
+            "SELECT * FROM runs WHERE idempotency_key=?", (idempotency_key,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._run_from_row(row), str(row["request_fingerprint"] or "")
+
     def create_run(self, run: AgentRun) -> None:
         with self._lock, self._connection:
             self._insert_run(run)
 
-    def _insert_run(self, run: AgentRun) -> None:
+    def _insert_run(
+        self,
+        run: AgentRun,
+        *,
+        idempotency_key: str | None = None,
+        request_fingerprint: str | None = None,
+    ) -> None:
         self._connection.execute(
             """
             INSERT INTO runs (
                 id, agent_name, input, status, created_at, updated_at, result, error,
-                step_count, tool_call_count, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                step_count, tool_call_count, metadata_json, idempotency_key,
+                request_fingerprint
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            self._run_values(run),
+            (*self._run_values(run), idempotency_key, request_fingerprint),
         )
 
     def get_run(self, run_id: str) -> AgentRun:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import random
 import time
@@ -27,6 +28,7 @@ from .domain import (
     RunRelation,
     RunRelationType,
     RunStatus,
+    RuntimeCapacityError,
     RuntimeClosedError,
     Session,
     Step,
@@ -56,6 +58,12 @@ if TYPE_CHECKING:
     from .orchestration import WorkflowExecution
 
 
+@dataclass(frozen=True, slots=True)
+class RunSubmission:
+    run: AgentRun
+    replayed: bool
+
+
 @dataclass(slots=True)
 class RuntimeConfig:
     workspace_path: Path
@@ -69,6 +77,8 @@ class RuntimeConfig:
     shutdown_timeout_seconds: float = 30.0
     max_sync_tool_workers: int = 8
     max_pending_sync_tools: int = 32
+    max_inflight_runs: int = 64
+    max_concurrent_model_requests: int = 8
     sqlite_busy_timeout_seconds: float = 5.0
     sqlite_synchronous: str = "FULL"
     sqlite_lock_retry_attempts: int = 3
@@ -95,6 +105,10 @@ class RuntimeConfig:
             raise ValueError(
                 "max_pending_sync_tools must be at least max_sync_tool_workers."
             )
+        if self.max_inflight_runs < 1:
+            raise ValueError("max_inflight_runs must be at least 1.")
+        if self.max_concurrent_model_requests < 1:
+            raise ValueError("max_concurrent_model_requests must be at least 1.")
         if self.sqlite_busy_timeout_seconds < 0:
             raise ValueError("sqlite_busy_timeout_seconds must not be negative.")
         if self.memory_search_limit < 0:
@@ -140,6 +154,7 @@ class Runtime:
         )
         self._tasks: dict[str, asyncio.Task[AgentRun]] = {}
         self._cancellation_tokens: dict[str, CancellationToken] = {}
+        self._model_capacity = asyncio.Semaphore(config.max_concurrent_model_requests)
         self._closing = False
         self._closed = False
         self._shutdown_run_ids: set[str] = set()
@@ -149,6 +164,17 @@ class Runtime:
     @property
     def is_accepting(self) -> bool:
         return not self._closing and not self._closed
+
+    @property
+    def active_task_count(self) -> int:
+        return sum(1 for task in self._tasks.values() if not task.done())
+
+    def capacity_snapshot(self) -> dict[str, int]:
+        return {
+            "active_tasks": self.active_task_count,
+            "max_inflight_runs": self.config.max_inflight_runs,
+            "max_concurrent_model_requests": self.config.max_concurrent_model_requests,
+        }
 
     async def __aenter__(self) -> Runtime:
         if self._closed:
@@ -162,6 +188,12 @@ class Runtime:
     def _ensure_accepting(self) -> None:
         if not self.is_accepting:
             raise RuntimeClosedError("Runtime is shutting down or already closed.")
+
+    def _ensure_run_capacity(self) -> None:
+        if self.active_task_count >= self.config.max_inflight_runs:
+            raise RuntimeCapacityError(
+                "Runtime in-flight run capacity is exhausted; retry after active work completes."
+            )
 
     def _reconcile_incomplete_runs(self) -> None:
         for run in self.store.incomplete_runs():
@@ -346,6 +378,60 @@ class Runtime:
     def purge_expired_memories(self) -> int:
         return self.memory.purge_expired_memories()
 
+    def create_run_submission(
+        self,
+        agent: AgentDefinition | str,
+        input_text: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> RunSubmission:
+        self._ensure_accepting()
+        definition = self._resolve_agent(agent)
+        requested_metadata = {**self.config.metadata, **(metadata or {})}
+        session_id = session_id or requested_metadata.get("session_id")
+        if session_id is not None:
+            self.store.get_session(str(session_id))
+            requested_metadata["session_id"] = str(session_id)
+        fingerprint = self._request_fingerprint(
+            definition.name, input_text, requested_metadata, session_id
+        )
+        normalized_key = self._normalize_idempotency_key(idempotency_key)
+        if normalized_key is not None:
+            existing = self.store.idempotent_run(normalized_key, fingerprint)
+            if existing is not None:
+                return RunSubmission(existing, True)
+        run_metadata = dict(requested_metadata)
+        run_metadata.setdefault("trace_id", new_id("trace"))
+        run = AgentRun.create(definition.name, input_text, run_metadata)
+        run.metadata.setdefault("root_run_id", run.id)
+        run.metadata.setdefault("root_trace_id", run.metadata["trace_id"])
+        event_payload = {
+            "agent_name": definition.name,
+            "input": input_text,
+            "trace_id": run.metadata["trace_id"],
+            "session_id": session_id,
+            "idempotency_key": normalized_key,
+        }
+        if normalized_key is None:
+            self.store.create_run_with_event(
+                run,
+                "run.created",
+                event_payload,
+                session_id=str(session_id) if session_id is not None else None,
+            )
+            return RunSubmission(run, False)
+        durable_run, replayed = self.store.create_run_idempotently(
+            run,
+            "run.created",
+            event_payload,
+            idempotency_key=normalized_key,
+            request_fingerprint=fingerprint,
+            session_id=str(session_id) if session_id is not None else None,
+        )
+        return RunSubmission(durable_run, replayed)
+
     def create_run(
         self,
         agent: AgentDefinition | str,
@@ -353,34 +439,15 @@ class Runtime:
         metadata: dict[str, Any] | None = None,
         *,
         session_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> AgentRun:
-        self._ensure_accepting()
-        definition = self._resolve_agent(agent)
-        run_metadata = {**self.config.metadata, **(metadata or {})}
-        session_id = session_id or run_metadata.get("session_id")
-        if session_id is not None:
-            self.store.get_session(str(session_id))
-            run_metadata["session_id"] = str(session_id)
-        run_metadata.setdefault("trace_id", new_id("trace"))
-        run = AgentRun.create(
-            definition.name,
+        return self.create_run_submission(
+            agent,
             input_text,
-            run_metadata,
-        )
-        run.metadata.setdefault("root_run_id", run.id)
-        run.metadata.setdefault("root_trace_id", run.metadata["trace_id"])
-        self.store.create_run_with_event(
-            run,
-            "run.created",
-            {
-                "agent_name": definition.name,
-                "input": input_text,
-                "trace_id": run.metadata["trace_id"],
-                "session_id": session_id,
-            },
-            session_id=str(session_id) if session_id is not None else None,
-        )
-        return run
+            metadata,
+            session_id=session_id,
+            idempotency_key=idempotency_key,
+        ).run
 
     def create_workflow_run(
         self,
@@ -633,9 +700,53 @@ class Runtime:
         metadata: dict[str, Any] | None = None,
         *,
         session_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> AgentRun:
-        run = self.create_run(agent, input_text, metadata, session_id=session_id)
-        return await self._execute(run.id)
+        submitted = self.submit(
+            agent,
+            input_text,
+            metadata,
+            session_id=session_id,
+            idempotency_key=idempotency_key,
+        )
+        return await self.wait(submitted.run.id)
+
+    def submit(
+        self,
+        agent: AgentDefinition | str,
+        input_text: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> RunSubmission:
+        self._ensure_accepting()
+        normalized_key = self._normalize_idempotency_key(idempotency_key)
+        if normalized_key is not None:
+            definition = self._resolve_agent(agent)
+            requested_metadata = {**self.config.metadata, **(metadata or {})}
+            effective_session = session_id or requested_metadata.get("session_id")
+            if effective_session is not None:
+                requested_metadata["session_id"] = str(effective_session)
+            fingerprint = self._request_fingerprint(
+                definition.name, input_text, requested_metadata, effective_session
+            )
+            existing = self.store.idempotent_run(normalized_key, fingerprint)
+            if existing is not None:
+                return RunSubmission(existing, True)
+        self._ensure_run_capacity()
+        submission = self.create_run_submission(
+            agent,
+            input_text,
+            metadata,
+            session_id=session_id,
+            idempotency_key=normalized_key,
+        )
+        if not submission.replayed:
+            self.track_task(
+                submission.run.id, asyncio.create_task(self._execute(submission.run.id))
+            )
+        return submission
 
     def start(
         self,
@@ -644,10 +755,15 @@ class Runtime:
         metadata: dict[str, Any] | None = None,
         *,
         session_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> AgentRun:
-        run = self.create_run(agent, input_text, metadata, session_id=session_id)
-        self.track_task(run.id, asyncio.create_task(self._execute(run.id)))
-        return run
+        return self.submit(
+            agent,
+            input_text,
+            metadata,
+            session_id=session_id,
+            idempotency_key=idempotency_key,
+        ).run
 
     async def wait(
         self, run_id: str, timeout_seconds: float | None = None
@@ -675,6 +791,7 @@ class Runtime:
         if existing is not None and not existing.done():
             return await existing
         run = self.store.get_run(run_id)
+        self._ensure_run_capacity()
         if run.status not in {
             RunStatus.RUNNING,
             RunStatus.PAUSED,
@@ -1410,50 +1527,51 @@ class Runtime:
         last_error: Exception | None = None
         for attempt in range(self.config.max_model_retries + 1):
             try:
-                stream = getattr(self.provider, "stream", None)
-                if callable(stream):
-                    self._event(
-                        run.id,
-                        "model.stream.started",
-                        {"step": step_index, "attempt": attempt + 1},
-                    )
-                    response = await asyncio.wait_for(
-                        self._consume_model_stream(
-                            run,
-                            stream(
-                                model_messages,
-                                self.tools.definitions_for(agent.tools),
-                                agent.model,
+                async with self._model_capacity:
+                    stream = getattr(self.provider, "stream", None)
+                    if callable(stream):
+                        self._event(
+                            run.id,
+                            "model.stream.started",
+                            {"step": step_index, "attempt": attempt + 1},
+                        )
+                        response = await asyncio.wait_for(
+                            self._consume_model_stream(
+                                run,
+                                stream(
+                                    model_messages,
+                                    self.tools.definitions_for(agent.tools),
+                                    agent.model,
+                                ),
+                                step_index,
+                                attempt + 1,
                             ),
-                            step_index,
-                            attempt + 1,
+                            timeout=self.config.model_timeout_seconds,
+                        )
+                        self._event(
+                            run.id,
+                            "model.stream.completed",
+                            {
+                                "step": step_index,
+                                "finish_reason": response.finish_reason,
+                                "usage": response.usage,
+                                "has_tool_calls": bool(response.tool_calls),
+                            },
+                        )
+                        return response
+                    complete = getattr(self.provider, "complete", None)
+                    if not callable(complete):
+                        raise ProviderError(
+                            "Model provider implements neither stream nor complete."
+                        )
+                    return await asyncio.wait_for(
+                        complete(
+                            model_messages,
+                            self.tools.definitions_for(agent.tools),
+                            agent.model,
                         ),
                         timeout=self.config.model_timeout_seconds,
                     )
-                    self._event(
-                        run.id,
-                        "model.stream.completed",
-                        {
-                            "step": step_index,
-                            "finish_reason": response.finish_reason,
-                            "usage": response.usage,
-                            "has_tool_calls": bool(response.tool_calls),
-                        },
-                    )
-                    return response
-                complete = getattr(self.provider, "complete", None)
-                if not callable(complete):
-                    raise ProviderError(
-                        "Model provider implements neither stream nor complete."
-                    )
-                return await asyncio.wait_for(
-                    complete(
-                        model_messages,
-                        self.tools.definitions_for(agent.tools),
-                        agent.model,
-                    ),
-                    timeout=self.config.model_timeout_seconds,
-                )
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -1632,6 +1750,37 @@ class Runtime:
             } == call_ids:
                 return
         messages.append(step.assistant_message)
+
+    @staticmethod
+    def _normalize_idempotency_key(value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Idempotency key must not be blank.")
+        if len(normalized) > 200:
+            raise ValueError("Idempotency key must not exceed 200 characters.")
+        return normalized
+
+    @staticmethod
+    def _request_fingerprint(
+        agent_name: str,
+        input_text: str,
+        metadata: dict[str, Any],
+        session_id: object | None,
+    ) -> str:
+        canonical = json.dumps(
+            {
+                "agent_name": agent_name,
+                "input": input_text,
+                "metadata": metadata,
+                "session_id": str(session_id) if session_id is not None else None,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _event(
         self,

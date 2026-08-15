@@ -5,12 +5,14 @@ from .doctor import DoctorCheck, DoctorReport, RuntimeDoctor
 from .domain import (
     AgentDefinition,
     AgentRun,
+    IdempotencyConflict,
     MemoryRecord,
     MemoryScope,
     MemorySearchResult,
     RunRelation,
     RunRelationType,
     RunStatus,
+    RuntimeCapacityError,
     Session,
     ToolDefinition,
     UnknownToolResolution,
@@ -51,7 +53,7 @@ from .providers import (
     StreamingModelProvider,
     ToolCallDelta,
 )
-from .runtime import Runtime, RuntimeConfig
+from .runtime import RunSubmission, Runtime, RuntimeConfig
 from .sdk import (
     create_memory_demo_runtime,
     create_multi_agent_demo_runtime,
@@ -77,6 +79,7 @@ __all__ = [
     "EvalSuite",
     "ExactMatchEvaluator",
     "ExpectedStatusEvaluator",
+    "IdempotencyConflict",
     "MemoryEvalRunner",
     "MemoryRecord",
     "MemoryScope",
@@ -91,8 +94,10 @@ __all__ = [
     "RunRelation",
     "RunRelationType",
     "RunStatus",
+    "RunSubmission",
     "RunTrace",
     "Runtime",
+    "RuntimeCapacityError",
     "RuntimeConfig",
     "RuntimeDoctor",
     "SequentialWorkflow",

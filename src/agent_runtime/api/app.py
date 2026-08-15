@@ -10,8 +10,10 @@ from ..doctor import RuntimeDoctor
 from ..domain import (
     AgentRun,
     Approval,
+    IdempotencyConflict,
     MemoryScope,
     RunNotFound,
+    RuntimeCapacityError,
     RuntimeClosedError,
     RuntimeEvent,
     StoreBusyError,
@@ -23,7 +25,7 @@ from ..runtime import Runtime
 from ..sdk import create_local_runtime, demo_agent
 
 try:
-    from fastapi import FastAPI, HTTPException, Query, Request, status
+    from fastapi import FastAPI, HTTPException, Query, Request, Response, status
     from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
     from pydantic import BaseModel, Field
@@ -156,7 +158,7 @@ def create_app(
 
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.7.7",
+        version="0.7.8",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
         lifespan=lifespan,
     )
@@ -242,6 +244,33 @@ def create_app(
             },
         )
 
+    @app.exception_handler(RuntimeCapacityError)
+    async def handle_runtime_capacity(
+        _: Request, error: RuntimeCapacityError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "detail": str(error),
+                "code": "runtime_capacity_exhausted",
+                "retryable": True,
+            },
+            headers={"Retry-After": "1"},
+        )
+
+    @app.exception_handler(IdempotencyConflict)
+    async def handle_idempotency_conflict(
+        _: Request, error: IdempotencyConflict
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": str(error),
+                "code": "idempotency_conflict",
+                "retryable": False,
+            },
+        )
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         if not runtime.is_accepting:
@@ -253,8 +282,9 @@ def create_app(
         return {
             "status": "ok",
             "runtime": "agent-runtime",
-            "version": "0.7.7",
+            "version": "0.7.8",
             "store": store,
+            "capacity": runtime.capacity_snapshot(),
         }
 
     @app.post("/sessions", status_code=status.HTTP_201_CREATED)
@@ -393,18 +423,26 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/runs", status_code=status.HTTP_202_ACCEPTED)
-    async def create_run(request: CreateRunRequest) -> dict[str, Any]:
-        agent_name = request.agent_name or app.state.default_agent
+    async def create_run(
+        payload: CreateRunRequest,
+        request: Request,
+        response: Response,
+    ) -> dict[str, Any]:
+        agent_name = payload.agent_name or app.state.default_agent
         try:
-            run = runtime.start(
+            submission = runtime.submit(
                 agent_name,
-                request.input,
-                request.metadata,
-                session_id=request.session_id,
+                payload.input,
+                payload.metadata,
+                session_id=payload.session_id,
+                idempotency_key=request.headers.get("Idempotency-Key"),
             )
-        except (KeyError, ValueError) as error:
+        except KeyError as error:
             raise _not_found(error) from error
-        return _run_payload(run)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        response.headers["Idempotent-Replayed"] = str(submission.replayed).lower()
+        return _run_payload(submission.run)
 
     @app.get("/runs/{run_id}")
     async def get_run(run_id: str) -> dict[str, Any]:
