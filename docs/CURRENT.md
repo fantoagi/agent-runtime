@@ -4,7 +4,7 @@
 - **当前里程碑**：v0.7.8 Durable Submission & Admission Control
 - **Runtime 构建完成时间**：2026-08-15（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`
+- **当前代码基线 commit**：`ab73a38`
 - **最近演进记录**：[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)
 
 ## 状态定义

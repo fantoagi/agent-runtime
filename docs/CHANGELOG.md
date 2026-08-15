@@ -20,7 +20,7 @@
   - `tests/test_api.py`
   - `tests/test_reliability.py`
   - `tests/test_contract_edges.py`
-- **关联 commit**：`pending`
+- **关联 commit**：`ab73a38`
 - **关联 ADR**：[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)
 
 ### 变更摘要
