@@ -342,7 +342,7 @@ Learning Console 是 `agent_runtime.lab` 中的教学 Adapter，通过 `create_a
 - v0.7 Context/Memory 场景：真实创建 Session/Memory、触发检索与 Context Compaction，并将大 Tool Result 写入 Artifact Store。
 - `LearningConsole`：启动场景，根据 Root Run metadata 定位 Runtime，并聚合 Root/Child Snapshot。
 - Lab FastAPI Routes：提供场景目录、启动、Snapshot 和审批接口。
-- Static UI：提供 8 条事件泳道和 Event、State、Messages、Execution、Trace、Context、Memory、Artifact、SQLite、Acceptance 检查器。
+- Static UI：根据 Snapshot 动态生成 Workflow Parent、每个 Child Agent 和实际出现的领域泳道，并提供 Event、State、Messages、Execution、Trace、Context、Memory、Artifact、SQLite、Acceptance 检查器。
 
 所有场景 Runtime 共享现有 SQLiteStore，但不共享 Provider 行为。Run、Relation、Event、Step、ToolExecution、Approval、Checkpoint、Session、Memory 和 Artifact 仍是唯一执行事实；教学解释、`timeline_sequence` 和状态投影只用于展示，不回写领域状态。
 
@@ -350,12 +350,14 @@ Snapshot 先通过 `root_run_id` 和 `relations_for_root()` 找到完整 Run Tre
 
 Root 事件实时通知复用 `/runs/{run_id}/events/stream`。因为 Child Run 保留独立 Event Stream，页面在 Parent 运行期间每 450ms 刷新聚合 Snapshot，从而动态显示 Child Model/Tool/Checkpoint；这属于本地教学投影，不新增 Runtime 消息总线。
 
-泳道映射：Workflow/Root 生命周期进入 Run，Delegation 和 Child 事件进入 Agent，Session/Memory 进入 Memory，Context Build/Compaction 进入 Context，其余进入 Model、Tool、Approval 或 State。Trace Inspector 直接递归渲染 `TraceTree.root`，Context/Memory/Artifact Inspector 读取 Snapshot 的对应持久化事实。
+泳道映射：Workflow/Root 生命周期与 Delegation 进入 Workflow Parent；每个 Child Run 根据 `workflow_step` 或 `workflow_branch` 排序并获得独立 Agent 泳道，其自身的 Run、Context、Model、Tool 和 Checkpoint 事件全部留在该泳道；非 Child 事件再按 Session/Memory、Context、Model、Tool、Approval 或 State 领域映射。只渲染当前 Snapshot 实际使用的领域泳道。
+
+连线不再按跨 Run 全局相邻事件直接串接：同一 Run 按 `local_sequence` 连接内部执行线；`delegation.created → Child run.created` 形成委派分叉；`Child run.completed/failed/cancelled → delegation.completed/failed/cancelled` 形成结果汇聚。这样并行分支不会因为 `timeline_sequence` 相邻而被误表示为业务依赖。Trace Inspector 直接递归渲染 `TraceTree.root`，Context/Memory/Artifact Inspector 读取 Snapshot 的对应持久化事实。
 
 事件“回放”只移动浏览器展示游标。它不会暂停 Runtime asyncio Task，也不会改变 Run 状态机、Event sequence 或恢复语义。该边界保证 Learning Console 可以随功能演进扩展，而 Runtime Kernel 不依赖 UI。
 
 > 最近更新：2026-08-15
-> 关联记录：[E2026-08-15-002](./CHANGELOG.md#e2026-08-15-002)
+> 关联记录：[E2026-08-15-003](./CHANGELOG.md#e2026-08-15-003)
 > 关联决策：[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)、[ADR-0009](./adr/0009-learning-console.md)
 ## 10. 安全边界
 

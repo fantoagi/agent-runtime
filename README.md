@@ -27,9 +27,10 @@ OpenAI-compatible provider in application code when connecting to a real model.
 agent-runtime lab
 ```
 
-浏览器会打开 `http://127.0.0.1:8000/lab`。v0.7.1 内置 9 个确定性场景，覆盖单 Run、v0.6 多 Agent 和 v0.7 Context/Memory，并提供：
+浏览器会打开 `http://127.0.0.1:8000/lab`。v0.7.2 内置 9 个确定性场景，覆盖单 Run、v0.6 多 Agent 和 v0.7 Context/Memory，并提供：
 
-- 按 Run / Agent / Session-Memory / Context / Model / Tool / Approval / State 分组的动态泳道图。
+- 多 Agent 场景按 Workflow Parent 与每个 Child Agent 动态拆分独立泳道；单 Run 场景按实际出现的 Context / Model / Tool / Approval / State 领域展示。
+- 连线区分 Run 内部执行、Parent 委派和 Child 汇聚，避免把并行分支误画成串行依赖。
 - 从头回放、逐事件前进和自动播放。
 - Event 状态 diff、原因、下一步和源码方法映射。
 - Parent/Child Trace Tree，以及 Context、Memory、Artifact、Messages、Execution、Metrics 和 SQLite 检查器。

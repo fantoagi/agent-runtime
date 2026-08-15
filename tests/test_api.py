@@ -47,7 +47,7 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.7.1"
+        assert health.json()["version"] == "0.7.2"
 
         created = await client.post(
             "/runs", json={"agent_name": "demo", "input": "hello", "metadata": {"source": "test"}}

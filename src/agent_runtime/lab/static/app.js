@@ -27,16 +27,16 @@ const sseEventTypes = [
   "memory.search.completed", "context.built", "context.compacted", "tool.result.artifactized",
 ];
 
-const swimlanes = [
-  { id: "run", label: "Run" },
-  { id: "agent", label: "Agent" },
-  { id: "memory", label: "Session / Memory" },
-  { id: "context", label: "Context" },
-  { id: "model", label: "Model" },
-  { id: "tool", label: "Tool" },
-  { id: "approval", label: "Approval" },
-  { id: "checkpoint", label: "State" },
+const domainSwimlanes = [
+  { id: "run", label: "Run", detail: "Root 生命周期", color: "var(--blue)" },
+  { id: "memory", label: "Session / Memory", detail: "会话与作用域记忆", color: "#f78cda" },
+  { id: "context", label: "Context", detail: "预算、选择与压缩", color: "#9fe870" },
+  { id: "model", label: "Model", detail: "推理与流式输出", color: "var(--purple)" },
+  { id: "tool", label: "Tool", detail: "工具执行与 Artifact", color: "var(--orange)" },
+  { id: "approval", label: "Approval", detail: "人工决策", color: "var(--yellow)" },
+  { id: "checkpoint", label: "State", detail: "Step / Checkpoint", color: "var(--green)" },
 ];
+const agentLaneColors = ["#66d9ef", "#b596ff", "#ffad66", "#79e6b3", "#f78cda", "#66a9ff"];
 const swimlaneLayout = {
   columnWidth: 156,
   headerHeight: 48,
@@ -59,8 +59,8 @@ function json(value) {
 function eventLane(value) {
   const event = typeof value === "string" ? { type: value } : value;
   const type = event.type || "";
-  if (type.startsWith("delegation.") || event.run_role === "child") return "agent";
-  if (type.startsWith("workflow.") || type.startsWith("run.")) return "run";
+  if (event.run_role === "child" && event.run_id) return `agent:${event.run_id}`;
+  if (type.startsWith("workflow.") || type.startsWith("delegation.") || type.startsWith("run.")) return "run";
   if (type.startsWith("session.") || type.startsWith("memory.")) return "memory";
   if (type.startsWith("context.")) return "context";
   if (type.startsWith("model.")) return "model";
@@ -73,7 +73,58 @@ function eventLane(value) {
 function eventCategory(value) {
   const event = typeof value === "string" ? { type: value } : value;
   if ((event.type || "").includes("failed") || (event.type || "").includes("unknown")) return "error";
+  if (event.run_role === "child") return "agent";
   return eventLane(event);
+}
+
+function workflowPosition(run) {
+  const metadata = run.metadata || {};
+  if (Number.isFinite(metadata.workflow_step)) return metadata.workflow_step;
+  if (Number.isFinite(metadata.workflow_branch)) return metadata.workflow_branch;
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function buildSwimlanes(snapshot) {
+  const runs = snapshot?.runs || [];
+  const events = snapshot?.events || [];
+  const root = snapshot?.run || runs.find((run) => run.run_role === "root") || {};
+  const children = runs
+    .filter((run) => run.run_role === "child")
+    .sort((left, right) => {
+      const position = workflowPosition(left) - workflowPosition(right);
+      if (position !== 0) return position;
+      return String(left.agent_name || left.id).localeCompare(String(right.agent_name || right.id));
+    });
+  const workflowType = root.metadata?.workflow_type;
+  const rootLane = {
+    ...domainSwimlanes[0],
+    label: children.length ? "Workflow Parent" : "Run",
+    detail: children.length
+      ? `${workflowType || "workflow"} · ${root.status || "unknown"}`
+      : `${root.agent_name || "Runtime"} · ${root.status || "unknown"}`,
+    kind: "root",
+    runId: root.id,
+  };
+  const childLanes = children.map((run, index) => {
+    const metadata = run.metadata || {};
+    const isSequential = Number.isFinite(metadata.workflow_step);
+    const position = isSequential ? metadata.workflow_step : metadata.workflow_branch;
+    const prefix = Number.isFinite(position)
+      ? `${isSequential ? "Step" : "Branch"} ${position + 1}`
+      : `Child ${index + 1}`;
+    return {
+      id: `agent:${run.id}`,
+      label: metadata.workflow_step_name || run.agent_name || `Child Agent ${index + 1}`,
+      detail: `${prefix} · ${run.agent_name || "Agent"} · ${run.status || "unknown"}`,
+      color: agentLaneColors[index % agentLaneColors.length],
+      kind: "agent",
+      runId: run.id,
+    };
+  });
+  const activeDomainLanes = domainSwimlanes.slice(1).filter((lane) =>
+    events.some((event) => eventLane(event) === lane.id)
+  );
+  return [rootLane, ...childLanes, ...activeDomainLanes];
 }
 
 function relativeEventTime(events, index) {
@@ -85,12 +136,76 @@ function relativeEventTime(events, index) {
   return `+${(elapsed / 1000).toFixed(elapsed < 10000 ? 1 : 0)}s`;
 }
 
-function swimlanePoint(eventIndex, laneId) {
+function swimlanePoint(eventIndex, laneId, swimlanes) {
   const laneIndex = Math.max(0, swimlanes.findIndex((lane) => lane.id === laneId));
   return {
     x: eventIndex * swimlaneLayout.columnWidth + swimlaneLayout.columnWidth / 2,
     y: swimlaneLayout.headerHeight + laneIndex * swimlaneLayout.rowHeight + swimlaneLayout.rowHeight / 2,
   };
+}
+
+function laneColor(swimlanes, laneId) {
+  return swimlanes.find((lane) => lane.id === laneId)?.color || "var(--line-strong)";
+}
+
+function buildTimelineLinks(events) {
+  const links = [];
+  const eventsByRun = new Map();
+  events.forEach((event, index) => {
+    const current = eventsByRun.get(event.run_id) || [];
+    current.push({ event, index });
+    eventsByRun.set(event.run_id, current);
+  });
+  eventsByRun.forEach((runEvents) => {
+    runEvents.sort((left, right) => left.event.local_sequence - right.event.local_sequence);
+    runEvents.slice(1).forEach((current, offset) => {
+      links.push({
+        fromIndex: runEvents[offset].index,
+        toIndex: current.index,
+        kind: "run-flow",
+        category: eventCategory(current.event),
+        laneId: eventLane(current.event),
+      });
+    });
+  });
+
+  const childCreated = new Map();
+  const childTerminal = new Map();
+  const delegationCreated = new Map();
+  const delegationResolved = new Map();
+  events.forEach((event, index) => {
+    if (event.run_role === "child" && event.type === "run.created") childCreated.set(event.run_id, index);
+    if (event.run_role === "child" && ["run.completed", "run.failed", "run.cancelled"].includes(event.type)) {
+      childTerminal.set(event.run_id, index);
+    }
+    const childRunId = event.payload?.child_run_id;
+    if (!childRunId) return;
+    if (event.type === "delegation.created") delegationCreated.set(childRunId, index);
+    if (["delegation.completed", "delegation.failed", "delegation.cancelled"].includes(event.type)) {
+      delegationResolved.set(childRunId, index);
+    }
+  });
+  delegationCreated.forEach((fromIndex, childRunId) => {
+    if (!childCreated.has(childRunId)) return;
+    links.push({
+      fromIndex,
+      toIndex: childCreated.get(childRunId),
+      kind: "delegation-flow",
+      category: "agent",
+      laneId: `agent:${childRunId}`,
+    });
+  });
+  delegationResolved.forEach((toIndex, childRunId) => {
+    if (!childTerminal.has(childRunId)) return;
+    links.push({
+      fromIndex: childTerminal.get(childRunId),
+      toIndex,
+      kind: "aggregation-flow",
+      category: "agent",
+      laneId: `agent:${childRunId}`,
+    });
+  });
+  return links;
 }
 
 function setConnection(mode, text) {
@@ -249,50 +364,83 @@ function renderAll() {
   renderInspector();
 }
 
+function renderSwimlaneLabels(swimlanes) {
+  const labels = $("swimlaneLabels");
+  labels.style.gridTemplateRows = `${swimlaneLayout.headerHeight}px repeat(${swimlanes.length}, ${swimlaneLayout.rowHeight}px)`;
+  labels.innerHTML = `
+    <div class="swimlane-corner"><span>FLOW</span><small>时间 →</small></div>
+    ${swimlanes.map((lane) => `
+      <div class="swimlane-label ${lane.kind === "agent" ? "agent" : lane.id}" data-lane-id="${escapeHtml(lane.id)}" style="--lane-color:${lane.color}">
+        <strong>${escapeHtml(lane.label)}</strong>
+        <small>${escapeHtml(lane.detail)}</small>
+      </div>
+    `).join("")}
+  `;
+}
+
+function timelineLinkPath(link, swimlanes) {
+  const fromEvent = state.snapshot.events[link.fromIndex];
+  const toEvent = state.snapshot.events[link.toIndex];
+  const from = swimlanePoint(link.fromIndex, eventLane(fromEvent), swimlanes);
+  const to = swimlanePoint(link.toIndex, eventLane(toEvent), swimlanes);
+  const middle = (from.x + to.x) / 2;
+  return `M ${from.x} ${from.y} C ${middle} ${from.y}, ${middle} ${to.y}, ${to.x} ${to.y}`;
+}
+
 function renderTimeline() {
   const events = state.snapshot?.events || [];
   const hasEvents = events.length > 0;
   $("timelineEmpty").hidden = hasEvents;
   $("swimlaneBoard").hidden = !hasEvents;
-  $("swimlaneStatus").textContent = `${Math.max(0, Math.min(events.length, state.revealedEventIndex + 1))} / ${events.length} 事件`;
   if (!hasEvents) {
     $("eventTimeline").innerHTML = "";
+    $("swimlaneLabels").innerHTML = "";
+    $("swimlaneStatus").textContent = "0 / 0 事件";
     return;
   }
 
+  const swimlanes = buildSwimlanes(state.snapshot);
+  const agentLaneCount = swimlanes.filter((lane) => lane.kind === "agent").length;
+  const revealedCount = Math.max(0, Math.min(events.length, state.revealedEventIndex + 1));
+  $("swimlaneStatus").textContent = `${revealedCount} / ${events.length} 事件 · ${agentLaneCount} 条 Agent 泳道`;
+
   const canvasWidth = Math.max(3, events.length) * swimlaneLayout.columnWidth;
   const canvasHeight = swimlaneLayout.headerHeight + swimlanes.length * swimlaneLayout.rowHeight;
+  const board = $("swimlaneBoard");
+  board.style.height = `${canvasHeight}px`;
+  renderSwimlaneLabels(swimlanes);
+
   const tracks = swimlanes.map((lane, laneIndex) => `
-    <div class="swimlane-track ${lane.id}" style="top:${swimlaneLayout.headerHeight + laneIndex * swimlaneLayout.rowHeight}px;height:${swimlaneLayout.rowHeight}px"></div>
+    <div class="swimlane-track ${lane.kind === "agent" ? "agent" : lane.id}" data-lane-id="${escapeHtml(lane.id)}" style="--lane-color:${lane.color};top:${swimlaneLayout.headerHeight + laneIndex * swimlaneLayout.rowHeight}px;height:${swimlaneLayout.rowHeight}px"></div>
   `).join("");
   const ticks = events.map((event, index) => `
     <div class="swimlane-tick ${index <= state.revealedEventIndex ? "revealed" : ""} ${index === state.selectedEventIndex ? "selected" : ""}" style="left:${index * swimlaneLayout.columnWidth}px;width:${swimlaneLayout.columnWidth}px">
-      <strong>#${event.sequence}</strong><small>${relativeEventTime(events, index)}</small>
+      <strong>#${event.timeline_sequence || index + 1}</strong><small>${relativeEventTime(events, index)}</small>
     </div>
   `).join("");
-  const links = events.slice(1).map((event, offset) => {
-    const index = offset + 1;
-    const previous = swimlanePoint(index - 1, eventLane(events[index - 1]));
-    const current = swimlanePoint(index, eventLane(event));
-    const middle = (previous.x + current.x) / 2;
-    const path = `M ${previous.x} ${previous.y} C ${middle} ${previous.y}, ${middle} ${current.y}, ${current.x} ${current.y}`;
-    return `<path class="swimlane-link ${eventCategory(event)} ${index <= state.revealedEventIndex ? "revealed" : ""} ${index === state.selectedEventIndex ? "selected" : ""}" d="${path}" />`;
+  const links = buildTimelineLinks(events).map((link) => {
+    const revealIndex = Math.max(link.fromIndex, link.toIndex);
+    const selected = [link.fromIndex, link.toIndex].includes(state.selectedEventIndex);
+    const color = link.category === "error" ? "var(--red)" : laneColor(swimlanes, link.laneId);
+    return `<path class="swimlane-link ${link.kind} ${link.category} ${revealIndex <= state.revealedEventIndex ? "revealed" : ""} ${selected ? "selected" : ""}" style="--lane-color:${color}" d="${timelineLinkPath(link, swimlanes)}" />`;
   }).join("");
   const nodes = events.map((event, index) => {
     const lane = eventLane(event);
-    const laneIndex = swimlanes.findIndex((item) => item.id === lane);
+    const laneIndex = Math.max(0, swimlanes.findIndex((item) => item.id === lane));
     const left = index * swimlaneLayout.columnWidth + 12;
-    const top = swimlaneLayout.headerHeight + laneIndex * swimlaneLayout.rowHeight + 17;
+    const top = swimlaneLayout.headerHeight + laneIndex * swimlaneLayout.rowHeight + 9;
+    const category = eventCategory(event);
+    const color = category === "error" ? "var(--red)" : laneColor(swimlanes, lane);
     const classes = [
       "swimlane-event",
-      eventCategory(event),
+      category,
       index <= state.revealedEventIndex ? "revealed" : "",
       index === state.revealedEventIndex ? "arriving" : "",
       index === state.selectedEventIndex ? "selected" : "",
     ].filter(Boolean).join(" ");
     return `
-      <button type="button" class="${classes}" style="left:${left}px;top:${top}px" data-event-index="${index}" title="${escapeHtml(event.teaching.summary)}" aria-label="#${event.timeline_sequence || event.sequence} ${escapeHtml(event.type)}">
-        <span class="swimlane-event-top"><span class="swimlane-event-dot"></span><span>#${event.timeline_sequence || event.sequence}</span><small>${event.run_role === "child" ? `Child #${event.local_sequence}` : relativeEventTime(events, index)}</small></span>
+      <button type="button" class="${classes}" style="--lane-color:${color};left:${left}px;top:${top}px" data-event-index="${index}" data-run-id="${escapeHtml(event.run_id)}" title="${escapeHtml(event.teaching.summary)}" aria-label="#${event.timeline_sequence || event.sequence} ${escapeHtml(event.type)}">
+        <span class="swimlane-event-top"><span class="swimlane-event-dot"></span><span>#${event.timeline_sequence || event.sequence}</span><small>${event.run_role === "child" ? `Local #${event.local_sequence}` : relativeEventTime(events, index)}</small></span>
         <strong>${escapeHtml(event.type)}</strong>
         <span class="swimlane-event-agent">${escapeHtml(event.agent_name || "Runtime")}</span>
         <span class="swimlane-event-title">${escapeHtml(event.teaching.title)}</span>

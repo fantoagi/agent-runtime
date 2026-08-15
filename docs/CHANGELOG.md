@@ -4,6 +4,97 @@
 
 ---
 
+<a id="e2026-08-15-003"></a>
+## E2026-08-15-003：Learning Console 多 Agent 独立泳道与流程语义连线
+
+- **完成时间**：2026-08-15
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `pyproject.toml`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/lab/static/app.js`
+  - `src/agent_runtime/lab/static/styles.css`
+  - `tests/test_api.py`
+  - `tests/test_lab_api.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/LEARNING.md`
+  - `docs/CONTEXT_MEMORY.md`
+  - `docs/ROADMAP.md`
+  - `docs/CHANGELOG.md`
+  - `docs/adr/0009-learning-console.md`
+  - `docs/adr/README.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0009](./adr/0009-learning-console.md)
+
+### 变更摘要
+
+发布 v0.7.2 Learning Console 泳道可视化优化。修复串行和并行 Workflow 的全部 Child Event 被压入同一条 Agent 泳道、不同并行分支被全局相邻事件连线误表示为串行依赖的问题。
+
+### 系统架构
+
+- Timeline 从固定 8 条泳道改为 Snapshot 驱动的动态泳道模型。
+- 多 Agent 场景生成 1 条 Workflow Parent 泳道，并为每个 Child Run 生成独立 Agent 泳道。
+- Child 泳道按 `workflow_step` 或 `workflow_branch` 排序，顺序直接来自持久化 Run metadata。
+- 非 Child 事件仍按 Memory、Context、Model、Tool、Approval 和 State 领域映射，但只显示当前 Snapshot 实际使用的领域泳道。
+- 连线由跨 Run 全局相邻关系改为 Run 内部、Parent 委派和 Child 汇聚三类显式语义。
+
+### 实现方式
+
+- `buildSwimlanes()` 从 `snapshot.runs` 读取 Root/Child、Agent Name、Workflow Step/Branch、状态和 metadata，动态构造标签、顺序、颜色和画布高度。
+- Child Event 使用 `agent:<run_id>` 作为稳定泳道 ID，因此同一 Child 的 Run、Context、Model、Tool 与 Checkpoint 事件保持在同一行。
+- `buildTimelineLinks()` 先按 `run_id` 分组，再按 `local_sequence` 建立 Run 内部连线。
+- `delegation.created → Child run.created` 建立委派分叉线；Child 终态事件到对应 `delegation.completed/failed/cancelled` 建立汇聚线。
+- 页面增加连线图例；实线表示 Run 内部，长虚线表示委派，点线表示汇聚。
+- 泳道标签和画布高度由 JavaScript 动态计算，移除 HTML/CSS 中固定 8 行和固定 660px 高度。
+
+### 当前功能
+
+- 串行 Workflow 显示 Workflow Parent、Planner、Worker、Reviewer 独立泳道。
+- 并行 Workflow 显示 Workflow Parent、Research、Test、Risk 独立泳道。
+- 每条 Agent 泳道显示 Step/Branch 编号、Agent Name 和当前状态，并使用独立颜色。
+- 单 Run 场景继续按实际出现的 Context、Model、Tool、Approval 和 State 领域展示。
+- 顶部时间轴使用跨 Run `timeline_sequence`，Child 节点同时展示 `local_sequence`。
+- 回放、节点点击、自动跟随、Inspector 和 Root SSE + Snapshot 轮询行为保持不变。
+
+### 已知限制
+
+- 横轴仍按 `timeline_sequence` 等距排列，不是按真实耗时比例缩放。
+- 确定性并行教学场景用于展示逻辑并发与分支关系，不用于衡量真实并行性能。
+- Root SSE 仍不直接转发全部 Child Event，页面运行期间继续使用 450ms Snapshot 轮询。
+- Learning Console 仍是本地单用户教学工具，不是生产 Workflow Designer 或分布式 Trace UI。
+
+### 测试与验收
+
+```powershell
+cd D:\AICoding\Agent
+$env:PYTHONPATH='src'
+python scripts/check_docs.py
+python -m pytest -p no:cacheprovider -o addopts= -q
+python -m compileall -q src tests
+node --check src\agent_runtime\lab\static\app.js
+git diff --check
+agent-runtime lab
+```
+
+验收覆盖：
+
+- 静态页面使用动态 `swimlaneLabels` 容器，不再硬编码 Agent/Context 等 8 行标签。
+- JavaScript 包含 `buildSwimlanes()` 和 `buildTimelineLinks()`。
+- Child Event 映射为 `agent:<run_id>`。
+- 串行 Agent 按 Planner、Worker、Reviewer 排序。
+- 并行 Agent 按 Research、Test、Risk 排序。
+- 每个 Child 均存在独立 `run.created`，可建立 Parent 委派和 Child 汇聚连线。
+- 自检确认两个 Workflow 均生成 3 条 Agent 泳道、3 条委派线和 3 条汇聚线。
+- 当前全量测试：`55 passed`。
+
+### 后续计划
+
+继续进入 v0.8 Sandbox；届时 Learning Console 为 Sandbox Policy、Capability、Secret Redaction 和 Tool Isolation 增加对应教学泳道或 Inspector，而不改变本次多 Agent 映射规则。
+
 <a id="e2026-08-15-002"></a>
 ## E2026-08-15-002：Learning Console 覆盖 v0.6 多 Agent 与 v0.7 Context/Memory
 

@@ -17,27 +17,36 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         assert 'data-tab="context"' in page.text
         assert 'data-tab="memory"' in page.text
         assert 'data-tab="artifacts"' in page.text
-        assert 'class="swimlane-label agent"' in page.text
-        assert 'class="swimlane-label context"' in page.text
+        assert 'id="swimlaneLabels"' in page.text
+        assert 'class="flow-legend"' in page.text
 
         stylesheet = await client.get("/lab/static/styles.css")
         assert stylesheet.status_code == 200
         assert "--accent" in stylesheet.text
         assert ".swimlane-board" in stylesheet.text
         assert ".swimlane-link" in stylesheet.text
+        assert ".swimlane-link.delegation-flow" in stylesheet.text
+        assert ".swimlane-link.aggregation-flow" in stylesheet.text
+        assert "repeat(8, 76px)" not in stylesheet.text
         assert ".topology-node" in stylesheet.text
         assert ".empty-state[hidden]" in stylesheet.text
 
         script = await client.get("/lab/static/app.js")
         assert script.status_code == 200
         assert "function eventLane" in script.text
+        assert "function buildSwimlanes" in script.text
+        assert "function buildTimelineLinks" in script.text
         assert "function swimlanePoint" in script.text
+        assert 'return `agent:${event.run_id}`' in script.text
+        assert 'kind: "delegation-flow"' in script.text
+        assert 'kind: "aggregation-flow"' in script.text
         assert "swimlane-event" in script.text
         assert '"delegation.created"' in script.text
         assert '"context.compacted"' in script.text
         assert "function renderMemoryInspector" in script.text
         assert 'id="swimlaneBoard"' in page.text
         assert 'id="swimlaneViewport"' in page.text
+        assert 'class="swimlane-label agent"' not in page.text
 
         scenarios = await client.get("/lab/api/scenarios")
         assert scenarios.status_code == 200
@@ -154,6 +163,26 @@ async def test_multi_agent_learning_scenarios_show_parent_child_topology(
         assert any(event["run_role"] == "child" for event in payload["events"])
         assert "delegation.created" in [event["type"] for event in payload["events"]]
         assert payload["persistence"]["tables"]["run_relations"] == 3
+        children = [run for run in payload["runs"] if run["run_role"] == "child"]
+        order_key = "workflow_step" if workflow_type == "sequential" else "workflow_branch"
+        ordered_children = sorted(children, key=lambda run: run["metadata"][order_key])
+        expected_names = (
+            ["Planner", "Worker", "Reviewer"]
+            if workflow_type == "sequential"
+            else ["Research", "Test", "Risk"]
+        )
+        assert [run["metadata"]["workflow_step_name"] for run in ordered_children] == expected_names
+        child_run_ids = {run["id"] for run in children}
+        assert child_run_ids == {
+            event["run_id"] for event in payload["events"] if event["run_role"] == "child"
+        }
+        assert all(
+            any(
+                event["run_id"] == child_id and event["type"] == "run.created"
+                for event in payload["events"]
+            )
+            for child_id in child_run_ids
+        )
 
 
 @pytest.mark.asyncio

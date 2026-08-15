@@ -1,6 +1,6 @@
 # Agent Runtime Learning Console 使用指南
 
-Learning Console v0.7.1 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context 和 Artifact 的真实执行事实放到同一个浏览器页面中。
+Learning Console v0.7.2 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context 和 Artifact 的真实执行事实放到同一个浏览器页面中。
 
 > 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。
 
@@ -43,7 +43,7 @@ uvicorn agent_runtime.api.app:app --reload
 
 ### 左侧：Learning Path
 
-选择确定性学习场景。v0.7.1 提供以下 9 个真实 Runtime 场景：
+选择确定性学习场景。v0.7.2 提供以下 9 个真实 Runtime 场景：
 
 1. 纯文本响应。
 2. Tool Calling。
@@ -60,23 +60,28 @@ uvicorn agent_runtime.api.app:app --reload
 
 尚未启动 Run 时，中间区域只显示一条紧凑的引导提示，用于说明事件来自 SQLite 和 SSE。一旦 Snapshot 中存在事件，该空状态会完全隐藏，不占用泳道图上方空间。
 
-持久化事件按 `RuntimeEvent.sequence` 从左向右进入动态泳道。纵向位置表示执行角色，曲线表示相邻事件之间的先后关系：
+聚合 Snapshot 按 `timeline_sequence` 从左向右展示事件，同时保留每个 Run 自己的 `local_sequence`。纵向位置表示执行主体或领域；多 Agent 场景会动态生成一条 Workflow Parent 泳道和 N 条 Child Agent 泳道：
 
 | 泳道 | 领域 | 典型事件 |
 | --- | --- | --- |
-| Run | Root / Workflow 生命周期 | `run.*`、`workflow.*` |
-| Agent | 委派与 Child Run | `delegation.*`、Child 的 `run.*` / `model.*` |
-| Session / Memory | 会话与作用域记忆 | `session.run.attached`、`memory.search.*` |
-| Context | 模型输入构建与压缩 | `context.built`、`context.compacted` |
-| Model | 模型请求与流式输出 | `model.requested`、`model.delta`、`model.completed` |
-| Tool | 工具执行与大结果 | `tool.*`、`tool.result.artifactized` |
-| Approval | 人工审批 | `approval.requested`、`approval.resolved` |
-| State | Step / Checkpoint | `checkpoint.created`、`step.completed` |
+| Workflow Parent / Run | Root 或 Workflow 生命周期与委派 | `run.*`、`workflow.*`、`delegation.*` |
+| Child Agent × N | 每个 Child Run 的完整内部链路 | Child 自己的 `run.*`、`context.*`、`model.*`、`tool.*`、`checkpoint.*` |
+| Session / Memory | 非 Child 的会话与作用域记忆 | `session.run.attached`、`memory.search.*` |
+| Context | 非 Child 的模型输入构建与压缩 | `context.built`、`context.compacted` |
+| Model | 非 Child 的模型请求与流式输出 | `model.requested`、`model.delta`、`model.completed` |
+| Tool | 非 Child 的工具执行与大结果 | `tool.*`、`tool.result.artifactized` |
+| Approval | 非 Child 的人工审批 | `approval.requested`、`approval.resolved` |
+| State | 非 Child 的 Step / Checkpoint | `checkpoint.created`、`step.completed` |
+
+Child Agent 泳道按 `workflow_step`（串行）或 `workflow_branch`（并行）排序。串行场景显示 Planner → Worker → Reviewer；并行场景显示 Research、Test、Risk 三条并列分支。没有事件的公共领域泳道不会渲染，避免空行占用空间。
 泳道图会同时展示：
 
 - **timeline sequence**：顶部 `#N` 是跨 Root/Child 的教学展示顺序；节点同时保留所属 Run 的 local sequence。
 - **相对时间**：`+120ms` 表示该事件距首个事件的时间。
-- **执行跳转**：连线从上一个事件指向下一个事件，可直观看到 Run 如何转入 Model、Tool、Approval 或 State。
+- **Run 内部实线**：只连接同一 Run 中按 `local_sequence` 相邻的事件。
+- **Parent 委派虚线**：连接 `delegation.created → Child run.created`，表示分叉。
+- **Child 汇聚点线**：连接 `Child run.completed/failed/cancelled → delegation.completed/failed/cancelled`，表示结果返回 Parent。
+- **并行语义安全**：不同 Child Run 不会因为全局时间上相邻而被直接连线，因此不会把 Research、Test、Risk 误画成串行依赖。
 - **实时追加**：Root SSE 触发主更新，运行期间的 Snapshot 轮询补充 Child Run 独立事件。
 - **节点联动**：点击任意节点，右侧 Inspector 会显示解释、状态 diff、源码和 payload。
 
@@ -269,4 +274,4 @@ python -m pytest -p no:cacheprovider -q
 python scripts/check_docs.py
 ```
 
-Learning Console 测试覆盖：9 个场景目录、真实 Runtime、Approval、串行/并行 Parent/Child、TraceTree、Session/Memory 检索、Context Compaction、Artifact 文件、聚合 Snapshot、SQLite 统计和自动验收；当前全量测试为 `55 passed`。
+Learning Console 测试覆盖：9 个场景目录、真实 Runtime、Approval、串行/并行 Parent/Child、TraceTree、Session/Memory 检索、Context Compaction、Artifact 文件、聚合 Snapshot、SQLite 统计和自动验收；当前全量测试为 `55 passed`，并验证串行/并行 Child metadata 可稳定生成独立泳道顺序。

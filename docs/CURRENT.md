@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.7.1`
-- **当前里程碑**：Learning Console v0.6/v0.7 教学投影 v0.7.1
+- **当前版本**：`0.7.2`
+- **当前里程碑**：Learning Console 多 Agent 独立泳道 v0.7.2
 - **Runtime 构建完成时间**：2026-08-15（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`c9c5f4c`
-- **最近演进记录**：[E2026-08-15-002](./CHANGELOG.md#e2026-08-15-002)
+- **当前代码基线 commit**：`pending`
+- **最近演进记录**：[E2026-08-15-003](./CHANGELOG.md#e2026-08-15-003)
 
 ## 状态定义
 
@@ -45,7 +45,7 @@
 | ✅ stable | Event Log | 每个 Run 使用单调递增 sequence，并支持状态和事件原子提交 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | Model Token Streaming | Provider 可按增量输出文本和 Tool Call，Runtime 持久化 `model.delta` 并最终合并为完整响应 | [E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001) |
 | ✅ stable | FastAPI / SSE API | HTTP Run lifecycle、持久化 Runtime Event 和模型增量 SSE | [E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002) |
-| ✅ stable | Learning Console | 9 个真实 Runtime 场景，覆盖单 Run、v0.6 串行/并行多 Agent、v0.7 Session/Memory、Context Compaction 与 Artifact；8 泳道和专用 Inspector | [E2026-08-15-002](./CHANGELOG.md#e2026-08-15-002) |
+| ✅ stable | Learning Console | 9 个真实 Runtime 场景；多 Agent 按 Workflow Parent 与每个 Child Agent 动态拆分泳道，连线区分 Run 内部、委派和汇聚；保留 Context/Memory/Artifact 等 Inspector | [E2026-08-15-003](./CHANGELOG.md#e2026-08-15-003) |
 | ✅ stable | Run Trace | 每个 Run 自动生成 `trace_id`，并从持久化事件派生 Run、Model、Tool、Approval Span | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Metrics / Prometheus | 从 SQLite 历史派生 Run 状态、事件、延迟、模型/工具次数和 token 指标 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Eval Runner | 支持状态、精确匹配、包含判断、通过率和 JSON Artifact 报告 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |

@@ -3,7 +3,7 @@
 - **状态**：Accepted
 - **日期**：2026-08-14
 - **决策人**：Agent Runtime Maintainers
-- **关联变更**：[E2026-08-15-002](../CHANGELOG.md#e2026-08-15-002)、[E2026-08-14-006](../CHANGELOG.md#e2026-08-14-006)、[E2026-08-14-005](../CHANGELOG.md#e2026-08-14-005)、[E2026-08-14-004](../CHANGELOG.md#e2026-08-14-004)
+- **关联变更**：[E2026-08-15-003](../CHANGELOG.md#e2026-08-15-003)、[E2026-08-15-002](../CHANGELOG.md#e2026-08-15-002)、[E2026-08-14-006](../CHANGELOG.md#e2026-08-14-006)、[E2026-08-14-005](../CHANGELOG.md#e2026-08-14-005)、[E2026-08-14-004](../CHANGELOG.md#e2026-08-14-004)
 
 ## 背景
 
@@ -22,6 +22,7 @@ v0.5 已具备 Run、Event、Step、ToolExecution、Checkpoint、Approval、SSE�
 9. 多 Agent Snapshot 必须从 `RunRelation` 和 `TraceTree` 聚合 Root/Child 事实；跨 Run `timeline_sequence` 只能作为展示序号，不能替代本地 Event sequence。
 10. Session、Memory、Context 和 Artifact 教学视图必须读取现有 Runtime/Store 事实，不建立 Lab 专用数据模型。
 11. Root SSE 不转发全部 Child Event 时，允许本地 Console 使用有界 Snapshot 轮询补充动态展示，但不得把轮询提升为 Runtime 消息总线。
+12. 多 Agent Timeline 必须按 Child Run 动态生成独立泳道；同一 Run 只按 `local_sequence` 建立内部连线，跨 Run 只通过 `RunRelation` 与 `delegation.*` / Child `run.*` 事件建立委派和汇聚连线，禁止用全局相邻事件推断并行分支依赖。
 
 ## 影响
 
