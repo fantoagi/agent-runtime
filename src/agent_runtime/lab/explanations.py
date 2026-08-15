@@ -157,6 +157,88 @@ EVENT_EXPLANATIONS: dict[str, dict[str, Any]] = {
 }
 
 
+EVENT_EXPLANATIONS.update(
+    {
+        "workflow.started": {
+            "title": "启动 Workflow Parent",
+            "summary": "Parent Run 进入 running，并记录顺序或并行编排类型。",
+            "why": "多 Agent 需要一个独立、可恢复的父级执行来管理 Child Run 和汇聚结果。",
+            "next": "Workflow 使用稳定 delegation_key 创建一个或多个 Child Run。",
+            "code": ["Runtime.begin_workflow()", "SequentialWorkflow.run()", "ParallelWorkflow.run()"],
+        },
+        "workflow.completed": {
+            "title": "Workflow 汇聚完成",
+            "summary": "所有需要的 Child Run 已收敛，Parent 保存最终结果和 Checkpoint。",
+            "why": "调用方只需等待 Parent，同时仍能沿 RunRelation 下钻每个 Child。",
+            "next": "在 Trace 页查看 Parent/Child 树和每个 Agent 的独立事件。",
+            "code": ["Runtime.finish_workflow()", "SQLiteStore.save_run_checkpoint_with_event()"],
+        },
+        "delegation.created": {
+            "title": "创建 Child Run 委派",
+            "summary": "Runtime 原子写入 Child Run、RunRelation，以及 Parent/Child 两侧事件。",
+            "why": "稳定的 delegation_key 让恢复和重试不会重复创建相同子任务。",
+            "next": "Child Agent 使用自己的模型循环执行，并共享 Root Trace。",
+            "code": ["Runtime.delegate()", "SQLiteStore.create_child_run_with_relation()"],
+        },
+        "delegation.completed": {
+            "title": "Child Run 返回结果",
+            "summary": "被委派的 Agent 已完成，结果写回 Parent 的 delegation.completed 事件。",
+            "why": "Parent 需要持久化知道哪个 Child 已完成，才能继续串行步骤或执行聚合。",
+            "next": "串行工作流继续下一步；并行工作流等待聚合条件满足。",
+            "code": ["Runtime.delegate()", "SequentialWorkflow.run()", "ParallelWorkflow._finish()"],
+        },
+        "session.run.attached": {
+            "title": "Run 关联 Session",
+            "summary": "Run 与 Session 的关系已写入 session_runs，后续可以查询同一会话的执行历史。",
+            "why": "Session 提供持久化会话边界，但不把所有旧消息无条件塞入模型上下文。",
+            "next": "Runtime 按 Session 和 Agent Scope 搜索相关 Memory。",
+            "code": ["Runtime.create_run()", "SQLiteStore.attach_run_to_session()"],
+        },
+        "memory.created": {
+            "title": "写入作用域记忆",
+            "summary": "一条带 Session 或 Agent Scope 的 MemoryRecord 已持久化并进入检索索引。",
+            "why": "显式 Scope、TTL 和来源信息让长期信息可控、可删除、可追溯。",
+            "next": "未来 Run 在模型请求前按 Query 检索，而不是读取全部记忆。",
+            "code": ["Runtime.remember()", "SQLiteStore.save_memory()"],
+        },
+        "memory.search.started": {
+            "title": "开始检索相关记忆",
+            "summary": "Runtime 使用本次输入作为 Query，并限定 Session/Agent Scope 和结果数量。",
+            "why": "按需检索可以控制 token 成本，也避免不同会话或 Agent 之间的信息泄漏。",
+            "next": "MemoryStore 返回匹配记录和排序分数。",
+            "code": ["Runtime.search_memory()", "SQLiteStore.search_memories()"],
+        },
+        "memory.search.completed": {
+            "title": "完成记忆检索",
+            "summary": "命中的 Memory ID 被记录，ContextBuilder 将选择预算内的内容。",
+            "why": "记录命中 ID 可以解释模型本次到底看到了哪些长期信息。",
+            "next": "构建最终 Model Context，并写入 context.built。",
+            "code": ["Runtime.search_memory()", "ContextBuilder.build()"],
+        },
+        "context.built": {
+            "title": "构建本次模型上下文",
+            "summary": "ContextBuilder 根据 token 预算选择 System、Memory、Summary 和最近安全消息组。",
+            "why": "持久化历史与模型可见上下文职责分离，历史可以完整，模型请求仍保持可控。",
+            "next": "若超出预算，会额外记录 context.compacted；随后发起 model.requested。",
+            "code": ["Runtime._build_context()", "ContextBuilder.build()"],
+        },
+        "context.compacted": {
+            "title": "压缩长上下文",
+            "summary": "较旧消息被确定性 Summary 替代，最近 ToolCall 安全组被完整保留。",
+            "why": "避免 token 无限制增长，同时不能破坏 assistant ToolCall 与 tool result 的配对。",
+            "next": "检查 omitted_messages、summary 和 estimated_tokens，再观察模型继续执行。",
+            "code": ["ContextBuilder.build()", "ContextBuilder._safe_groups()"],
+        },
+        "tool.result.artifactized": {
+            "title": "大工具结果写入 Artifact",
+            "summary": "完整工具文本保存为文件，事件和 Checkpoint 只保留路径、字符数与 Preview。",
+            "why": "大结果不应长期占用 SQLite Message 和后续 Model Context。",
+            "next": "在 Artifact 页查看文件路径、Preview 和 ToolExecution 来源。",
+            "code": ["Runtime._artifactize_tool_result()", "ArtifactStore.write_text()"],
+        },
+    }
+)
+
 def explain_event(event: RuntimeEvent) -> dict[str, Any]:
     explanation = deepcopy(EVENT_EXPLANATIONS.get(event.type))
     if explanation is None:

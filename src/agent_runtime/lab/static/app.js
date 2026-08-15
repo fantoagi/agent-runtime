@@ -8,6 +8,7 @@ const state = {
   activeTab: "event",
   eventSource: null,
   autoplay: null,
+  poller: null,
   followLive: true,
 };
 
@@ -20,10 +21,17 @@ const sseEventTypes = [
   "model.completed", "tool.requested", "tool.started", "tool.completed", "tool.failed",
   "tool.rejected", "tool.cancelled", "tool.outcome_unknown", "tool.unknown_resolved",
   "approval.requested", "approval.resolved", "checkpoint.created", "step.completed",
+  "workflow.started", "workflow.completed", "workflow.failed", "workflow.cancelled",
+  "delegation.created", "delegation.completed", "delegation.failed", "delegation.cancelled",
+  "session.run.attached", "memory.created", "memory.deleted", "memory.search.started",
+  "memory.search.completed", "context.built", "context.compacted", "tool.result.artifactized",
 ];
 
 const swimlanes = [
   { id: "run", label: "Run" },
+  { id: "agent", label: "Agent" },
+  { id: "memory", label: "Session / Memory" },
+  { id: "context", label: "Context" },
   { id: "model", label: "Model" },
   { id: "tool", label: "Tool" },
   { id: "approval", label: "Approval" },
@@ -32,7 +40,7 @@ const swimlanes = [
 const swimlaneLayout = {
   columnWidth: 156,
   headerHeight: 48,
-  rowHeight: 92,
+  rowHeight: 76,
 };
 
 function escapeHtml(value) {
@@ -48,8 +56,13 @@ function json(value) {
   return escapeHtml(JSON.stringify(value, null, 2));
 }
 
-function eventLane(type) {
-  if (type.startsWith("run.")) return "run";
+function eventLane(value) {
+  const event = typeof value === "string" ? { type: value } : value;
+  const type = event.type || "";
+  if (type.startsWith("delegation.") || event.run_role === "child") return "agent";
+  if (type.startsWith("workflow.") || type.startsWith("run.")) return "run";
+  if (type.startsWith("session.") || type.startsWith("memory.")) return "memory";
+  if (type.startsWith("context.")) return "context";
   if (type.startsWith("model.")) return "model";
   if (type.startsWith("tool.")) return "tool";
   if (type.startsWith("approval.")) return "approval";
@@ -57,11 +70,10 @@ function eventLane(type) {
   return "run";
 }
 
-function eventCategory(type) {
-  if (type.startsWith("tool.") && (type.includes("failed") || type.includes("unknown"))) {
-    return "error";
-  }
-  return eventLane(type);
+function eventCategory(value) {
+  const event = typeof value === "string" ? { type: value } : value;
+  if ((event.type || "").includes("failed") || (event.type || "").includes("unknown")) return "error";
+  return eventLane(event);
 }
 
 function relativeEventTime(events, index) {
@@ -194,6 +206,16 @@ function connectEventSource(runId) {
 function closeEventSource() {
   if (state.eventSource) state.eventSource.close();
   state.eventSource = null;
+  if (state.poller) window.clearInterval(state.poller);
+  state.poller = null;
+}
+
+function startSnapshotPolling() {
+  if (state.poller) window.clearInterval(state.poller);
+  state.poller = window.setInterval(async () => {
+    if (!state.runId || terminalStatuses.has(state.snapshot?.run?.status)) return;
+    try { await refreshSnapshot(); } catch (_) { /* SSE remains the primary signal */ }
+  }, 450);
 }
 
 async function refreshSnapshot() {
@@ -250,28 +272,29 @@ function renderTimeline() {
   `).join("");
   const links = events.slice(1).map((event, offset) => {
     const index = offset + 1;
-    const previous = swimlanePoint(index - 1, eventLane(events[index - 1].type));
-    const current = swimlanePoint(index, eventLane(event.type));
+    const previous = swimlanePoint(index - 1, eventLane(events[index - 1]));
+    const current = swimlanePoint(index, eventLane(event));
     const middle = (previous.x + current.x) / 2;
     const path = `M ${previous.x} ${previous.y} C ${middle} ${previous.y}, ${middle} ${current.y}, ${current.x} ${current.y}`;
-    return `<path class="swimlane-link ${eventCategory(event.type)} ${index <= state.revealedEventIndex ? "revealed" : ""} ${index === state.selectedEventIndex ? "selected" : ""}" d="${path}" />`;
+    return `<path class="swimlane-link ${eventCategory(event)} ${index <= state.revealedEventIndex ? "revealed" : ""} ${index === state.selectedEventIndex ? "selected" : ""}" d="${path}" />`;
   }).join("");
   const nodes = events.map((event, index) => {
-    const lane = eventLane(event.type);
+    const lane = eventLane(event);
     const laneIndex = swimlanes.findIndex((item) => item.id === lane);
     const left = index * swimlaneLayout.columnWidth + 12;
     const top = swimlaneLayout.headerHeight + laneIndex * swimlaneLayout.rowHeight + 17;
     const classes = [
       "swimlane-event",
-      eventCategory(event.type),
+      eventCategory(event),
       index <= state.revealedEventIndex ? "revealed" : "",
       index === state.revealedEventIndex ? "arriving" : "",
       index === state.selectedEventIndex ? "selected" : "",
     ].filter(Boolean).join(" ");
     return `
-      <button type="button" class="${classes}" style="left:${left}px;top:${top}px" data-event-index="${index}" title="${escapeHtml(event.teaching.summary)}" aria-label="#${event.sequence} ${escapeHtml(event.type)}">
-        <span class="swimlane-event-top"><span class="swimlane-event-dot"></span><span>#${event.sequence}</span><small>${relativeEventTime(events, index)}</small></span>
+      <button type="button" class="${classes}" style="left:${left}px;top:${top}px" data-event-index="${index}" title="${escapeHtml(event.teaching.summary)}" aria-label="#${event.timeline_sequence || event.sequence} ${escapeHtml(event.type)}">
+        <span class="swimlane-event-top"><span class="swimlane-event-dot"></span><span>#${event.timeline_sequence || event.sequence}</span><small>${event.run_role === "child" ? `Child #${event.local_sequence}` : relativeEventTime(events, index)}</small></span>
         <strong>${escapeHtml(event.type)}</strong>
+        <span class="swimlane-event-agent">${escapeHtml(event.agent_name || "Runtime")}</span>
         <span class="swimlane-event-title">${escapeHtml(event.teaching.title)}</span>
       </button>
     `;
@@ -334,6 +357,9 @@ function renderInspector() {
     messages: renderMessagesInspector,
     execution: renderExecutionInspector,
     trace: renderTraceInspector,
+    context: renderContextInspector,
+    memory: renderMemoryInspector,
+    artifacts: renderArtifactInspector,
     sqlite: renderSqliteInspector,
     acceptance: renderAcceptanceInspector,
   };
@@ -350,7 +376,7 @@ function renderEventInspector() {
     ? changed.map((key) => `<div class="diff-row"><span class="key">${escapeHtml(key)}</span><span class="diff-change">${escapeHtml(JSON.stringify(event.state_before[key]))} → ${escapeHtml(JSON.stringify(event.state_after[key]))}</span></div>`).join("")
     : '<div class="diff-row"><span class="key">状态</span><span>领域状态未变化，仅新增可观察事实</span></div>';
   return `
-    <section class="detail-block"><span class="detail-label">SEQUENCE #${event.sequence}</span><h3>${escapeHtml(event.teaching.title)}</h3><p>${escapeHtml(event.teaching.summary)}</p></section>
+    <section class="detail-block"><span class="detail-label">TIMELINE #${event.timeline_sequence || event.sequence} · ${escapeHtml(event.agent_name || "Runtime")} · LOCAL #${event.local_sequence || event.sequence}</span><h3>${escapeHtml(event.teaching.title)}</h3><p>${escapeHtml(event.teaching.summary)}</p></section>
     <section class="detail-block"><span class="detail-label">为什么需要它</span><p>${escapeHtml(event.teaching.why)}</p></section>
     <section class="detail-block"><span class="detail-label">下一步</span><p>${escapeHtml(event.teaching.next)}</p></section>
     <section class="detail-block"><span class="detail-label">状态变化</span><div class="state-diff">${diff}</div></section>
@@ -400,14 +426,43 @@ function renderExecutionInspector() {
 
 function renderTraceInspector() {
   const trace = state.snapshot.trace;
+  const tree = state.snapshot.trace_tree;
   const metrics = state.snapshot.metrics;
+  const renderNode = (node, depth = 0) => `
+    <div class="topology-node" style="--depth:${depth}">
+      <div><strong>${escapeHtml(node.run.agent_name)}</strong><small>${escapeHtml(node.run.status)} · ${escapeHtml(node.run.id)}</small></div>
+      ${node.relation ? `<span>${escapeHtml(node.relation.relation_type)} · ${escapeHtml(node.relation.delegation_key)}</span>` : '<span>root</span>'}
+    </div>${node.children.map((child) => renderNode(child, depth + 1)).join("")}`;
   return `
-    <section class="detail-block"><span class="detail-label">TRACE SUMMARY</span><div class="kv-grid">${kv("Trace ID", trace.trace_id)}${kv("Spans", trace.spans.length)}${kv("Run Status", trace.status)}${kv("Events", trace.events.length)}</div></section>
-    <section class="detail-block"><span class="detail-label">SPANS</span><div class="execution-list">${trace.spans.map((span) => `<div class="span-row"><div class="span-row-top"><strong>${escapeHtml(span.name)}</strong><small>${span.duration_ms == null ? "running" : `${span.duration_ms.toFixed(2)} ms`}</small></div><small>${escapeHtml(span.kind)} · ${escapeHtml(span.status)} · #${span.start_sequence}→${span.end_sequence ?? "…"}</small></div>`).join("")}</div></section>
-    <section class="detail-block"><span class="detail-label">GLOBAL METRICS</span><div class="metrics-grid">${metric("Runs", metrics.total_runs)}${metric("Events", metrics.total_events)}${metric("Model", metrics.model_requests)}${metric("Tools", metrics.tool_requests)}${metric("Approvals", metrics.approval_requests)}${metric("Tokens", metrics.tokens.total)}</div></section>
+    <section class="detail-block"><span class="detail-label">PARENT / CHILD TOPOLOGY</span><div class="topology-tree">${renderNode(tree.root)}</div></section>
+    <section class="detail-block"><span class="detail-label">TRACE SUMMARY</span><div class="kv-grid">${kv("Root Trace", tree.root_trace_id)}${kv("Tree Nodes", tree.node_count)}${kv("Root Status", trace.status)}${kv("Root Events", trace.events.length)}</div></section>
+    <section class="detail-block"><span class="detail-label">ROOT SPANS</span><div class="execution-list">${trace.spans.map((span) => `<div class="span-row"><div class="span-row-top"><strong>${escapeHtml(span.name)}</strong><small>${span.duration_ms == null ? "running" : `${span.duration_ms.toFixed(2)} ms`}</small></div><small>${escapeHtml(span.kind)} · ${escapeHtml(span.status)} · #${span.start_sequence}→${span.end_sequence ?? "…"}</small></div>`).join("")}</div></section>
+    <section class="detail-block"><span class="detail-label">GLOBAL METRICS</span><div class="metrics-grid">${metric("Runs", metrics.total_runs)}${metric("Child", metrics.multi_agent.child_runs)}${metric("Workflow", metrics.multi_agent.workflow_runs)}${metric("Delegations", metrics.multi_agent.delegations)}${metric("Sessions", metrics.context_memory.sessions)}${metric("Memories", metrics.context_memory.memories_active)}${metric("Searches", metrics.context_memory.memory_searches)}${metric("Compactions", metrics.context_memory.context_compactions)}${metric("Tokens", metrics.tokens.total)}</div></section>
   `;
 }
 
+function renderContextInspector() {
+  const builds = state.snapshot.context_builds || [];
+  if (!builds.length) return '<div class="empty-inspector">该场景还没有 Context 构建事件。</div>';
+  return `<section class="detail-block"><span class="detail-label">CONTEXT BUILDS</span><div class="execution-list">${builds.map((item) => `
+    <div class="execution-row"><div class="execution-row-top"><strong>${escapeHtml(item.event_type)} · ${escapeHtml(item.agent_name)}</strong><small>#${item.timeline_sequence}</small></div>
+    <div class="kv-grid">${kv("Budget", item.token_budget)}${kv("Original", item.original_tokens)}${kv("Estimated", item.estimated_tokens)}${kv("Omitted", item.omitted_messages)}${kv("Memory IDs", (item.memory_ids || []).length)}${kv("Overflow", item.overflow)}</div>
+    ${item.summary ? `<pre class="json-view">${escapeHtml(item.summary)}</pre>` : ""}</div>`).join("")}</div></section>`;
+}
+
+function renderMemoryInspector() {
+  const session = state.snapshot.session;
+  const memories = state.snapshot.memories || [];
+  return `
+    <section class="detail-block"><span class="detail-label">SESSION</span>${session ? `<div class="kv-grid">${kv("Session ID", session.id)}${kv("Runs", state.snapshot.session_runs.length)}</div><pre class="json-view">${json(session.metadata)}</pre>` : '<div class="empty-inspector">该场景没有 Session。</div>'}</section>
+    <section class="detail-block"><span class="detail-label">SCOPED MEMORIES</span><div class="execution-list">${memories.length ? memories.map((item) => `<div class="execution-row"><div class="execution-row-top"><strong>${escapeHtml(item.scope)} · ${escapeHtml(item.scope_id)}</strong><small>${item.active ? "active" : "inactive"}</small></div><p>${escapeHtml(item.content)}</p><pre class="json-view">${json({ id: item.id, source_run_id: item.source_run_id, source_trace_id: item.source_trace_id, expires_at: item.expires_at, metadata: item.metadata })}</pre></div>`).join("") : '<div class="empty-inspector">该场景没有 Memory。</div>'}</div></section>`;
+}
+
+function renderArtifactInspector() {
+  const artifacts = state.snapshot.artifacts || [];
+  if (!artifacts.length) return '<div class="empty-inspector">该场景还没有 Artifact。</div>';
+  return `<section class="detail-block"><span class="detail-label">TOOL RESULT ARTIFACTS</span><div class="execution-list">${artifacts.map((item) => `<div class="execution-row"><div class="execution-row-top"><strong>${escapeHtml(item.agent_name)}</strong><small>${item.exists ? "file exists" : "missing"}</small></div><div class="kv-grid">${kv("Characters", item.characters)}${kv("Preview chars", item.preview_characters)}${kv("Execution", item.tool_execution_id)}${kv("Run", item.run_id)}</div><pre class="json-view">${escapeHtml(item.path)}</pre><pre class="json-view">${escapeHtml(item.preview)}</pre></div>`).join("")}</div></section>`;
+}
 function renderSqliteInspector() {
   const persistence = state.snapshot.persistence;
   return `

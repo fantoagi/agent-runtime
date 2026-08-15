@@ -1,9 +1,9 @@
-﻿# ADR-0009：Learning Console 作为 Runtime 外部教学 Adapter
+# ADR-0009：Learning Console 作为 Runtime 外部教学 Adapter
 
 - **状态**：Accepted
 - **日期**：2026-08-14
 - **决策人**：Agent Runtime Maintainers
-- **关联变更**：[E2026-08-14-006](../CHANGELOG.md#e2026-08-14-006)、[E2026-08-14-005](../CHANGELOG.md#e2026-08-14-005)、[E2026-08-14-004](../CHANGELOG.md#e2026-08-14-004)
+- **关联变更**：[E2026-08-15-002](../CHANGELOG.md#e2026-08-15-002)、[E2026-08-14-006](../CHANGELOG.md#e2026-08-14-006)、[E2026-08-14-005](../CHANGELOG.md#e2026-08-14-005)、[E2026-08-14-004](../CHANGELOG.md#e2026-08-14-004)
 
 ## 背景
 
@@ -19,6 +19,9 @@ v0.5 已具备 Run、Event、Step、ToolExecution、Checkpoint、Approval、SSE�
 6. 教学解释、颜色、源码映射、场景预期和自动验收属于 Lab 模块，不进入 Runtime Kernel 和领域模型。
 7. 前端使用静态 HTML、CSS 和 Vanilla JavaScript，不引入 Node.js 构建链或 SPA 框架。
 8. 展示层的空状态必须与有事件的泳道状态互斥；CSS 不得覆盖 `hidden` 语义，且未运行提示应保持紧凑。
+9. 多 Agent Snapshot 必须从 `RunRelation` 和 `TraceTree` 聚合 Root/Child 事实；跨 Run `timeline_sequence` 只能作为展示序号，不能替代本地 Event sequence。
+10. Session、Memory、Context 和 Artifact 教学视图必须读取现有 Runtime/Store 事实，不建立 Lab 专用数据模型。
+11. Root SSE 不转发全部 Child Event 时，允许本地 Console 使用有界 Snapshot 轮询补充动态展示，但不得把轮询提升为 Runtime 消息总线。
 
 ## 影响
 
@@ -46,4 +49,4 @@ v0.5 已具备 Run、Event、Step、ToolExecution、Checkpoint、Approval、SSE�
 
 ## 后续约束
 
-新增学习场景必须通过真实 Runtime 路径，并提供预期事件、学习点、自动验收和测试。未来 v0.6 展示 Parent/Child Run 时，应在 Lab Adapter 中增加 Trace Tree 和关系视图，而不是在 Runtime Kernel 中加入展示逻辑。任何将 Learning Console 用于远程或多用户部署的方案都必须新增认证、授权和安全边界 ADR。
+新增学习场景必须通过真实 Runtime 路径，并提供预期事件、学习点、自动验收和测试。v0.6 Parent/Child 与 v0.7 Context/Memory/Artifact 的展示继续留在 Lab Adapter；后续 Sandbox、Worker 或治理场景也不得把展示逻辑加入 Runtime Kernel。任何将 Learning Console 用于远程或多用户部署的方案都必须新增认证、授权和安全边界 ADR。

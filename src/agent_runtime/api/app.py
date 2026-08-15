@@ -101,7 +101,7 @@ def create_app(
     """
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.7.0",
+        version="0.7.1",
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
     )
     app.state.runtime = runtime
@@ -117,7 +117,7 @@ def create_app(
 
     @app.get("/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "runtime": "agent-runtime", "version": "0.7.0"}
+        return {"status": "ok", "runtime": "agent-runtime", "version": "0.7.1"}
 
     @app.post("/sessions", status_code=status.HTTP_201_CREATED)
     async def create_session(request: CreateSessionRequest) -> dict[str, Any]:

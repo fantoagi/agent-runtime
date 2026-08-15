@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
 - **最近更新**：2026-08-15
-- **当前版本**：v0.7.0
-- **当前阶段**：Context、Session 与长期记忆完成，下一阶段进入 Sandbox、Tool Capability 与 Secret 安全
+- **当前版本**：v0.7.1
+- **当前阶段**：v0.6/v0.7 Learning Console 教学投影完成，下一阶段进入 Sandbox、Tool Capability 与 Secret 安全
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -31,6 +31,7 @@
 | v0.5.3 | ✅ completed | Learning Console 空状态显示与布局优化 | [E2026-08-14-006](./CHANGELOG.md#e2026-08-14-006) |
 | v0.6 | ✅ completed | 多 Agent 编排基础 | [E2026-08-14-007](./CHANGELOG.md#e2026-08-14-007) |
 | v0.7 | ✅ completed | Context、Session 与长期记忆 | [E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001) |
+| v0.7.1 | ✅ completed | Learning Console 覆盖多 Agent、Context、Memory 与 Artifact | [E2026-08-15-002](./CHANGELOG.md#e2026-08-15-002) |
 | v0.8 | 📋 planned | Sandbox、Tool Capability 与 Secret 安全 | — |
 | v0.9 | 📋 planned | 分布式 Worker、Queue 与 Lease | — |
 | v0.10 | 📋 planned | 多租户、权限、预算和生产治理 | — |

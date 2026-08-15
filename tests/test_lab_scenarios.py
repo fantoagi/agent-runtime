@@ -11,10 +11,19 @@ def test_default_learning_scenarios_are_ordered_and_traceable() -> None:
         "tool-calling",
         "token-streaming",
         "human-approval",
+        "multi-agent-sequential",
+        "multi-agent-parallel",
+        "session-memory",
+        "context-compaction",
+        "large-tool-artifact",
     ]
     assert all(scenario.expected_events for scenario in scenarios)
     assert all(scenario.learning_points for scenario in scenarios)
-    assert scenarios[-1].requires_human_action is True
+    assert next(item for item in scenarios if item.id == "human-approval").requires_human_action
+    assert next(item for item in scenarios if item.id == "multi-agent-sequential").minimum_children == 3
+    assert next(item for item in scenarios if item.id == "session-memory").minimum_memories == 2
+    assert next(item for item in scenarios if item.id == "context-compaction").minimum_context_compactions == 1
+    assert next(item for item in scenarios if item.id == "large-tool-artifact").minimum_artifacts == 1
 
 
 def test_lab_cli_command_has_beginner_friendly_defaults() -> None:

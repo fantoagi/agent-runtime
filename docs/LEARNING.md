@@ -1,6 +1,6 @@
 # Agent Runtime Learning Console 使用指南
 
-Learning Console 是 v0.7.0 继续提供的本地可视化学习入口。它把原本需要多条 PowerShell 命令才能观察的 Run、Event、Step、ToolExecution、Checkpoint、Approval、Trace 和 Metrics 放到同一个浏览器页面中。
+Learning Console v0.7.1 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context 和 Artifact 的真实执行事实放到同一个浏览器页面中。
 
 > 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。
 
@@ -43,13 +43,17 @@ uvicorn agent_runtime.api.app:app --reload
 
 ### 左侧：Learning Path
 
-选择确定性学习场景。v0.7.0 继续提供以下 4 个单 Run 场景：
+选择确定性学习场景。v0.7.1 提供以下 9 个真实 Runtime 场景：
 
 1. 纯文本响应。
 2. Tool Calling。
 3. Token Streaming。
 4. Human Approval。
-
+5. v0.6 多 Agent 串行协作。
+6. v0.6 多 Agent 并行协作。
+7. v0.7 Session 与作用域记忆。
+8. v0.7 Context Compaction。
+9. v0.7 大 Tool Result Artifact 化。
 每张卡片都包含默认输入、学习目标、预期事件路径和自动验收规则。
 
 ### 中间：Durable Event Log
@@ -60,18 +64,20 @@ uvicorn agent_runtime.api.app:app --reload
 
 | 泳道 | 领域 | 典型事件 |
 | --- | --- | --- |
-| Run | Run 生命周期 | `run.created`、`run.started`、`run.completed` |
-| Model | 模型请求与流式输出 | `context.built`、`model.requested`、`model.delta`、`model.completed` |
-| Tool | 工具执行 | `tool.requested`、`tool.started`、`tool.completed` |
+| Run | Root / Workflow 生命周期 | `run.*`、`workflow.*` |
+| Agent | 委派与 Child Run | `delegation.*`、Child 的 `run.*` / `model.*` |
+| Session / Memory | 会话与作用域记忆 | `session.run.attached`、`memory.search.*` |
+| Context | 模型输入构建与压缩 | `context.built`、`context.compacted` |
+| Model | 模型请求与流式输出 | `model.requested`、`model.delta`、`model.completed` |
+| Tool | 工具执行与大结果 | `tool.*`、`tool.result.artifactized` |
 | Approval | 人工审批 | `approval.requested`、`approval.resolved` |
 | State | Step / Checkpoint | `checkpoint.created`、`step.completed` |
-
 泳道图会同时展示：
 
-- **sequence**：每个节点顶部的 `#N` 是持久化顺序。
+- **timeline sequence**：顶部 `#N` 是跨 Root/Child 的教学展示顺序；节点同时保留所属 Run 的 local sequence。
 - **相对时间**：`+120ms` 表示该事件距首个事件的时间。
 - **执行跳转**：连线从上一个事件指向下一个事件，可直观看到 Run 如何转入 Model、Tool、Approval 或 State。
-- **实时追加**：SSE 收到新事件时，新节点追加到右侧并自动跟随。
+- **实时追加**：Root SSE 触发主更新，运行期间的 Snapshot 轮询补充 Child Run 独立事件。
 - **节点联动**：点击任意节点，右侧 Inspector 会显示解释、状态 diff、源码和 payload。
 
 可以使用：
@@ -91,7 +97,10 @@ uvicorn agent_runtime.api.app:app --reload
 | 状态 | AgentRun、trace_id、状态、结果、metadata 和回放投影 |
 | 消息 | 最近 Checkpoint 中的 system/user/assistant/tool messages |
 | 执行 | 持久化 Step、ToolExecution、参数、结果、幂等键和审批标记 |
-| Trace | Run/Model/Tool/Approval Span 和全局 Metrics 摘要 |
+| Trace | 可折叠 Parent/Child Topology、Root Span 和 v0.6/v0.7 Metrics |
+| Context | token budget、原始/选择 token、遗漏消息、Summary 和 Memory IDs |
+| Memory | Session、Session Runs、Session/Agent Scope Memory 与 provenance |
+| Artifact | 大工具结果文件、字符数、Preview 和 ToolExecution 来源 |
 | SQLite | 数据库路径、schema version 和本次 Run 的记录数量 |
 | 验收 | 预期事件顺序、状态、Step、工具次数和最终结果检查 |
 
@@ -181,6 +190,25 @@ approval.requested
 
 拒绝路径会把拒绝结果作为 tool message 返回模型，完整保留审批结论和事件。
 
+### 场景五：多 Agent 串行协作（v0.6）
+
+重点观察 `workflow.started → delegation.created → Child Run → delegation.completed` 重复三次，最后 `workflow.completed`。在 Trace Tab 中查看 Planner、Worker、Reviewer 三个 Child 如何组成 Parent/Child Tree。
+
+### 场景六：多 Agent 并行协作（v0.6）
+
+Research、Test、Risk 三个 Child 由独立 asyncio Task 执行。它们拥有独立 Run ID、Event sequence 和 Checkpoint，但共享 Root Trace。最终 Parent 使用 `AggregationStrategy.ALL` 汇聚 JSON 结果。
+
+### 场景七：Session 与作用域记忆（v0.7）
+
+场景会创建一个 Session、一条 Session Memory 和一条 Agent Memory。重点观察 `session.run.attached`、`memory.search.started/completed` 和 `context.built`，再到 Memory Tab 确认 Scope、内容和命中 ID。
+
+### 场景八：Context Compaction（v0.7）
+
+场景通过四轮大工具结果制造长 Checkpoint，并用较小 token budget 触发 `context.compacted`。Context Tab 会显示 original、estimated、omitted、Summary；Messages Tab 仍展示完整 Checkpoint，帮助理解“持久化历史”和“本次模型可见上下文”的区别。
+
+### 场景九：大 Tool Result Artifact（v0.7）
+
+工具返回超过阈值的大文本。完整结果进入 Artifact Store，Tool Message 只保存路径和 Preview。Artifact Tab 可以检查文件存在性、字符数、ToolExecution ID 和内容预览。
 ## 4. 如何把页面映射回代码
 
 事件检查器会给出源码方法链。例如 `tool.completed`：
@@ -227,13 +255,12 @@ flowchart LR
 
 ## 6. 当前限制
 
-- v0.7.0 的 Learning Console 仍只提供 4 个单 Run 确定性场景；可以看到 `context.built`，但 Session/Memory 专用场景和管理画布尚未实现。
-- 多 Agent 可先通过 `agent-runtime workflow demo` 学习，Memory 可通过 `agent-runtime memory demo` 学习。
+- 跨 Run `timeline_sequence` 是 Learning Console 展示序号，不替代 SQLite 中每个 Run 的本地 Event sequence。
+- Child Run 独立 Event 不会全部进入 Root SSE，因此页面使用 450ms Snapshot 轮询补充动态展示。
 - “逐步回放”是对已持久化事件的展示控制，不是单步暂停 Python 协程。
 - Learning Console 面向本地单用户学习，没有身份认证和多租户隔离。
 - 页面使用 Vanilla JavaScript，无前端构建工具；复杂 Workflow Designer 不在当前范围。
-- Snapshot API 已返回 Parent/Child `trace_tree`；专用的可折叠跨 Run 树形画布尚未实现。
-
+- 场景使用确定性 Mock Provider，验证的是 Runtime 语义，不代表真实模型回答质量。
 ## 7. 自动验证
 
 ```powershell
@@ -242,4 +269,4 @@ python -m pytest -p no:cacheprovider -q
 python scripts/check_docs.py
 ```
 
-Learning Console 测试覆盖：静态页面、场景目录、真实 Runtime 执行、Tool Calling、Token Streaming、Approval 暂停/恢复、Snapshot、Trace、SQLite 统计和自动验收。
+Learning Console 测试覆盖：9 个场景目录、真实 Runtime、Approval、串行/并行 Parent/Child、TraceTree、Session/Memory 检索、Context Compaction、Artifact 文件、聚合 Snapshot、SQLite 统计和自动验收；当前全量测试为 `55 passed`。

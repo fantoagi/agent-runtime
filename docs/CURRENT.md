@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.7.0`
-- **当前里程碑**：Context、Session 与长期记忆 v0.7
+- **当前版本**：`0.7.1`
+- **当前里程碑**：Learning Console v0.6/v0.7 教学投影 v0.7.1
 - **Runtime 构建完成时间**：2026-08-15（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`1086c5e`
-- **最近演进记录**：[E2026-08-15-001](./CHANGELOG.md#e2026-08-15-001)
+- **当前代码基线 commit**：`pending`
+- **最近演进记录**：[E2026-08-15-002](./CHANGELOG.md#e2026-08-15-002)
 
 ## 状态定义
 
@@ -45,7 +45,7 @@
 | ✅ stable | Event Log | 每个 Run 使用单调递增 sequence，并支持状态和事件原子提交 | [E2026-08-13-001](./CHANGELOG.md#e2026-08-13-001) |
 | ✅ stable | Model Token Streaming | Provider 可按增量输出文本和 Tool Call，Runtime 持久化 `model.delta` 并最终合并为完整响应 | [E2026-08-14-001](./CHANGELOG.md#e2026-08-14-001) |
 | ✅ stable | FastAPI / SSE API | HTTP Run lifecycle、持久化 Runtime Event 和模型增量 SSE | [E2026-08-13-002](./CHANGELOG.md#e2026-08-13-002) |
-| ✅ stable | Learning Console | 一条命令启动本地可视化学习环境；事件按 Run / Model / Tool / Approval / State 泳道实时展示；未运行时仅显示紧凑提示，有事件后空状态完全隐藏 | [E2026-08-14-006](./CHANGELOG.md#e2026-08-14-006) |
+| ✅ stable | Learning Console | 9 个真实 Runtime 场景，覆盖单 Run、v0.6 串行/并行多 Agent、v0.7 Session/Memory、Context Compaction 与 Artifact；8 泳道和专用 Inspector | [E2026-08-15-002](./CHANGELOG.md#e2026-08-15-002) |
 | ✅ stable | Run Trace | 每个 Run 自动生成 `trace_id`，并从持久化事件派生 Run、Model、Tool、Approval Span | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Metrics / Prometheus | 从 SQLite 历史派生 Run 状态、事件、延迟、模型/工具次数和 token 指标 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
 | ✅ stable | Eval Runner | 支持状态、精确匹配、包含判断、通过率和 JSON Artifact 报告 | [E2026-08-14-002](./CHANGELOG.md#e2026-08-14-002) |
@@ -87,7 +87,7 @@
 - Context Summary 是确定性文本摘要，不是模型生成的语义摘要。
 - Memory 当前只提供 SQLite FTS5 关键词检索，不提供 Embedding、向量检索或 global Scope。
 - Memory 必须显式创建；Runtime 不会自动永久保存全部对话。
-- Learning Console 暂无 Session/Memory 专用画布，但可以在 Event Log 中看到 `context.built` 与 Memory Search 事件。
+- Learning Console 的跨 Run `timeline_sequence` 是展示序号；每个 Run 的 SQLite Event `sequence` 仍独立且保持事实语义。
 - `OpenAICompatibleProvider` 的 SSE 流式解析已实现，但不同厂商的 Tool Call 增量格式仍需持续兼容验证。
 - `Runtime.stream()` 通过轮询 SQLite 事件工作，不是跨进程消息总线。
 - 当前仅实现 SQLite 基础迁移，尚未提供在线回滚和多节点迁移协调。
@@ -98,14 +98,14 @@
 - 本地 `.venv` 默认只安装 runtime 包，运行测试前需要安装 `pytest` 和 `pytest-asyncio`。
 - Parent/Child Trace Tree 和 Metrics 从本地 SQLite 派生，尚未接入 OpenTelemetry Collector 或外部时序数据库。
 - EvalRunner 和 WorkflowEvalRunner 当前顺序执行用例，内置评估器尚无 LLM-as-a-Judge。
-- Learning Console 当前只有 4 个单 Run 确定性场景；Snapshot 已返回 Trace Tree，但尚无专用跨 Run 树形画布。
+- Learning Console 通过 Root SSE + 450ms Snapshot 轮询动态补充 Child Run 事件，仅适合本地教学和低并发使用。
 - Learning Console 面向本地单用户学习，没有认证、授权和多租户隔离。
 
 ## 当前测试状态
 
 - **最近验证日期**：2026-08-15
-- **结果**：`50 passed`
-- **覆盖范围**：状态机、工具安全、审批、恢复与幂等、FastAPI / SSE、Token Streaming、多 Agent Workflow、Context 裁剪、Tool Call 分组、Session、Memory Scope 隔离、FTS5、TTL、软删除、大 Tool Result Artifact、Metrics、Memory Eval、Learning Console Snapshot 和自动验收。
+- **结果**：`55 passed`
+- **覆盖范围**：状态机、工具安全、审批、恢复与幂等、FastAPI / SSE、Token Streaming、多 Agent Workflow、Parent/Child Snapshot、Context 裁剪、Session、Memory Scope、FTS5、TTL、软删除、大 Tool Result Artifact、Metrics、Memory Eval、9 个 Learning Console 场景和自动验收。
 - **文档检查**：使用 `python scripts/check_docs.py`。
 
 ## 当前运行方式
@@ -173,4 +173,4 @@ python -m pip install -e .[api]
 agent-runtime lab
 ```
 
-默认地址：`http://127.0.0.1:8000/lab`。当前仍提供纯文本、Tool Calling、Token Streaming 和 Human Approval 四个确定性场景；v0.7 可在事件泳道中观察 `context.built`，专用 Session/Memory 场景暂未实现。详细操作见 [LEARNING.md](./LEARNING.md)。
+默认地址：`http://127.0.0.1:8000/lab`。当前提供 9 个真实 Runtime 场景：4 个单 Run、2 个 v0.6 多 Agent、3 个 v0.7 Context/Memory/Artifact 场景，并包含 Parent/Child Trace、Context、Memory 和 Artifact Inspector。详细操作见 [LEARNING.md](./LEARNING.md)。

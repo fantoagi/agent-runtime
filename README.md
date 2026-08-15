@@ -27,12 +27,12 @@ OpenAI-compatible provider in application code when connecting to a real model.
 agent-runtime lab
 ```
 
-浏览器会打开 `http://127.0.0.1:8000/lab`。v0.7.0 继续内置纯文本、Tool Calling、Token Streaming 和 Human Approval 四个确定性场景，并提供：
+浏览器会打开 `http://127.0.0.1:8000/lab`。v0.7.1 内置 9 个确定性场景，覆盖单 Run、v0.6 多 Agent 和 v0.7 Context/Memory，并提供：
 
-- 按 Run / Model / Tool / Approval / State 分组的动态泳道图。
+- 按 Run / Agent / Session-Memory / Context / Model / Tool / Approval / State 分组的动态泳道图。
 - 从头回放、逐事件前进和自动播放。
 - Event 状态 diff、原因、下一步和源码方法映射。
-- Messages、Step、ToolExecution、Checkpoint、Trace、Metrics 和 SQLite 检查器。
+- Parent/Child Trace Tree，以及 Context、Memory、Artifact、Messages、Execution、Metrics 和 SQLite 检查器。
 - 浏览器内审批与场景自动验收。
 
 详细学习路径见 [Learning Console 使用指南](./docs/LEARNING.md)。

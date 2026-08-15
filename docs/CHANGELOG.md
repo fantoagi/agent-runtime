@@ -4,6 +4,95 @@
 
 ---
 
+<a id="e2026-08-15-002"></a>
+## E2026-08-15-002：Learning Console 覆盖 v0.6 多 Agent 与 v0.7 Context/Memory
+
+- **完成时间**：2026-08-15
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `pyproject.toml`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/lab/scenarios.py`
+  - `src/agent_runtime/lab/console.py`
+  - `src/agent_runtime/lab/explanations.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/lab/static/app.js`
+  - `src/agent_runtime/lab/static/styles.css`
+  - `tests/test_lab_api.py`
+  - `tests/test_lab_scenarios.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/LEARNING.md`
+  - `docs/ROADMAP.md`
+  - `docs/CHANGELOG.md`
+  - `docs/adr/0009-learning-console.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0009](./adr/0009-learning-console.md)
+
+### 变更摘要
+
+发布 v0.7.1 Learning Console 教学增强版。场景从 4 个单 Run 扩展到 9 个，新增 v0.6 串行/并行多 Agent，以及 v0.7 Session/Memory、Context Compaction 和大 Tool Result Artifact 场景。所有流程继续通过真实 Runtime、SQLite、Workflow、MemoryStore、ContextBuilder 和 ArtifactStore 执行。
+
+### 系统架构
+
+- Learning Console Snapshot 从单 Run 投影升级为 Root + Child Run 聚合投影。
+- 使用 `RunRelation` 和 `TraceTree` 展示 Parent/Child 拓扑，不向 Runtime Kernel 注入 UI 状态。
+- 增加 Session/Memory、Context、Agent 专用泳道和 Inspector。
+- Root SSE 继续提供主事件通知；页面在运行期间补充轻量 Snapshot 轮询，以动态读取 Child Run 独立事件。
+- Timeline 为跨 Run 事件生成展示用 `timeline_sequence`，同时保留每个 Run 的持久化 `local_sequence`。
+
+### 实现方式
+
+- `SequentialWorkflow` 真实执行 Planner → Worker → Reviewer 三个 Child Run。
+- `ParallelWorkflow` 真实并发执行 Research、Test 和 Risk 三个 Child Run，并按 `ALL` 策略聚合。
+- Session 场景创建 Session Memory 与 Agent Memory，模型请求前执行作用域检索和 Context 注入。
+- Context 场景使用小 token budget 和四轮大工具结果稳定触发 `context.compacted`。
+- Artifact 场景使用真实 ArtifactStore 保存完整大文本，Checkpoint 只保留引用和 Preview。
+- Snapshot 聚合 Runs、Relations、Events、Checkpoints、Steps、ToolExecutions、Approvals、Memories、Context Builds 和 Artifacts。
+
+### 当前功能
+
+- Learning Console 共 9 个确定性教学场景。
+- v0.6：串行多 Agent、并行多 Agent、Parent/Child Trace Tree、RunRelation 与聚合策略展示。
+- v0.7：Session/Memory 检索、Context 构建/压缩、大 Tool Result Artifact 化展示。
+- 8 条泳道：Run、Agent、Session/Memory、Context、Model、Tool、Approval、State。
+- Inspector 新增 Context、Memory、Artifact，并强化 Trace Parent/Child Topology 与 v0.6/v0.7 Metrics。
+- 自动验收新增 Child、Memory、Compaction 和 Artifact 数量检查。
+
+### 已知限制
+
+- 跨 Run Timeline 的 `timeline_sequence` 是 Snapshot 展示序号，不替代各 Run Event Log 的本地 sequence。
+- Root SSE 不直接转发 Child Run 的每个事件，Learning Console 在本地运行期间使用 450ms Snapshot 轮询补充动态展示。
+- Learning Console 仍面向本地单用户教学，不提供认证、远程多租户或 Workflow Designer。
+- 场景使用确定性 Mock Provider，目的是学习 Runtime 语义，不评估真实模型质量。
+
+### 测试与验收
+
+```powershell
+cd D:\AICoding\Agent
+$env:PYTHONPATH='src'
+python scripts/check_docs.py
+python -m pytest -p no:cacheprovider -o addopts= -q
+python -m compileall -q src tests
+node --check src\agent_runtime\lab\static\app.js
+git diff --check
+agent-runtime lab
+```
+
+验收覆盖：
+
+- 9 个场景目录和静态页面入口。
+- 串行/并行 Workflow 均生成 1 个 Parent、3 个 Child 和 3 条 RunRelation。
+- Session 场景检索 Session/Agent 两类 Memory，并在 Context 中记录命中 ID。
+- Context 场景稳定产生 `context.compacted`，完整 Checkpoint 消息多于模型实际选择消息。
+- Artifact 场景产生真实文件和 `tool.result.artifactized` provenance。
+- 聚合 Event 同时包含 `timeline_sequence`、`local_sequence`、`run_id`、`agent_name` 和 `run_role`。
+
+### 后续计划
+
+继续进入 v0.8 Sandbox；Learning Console 后续可增加安全策略、Capability 和 Secret Redaction 教学场景。
 
 <a id="e2026-08-15-001"></a>
 ## E2026-08-15-001：完成 Context、Session 与长期记忆 v0.7

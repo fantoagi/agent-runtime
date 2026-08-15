@@ -14,20 +14,28 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         page = await client.get("/lab")
         assert page.status_code == 200
         assert "Agent Runtime Learning Console" in page.text
+        assert 'data-tab="context"' in page.text
+        assert 'data-tab="memory"' in page.text
+        assert 'data-tab="artifacts"' in page.text
+        assert 'class="swimlane-label agent"' in page.text
+        assert 'class="swimlane-label context"' in page.text
 
         stylesheet = await client.get("/lab/static/styles.css")
         assert stylesheet.status_code == 200
         assert "--accent" in stylesheet.text
         assert ".swimlane-board" in stylesheet.text
         assert ".swimlane-link" in stylesheet.text
+        assert ".topology-node" in stylesheet.text
         assert ".empty-state[hidden]" in stylesheet.text
-        assert "min-height: 164px" in stylesheet.text
 
         script = await client.get("/lab/static/app.js")
         assert script.status_code == 200
         assert "function eventLane" in script.text
         assert "function swimlanePoint" in script.text
         assert "swimlane-event" in script.text
+        assert '"delegation.created"' in script.text
+        assert '"context.compacted"' in script.text
+        assert "function renderMemoryInspector" in script.text
         assert 'id="swimlaneBoard"' in page.text
         assert 'id="swimlaneViewport"' in page.text
 
@@ -38,6 +46,11 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
             "tool-calling",
             "token-streaming",
             "human-approval",
+            "multi-agent-sequential",
+            "multi-agent-parallel",
+            "session-memory",
+            "context-compaction",
+            "large-tool-artifact",
         ]
 
 
@@ -108,3 +121,104 @@ async def test_human_approval_scenario_pauses_and_resumes(workspace) -> None:
         assert after["tool_executions"][0]["status"] == "completed"
         assert after["acceptance"]["passed"] is True
         assert "approval.resolved" in [event["type"] for event in after["events"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scenario_id", "workflow_type"),
+    [
+        ("multi-agent-sequential", "sequential"),
+        ("multi-agent-parallel", "parallel"),
+    ],
+)
+async def test_multi_agent_learning_scenarios_show_parent_child_topology(
+    workspace, scenario_id: str, workflow_type: str
+) -> None:
+    app = create_demo_app(workspace, enable_learning_console=True)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post(f"/lab/api/scenarios/{scenario_id}/runs", json={"input": None})
+        run_id = created.json()["id"]
+        runtime = app.state.learning_console.runtime_for_run(run_id)
+        completed = await runtime.wait(run_id)
+        assert completed.status.value == "completed"
+
+        payload = (await client.get(f"/lab/api/runs/{run_id}/snapshot")).json()
+        assert payload["run"]["metadata"]["workflow_type"] == workflow_type
+        assert len(payload["runs"]) == 4
+        assert len(payload["relations"]) == 3
+        assert payload["trace_tree"]["node_count"] == 4
+        assert payload["metrics"]["multi_agent"]["child_runs"] >= 3
+        assert payload["acceptance"]["passed"] is True
+        assert all("timeline_sequence" in event for event in payload["events"])
+        assert any(event["run_role"] == "child" for event in payload["events"])
+        assert "delegation.created" in [event["type"] for event in payload["events"]]
+        assert payload["persistence"]["tables"]["run_relations"] == 3
+
+
+@pytest.mark.asyncio
+async def test_session_memory_learning_scenario_exposes_retrieval_and_context(workspace) -> None:
+    app = create_demo_app(workspace, enable_learning_console=True)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/lab/api/scenarios/session-memory/runs", json={"input": None})
+        run_id = created.json()["id"]
+        runtime = app.state.learning_console.runtime_for_run(run_id)
+        completed = await runtime.wait(run_id)
+        assert completed.status.value == "completed"
+
+        payload = (await client.get(f"/lab/api/runs/{run_id}/snapshot")).json()
+        event_types = [event["type"] for event in payload["events"]]
+        assert payload["session"] is not None
+        assert len(payload["session_runs"]) == 1
+        assert len(payload["memories"]) == 2
+        assert {item["scope"] for item in payload["memories"]} == {"session", "agent"}
+        assert "session.run.attached" in event_types
+        assert "memory.search.started" in event_types
+        assert "memory.search.completed" in event_types
+        assert "context.built" in event_types
+        assert payload["context_builds"][0]["memory_ids"]
+        assert "Mermaid" in payload["run"]["result"]
+        assert payload["acceptance"]["passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_context_compaction_learning_scenario_keeps_full_checkpoint(workspace) -> None:
+    app = create_demo_app(workspace, enable_learning_console=True)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/lab/api/scenarios/context-compaction/runs", json={"input": None})
+        run_id = created.json()["id"]
+        runtime = app.state.learning_console.runtime_for_run(run_id)
+        completed = await runtime.wait(run_id)
+        assert completed.status.value == "completed"
+
+        payload = (await client.get(f"/lab/api/runs/{run_id}/snapshot")).json()
+        compacted = [item for item in payload["context_builds"] if item["event_type"] == "context.compacted"]
+        assert compacted
+        assert any(item["omitted_messages"] > 0 for item in compacted)
+        assert len(payload["checkpoint"]["messages"]) > compacted[-1]["selected_messages"]
+        assert payload["run"]["tool_call_count"] == 4
+        assert payload["acceptance"]["passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_large_tool_result_learning_scenario_writes_real_artifact(workspace) -> None:
+    app = create_demo_app(workspace, enable_learning_console=True)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/lab/api/scenarios/large-tool-artifact/runs", json={"input": None})
+        run_id = created.json()["id"]
+        runtime = app.state.learning_console.runtime_for_run(run_id)
+        completed = await runtime.wait(run_id)
+        assert completed.status.value == "completed"
+
+        payload = (await client.get(f"/lab/api/runs/{run_id}/snapshot")).json()
+        assert "tool.result.artifactized" in [event["type"] for event in payload["events"]]
+        assert len(payload["artifacts"]) == 1
+        artifact = payload["artifacts"][0]
+        assert artifact["exists"] is True
+        assert artifact["characters"] > 256
+        assert artifact["preview"]
+        assert payload["tool_executions"][0]["result_data"]["_artifact"]["path"] == artifact["path"]
+        assert payload["acceptance"]["passed"] is True

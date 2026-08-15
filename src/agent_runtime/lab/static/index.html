@@ -10,10 +10,7 @@
   <header class="topbar">
     <div class="brand">
       <div class="brand-mark">AR</div>
-      <div>
-        <strong>Agent Runtime</strong>
-        <span>Learning Console · v0.7.0</span>
-      </div>
+      <div><strong>Agent Runtime</strong><span>Learning Console · v0.7.1</span></div>
     </div>
     <div class="topbar-actions">
       <span id="connectionBadge" class="connection-badge idle"><span></span>等待运行</span>
@@ -25,17 +22,14 @@
   <main class="workspace">
     <aside class="scenario-panel panel">
       <div class="panel-heading">
-        <div>
-          <span class="eyebrow">LEARNING PATH</span>
-          <h1>选择一个场景</h1>
-        </div>
+        <div><span class="eyebrow">LEARNING PATH</span><h1>选择一个场景</h1></div>
         <span id="scenarioCount" class="count-pill">0</span>
       </div>
       <p class="panel-intro">每个场景都经过真实 Runtime、SQLite Event Log 和 Checkpoint，不是前端动画。</p>
       <div id="scenarioList" class="scenario-list" aria-live="polite"></div>
       <div class="learning-tip">
         <strong>建议顺序</strong>
-        <p>先理解 Run，再观察 Tool、Streaming 和 Approval。点击任一事件可查看状态变化与源码入口。</p>
+        <p>先理解单 Run，再学习 v0.6 Parent/Child 多 Agent，最后观察 v0.7 Session、Memory、Context 与 Artifact。</p>
       </div>
     </aside>
 
@@ -59,89 +53,70 @@
 
       <div class="timeline-panel panel">
         <div class="timeline-toolbar">
-          <div>
-            <span class="eyebrow">DURABLE EVENT LOG</span>
-            <h2>事件时间线</h2>
-          </div>
+          <div><span class="eyebrow">DURABLE EVENT LOG</span><h2>事件泳道时间线</h2></div>
           <div class="replay-controls" aria-label="事件回放控制">
             <button id="replayButton" type="button" class="ghost-button">从头回放</button>
             <button id="prevButton" type="button" class="icon-button" aria-label="上一步">←</button>
             <button id="playButton" type="button" class="icon-button" aria-label="自动播放">▶</button>
             <button id="nextButton" type="button" class="icon-button" aria-label="下一步">→</button>
-            <select id="speedSelect" aria-label="回放速度">
-              <option value="1200">慢速</option>
-              <option value="700" selected>正常</option>
-              <option value="320">快速</option>
-            </select>
+            <select id="speedSelect" aria-label="回放速度"><option value="1200">慢速</option><option value="700" selected>正常</option><option value="320">快速</option></select>
           </div>
         </div>
         <div class="timeline-meta">
           <div class="timeline-legend" aria-label="泳道颜色图例">
-            <span class="legend run">Run</span>
-            <span class="legend model">Model</span>
-            <span class="legend tool">Tool</span>
-            <span class="legend approval">Approval</span>
-            <span class="legend checkpoint">State</span>
+            <span class="legend run">Run</span><span class="legend agent">Agent</span>
+            <span class="legend memory">Memory</span><span class="legend context">Context</span>
+            <span class="legend model">Model</span><span class="legend tool">Tool</span>
+            <span class="legend approval">Approval</span><span class="legend checkpoint">State</span>
           </div>
           <span id="swimlaneStatus" class="swimlane-status">0 / 0 事件</span>
         </div>
         <div id="timelineEmpty" class="empty-state">
           <div class="empty-orbit"><span></span></div>
-          <strong>运行一个场景，事件会按执行角色进入泳道</strong>
-          <p>每个节点都来自 SQLite 持久化记录，SSE 会把新事件实时追加到右侧。</p>
+          <strong>运行一个场景，真实事件会按执行角色进入泳道</strong>
+          <p>单 Run、Parent/Child、Memory、Context、Model、Tool 和 State 都来自持久化事实。</p>
         </div>
         <div id="swimlaneBoard" class="swimlane-board" hidden>
           <div class="swimlane-labels" aria-hidden="true">
             <div class="swimlane-corner"><span>FLOW</span><small>时间 →</small></div>
-            <div class="swimlane-label run"><strong>Run</strong><small>运行生命周期</small></div>
+            <div class="swimlane-label run"><strong>Run</strong><small>Root / Workflow 生命周期</small></div>
+            <div class="swimlane-label agent"><strong>Agent</strong><small>Delegation / Child Run</small></div>
+            <div class="swimlane-label memory"><strong>Session / Memory</strong><small>会话与作用域记忆</small></div>
+            <div class="swimlane-label context"><strong>Context</strong><small>预算、选择与压缩</small></div>
             <div class="swimlane-label model"><strong>Model</strong><small>推理与流式输出</small></div>
-            <div class="swimlane-label tool"><strong>Tool</strong><small>工具执行</small></div>
+            <div class="swimlane-label tool"><strong>Tool</strong><small>工具执行与 Artifact</small></div>
             <div class="swimlane-label approval"><strong>Approval</strong><small>人工决策</small></div>
             <div class="swimlane-label checkpoint"><strong>State</strong><small>Step / Checkpoint</small></div>
           </div>
-          <div id="swimlaneViewport" class="swimlane-viewport">
-            <div id="eventTimeline" class="swimlane-canvas" role="group" aria-label="Runtime 事件泳道图"></div>
-          </div>
+          <div id="swimlaneViewport" class="swimlane-viewport"><div id="eventTimeline" class="swimlane-canvas" role="group" aria-label="Runtime 事件泳道图"></div></div>
         </div>
       </div>
     </section>
 
     <aside class="inspector-panel panel">
       <div class="inspector-heading">
-        <div>
-          <span class="eyebrow">RUNTIME INSPECTOR</span>
-          <h2>执行检查器</h2>
-        </div>
+        <div><span class="eyebrow">RUNTIME INSPECTOR</span><h2>执行检查器</h2></div>
         <span id="runStatus" class="status-chip neutral">idle</span>
       </div>
-
       <div id="approvalCard" class="approval-card" hidden>
         <div class="approval-icon">!</div>
-        <div>
-          <strong>Runtime 正在等待你的决定</strong>
-          <p id="approvalSummary"></p>
-          <div class="approval-actions">
-            <button id="approveButton" class="approve-button" type="button">批准并继续</button>
-            <button id="rejectButton" class="reject-button" type="button">拒绝</button>
-          </div>
-        </div>
+        <div><strong>Runtime 正在等待你的决定</strong><p id="approvalSummary"></p><div class="approval-actions"><button id="approveButton" class="approve-button" type="button">批准并继续</button><button id="rejectButton" class="reject-button" type="button">拒绝</button></div></div>
       </div>
-
       <nav id="inspectorTabs" class="tabs" aria-label="检查器标签">
         <button class="active" data-tab="event" type="button">事件</button>
         <button data-tab="state" type="button">状态</button>
         <button data-tab="messages" type="button">消息</button>
         <button data-tab="execution" type="button">执行</button>
         <button data-tab="trace" type="button">Trace</button>
+        <button data-tab="context" type="button">Context</button>
+        <button data-tab="memory" type="button">Memory</button>
+        <button data-tab="artifacts" type="button">Artifact</button>
         <button data-tab="sqlite" type="button">SQLite</button>
         <button data-tab="acceptance" type="button">验收</button>
       </nav>
-      <div id="inspectorContent" class="inspector-content">
-        <div class="empty-inspector">选择事件后，这里会解释“发生了什么、为什么、下一步和对应代码”。</div>
-      </div>
+      <div id="inspectorContent" class="inspector-content"><div class="empty-inspector">选择事件后，这里会解释发生了什么、为什么、下一步和对应代码。</div></div>
     </aside>
   </main>
-
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="/lab/static/app.js" defer></script>
 </body>
