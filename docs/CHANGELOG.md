@@ -39,7 +39,7 @@
   - `docs/CHANGELOG.md`
   - `docs/adr/0011-context-session-memory.md`
   - `docs/adr/README.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`1086c5e`
 - **关联 ADR**：[ADR-0011](./adr/0011-context-session-memory.md)
 
 ### 变更摘要
