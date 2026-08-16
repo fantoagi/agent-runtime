@@ -25,12 +25,14 @@ REQUIRED_FILES = (
     "docs/LEARNING.md",
     "docs/MULTI_AGENT.md",
     "docs/CONTEXT_MEMORY.md",
+    "docs/OPERATIONS.md",
     "docs/adr/README.md",
     "docs/templates/change-entry.md",
     "docs/templates/adr.md",
 )
 
 CORE_PATHS = {
+    "src/agent_runtime/backup.py",
     "src/agent_runtime/domain.py",
     "src/agent_runtime/runtime.py",
     "src/agent_runtime/providers.py",

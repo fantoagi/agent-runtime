@@ -26,6 +26,7 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
+| [ADR-0022](./0022-runtime-backup-restore.md) | Accepted | 2026-08-16 | Runtime 状态归档与离线恢复 | E2026-08-16-001 |
 | [ADR-0021](./0021-agent-definition-snapshots.md) | Accepted | 2026-08-15 | AgentDefinition 不可变快照与恢复绑定 | E2026-08-15-010 |
 | [ADR-0020](./0020-run-submission-idempotency-admission.md) | Accepted | 2026-08-15 | Run 提交幂等与运行时准入控制 | E2026-08-15-009 |
 | [ADR-0019](./0019-runtime-doctor.md) | Accepted | 2026-08-15 | Runtime Doctor 只读诊断模型 | E2026-08-15-008 |

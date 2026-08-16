@@ -77,9 +77,13 @@ jobs:
         if: matrix.python == '3.13'
         run: python scripts/run_crash_recovery.py --output crash-result.json
 
+      - name: Backup and restore drill
+        if: matrix.python == '3.13'
+        run: python scripts/run_backup_recovery.py --output backup-result.json
+
       - name: Build sdist and wheel
         run: python -m build
 
       - name: Verify clean wheel installation and CLI/API/SSE smokes
         if: matrix.python == '3.13'
-        run: python scripts/verify_distribution.py dist/agent_runtime-0.7.7-py3-none-any.whl
+        run: python scripts/verify_distribution.py dist

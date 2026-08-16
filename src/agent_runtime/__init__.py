@@ -1,11 +1,15 @@
 """Durable single-agent and multi-agent runtime primitives."""
 
+from .backup import BackupCreation, BackupVerification, RestoreResult, RuntimeBackupManager
 from .context import ContextBuilder, ContextBuildResult
 from .doctor import DoctorCheck, DoctorReport, RuntimeDoctor
 from .domain import (
     AgentDefinition,
     AgentDefinitionUnavailable,
     AgentRun,
+    BackupConflictError,
+    BackupError,
+    BackupTargetBusyError,
     IdempotencyConflict,
     MemoryRecord,
     MemoryScope,
@@ -69,6 +73,11 @@ __all__ = [
     "AgentRegistry",
     "AgentRun",
     "AggregationStrategy",
+    "BackupConflictError",
+    "BackupCreation",
+    "BackupError",
+    "BackupTargetBusyError",
+    "BackupVerification",
     "ContainsEvaluator",
     "ContextBuildResult",
     "ContextBuilder",
@@ -93,12 +102,14 @@ __all__ = [
     "ObservabilityService",
     "OpenAICompatibleProvider",
     "ParallelWorkflow",
+    "RestoreResult",
     "RunRelation",
     "RunRelationType",
     "RunStatus",
     "RunSubmission",
     "RunTrace",
     "Runtime",
+    "RuntimeBackupManager",
     "RuntimeCapacityError",
     "RuntimeConfig",
     "RuntimeDoctor",

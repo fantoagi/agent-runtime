@@ -19,6 +19,19 @@ agent-runtime demo "19 * 23"
 The demo uses a deterministic local provider. Set `OPENAI_API_KEY` and select the
 OpenAI-compatible provider in application code when connecting to a real model.
 
+## v0.7.10 Operational Backup & Recovery
+
+当前版本提供 SQLite Online Backup、Artifact 归档、Manifest/SHA-256 校验、离线恢复与自动回滚副本：
+
+```powershell
+agent-runtime backup create --output runtime.agent-backup
+agent-runtime backup verify runtime.agent-backup
+# 停止所有 Runtime 后：
+agent-runtime backup restore runtime.agent-backup --force
+python scripts/run_backup_recovery.py
+```
+
+完整操作步骤见 [运行与灾难恢复手册](./docs/OPERATIONS.md)。
 ## v0.7.9 AgentDefinition Snapshot Recovery
 
 当前版本会持久化 System Prompt、ToolDefinition、ModelConfig 和执行上限的不可变快照。普通 Run 与串行/并行 Workflow 在进程重启后无需重新注册 AgentDefinition，并始终恢复创建时绑定的确切定义；Tool Handler 与 Provider 实现仍需由进程提供。
@@ -165,6 +178,7 @@ The project treats documentation as part of the implementation contract:
 - [Context and memory guide](./docs/CONTEXT_MEMORY.md): context budgets, sessions, scoped memory, FTS5, lifecycle, and APIs.
 - [Evolution log](./docs/CHANGELOG.md): feature and architecture changes in reverse completion-time order.
 - [Architecture Decision Records](./docs/adr/README.md): why important public, data, reliability, or security decisions were made.
+- [Operations and disaster recovery](./docs/OPERATIONS.md): backup, verification, offline restore, rollback, and recovery drills.
 - [Documentation workflow](./docs/README.md): Change IDs, templates, update rules, and quality gates.
 
 Every independently verifiable feature, fix, or architecture change should have a
@@ -177,7 +191,7 @@ boundaries must also add or update an ADR.
 - **Runtime kernel**: bounded agent loop with cancellation, retry-safe checkpoints, approvals, and durable delegation.
 - **Providers**: normalized text/tool-call responses, optional token streaming, a deterministic Mock, and an OpenAI-compatible implementation.
 - **Tools**: JSON-schema-inspired argument validation, timeout handling, and workspace confinement.
-- **Storage**: SQLite schema v4 for runs, relations, sessions, memories, event log, checkpoints, FTS5, and file-backed artifacts.
+- **Storage**: SQLite schema v8 for runs, relations, sessions, memories, AgentDefinition snapshots, event log, checkpoints, FTS5, file-backed artifacts, and verified backup archives.
 - **Orchestration**: AgentRegistry, RunRelation, sequential/parallel workflows, aggregation, timeout, cancellation propagation, and idempotent recovery.
 - **Context and memory**: ContextBuilder, Session, scoped MemoryStore search, lifecycle, provenance, and large Tool Result artifactization.
 - **Observability**: per-Run trace, Parent/Child trace tree, and metrics derived from persisted runs/events/relations, with JSON and Prometheus outputs.

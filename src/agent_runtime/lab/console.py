@@ -244,6 +244,12 @@ class LearningConsole:
                 "unknown_tool_executions": sum(
                     item.status.value == "unknown" for item in executions
                 ),
+                "backup": {
+                    "format_version": 1,
+                    "online_create": True,
+                    "restore_requires_shutdown": True,
+                    "drill_command": "python scripts/run_backup_recovery.py",
+                },
                 "guidance": (
                     "UNKNOWN 表示副作用结果无法确认，必须人工核对后再恢复。"
                     if any(item.status.value == "unknown" for item in executions)

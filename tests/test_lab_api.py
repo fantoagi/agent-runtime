@@ -14,6 +14,7 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         page = await client.get("/lab")
         assert page.status_code == 200
         assert "Agent Runtime Learning Console" in page.text
+        assert "v0.7.10" in page.text
         assert 'data-tab="context"' in page.text
         assert 'data-tab="memory"' in page.text
         assert 'data-tab="artifacts"' in page.text
@@ -44,6 +45,8 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         assert '"delegation.created"' in script.text
         assert '"context.compacted"' in script.text
         assert "function renderMemoryInspector" in script.text
+        assert "Backup format" in script.text
+        assert "offline only" in script.text
         assert 'id="swimlaneBoard"' in page.text
         assert 'id="swimlaneViewport"' in page.text
         assert 'class="swimlane-label agent"' not in page.text
@@ -101,6 +104,8 @@ async def test_learning_scenarios_run_through_real_runtime(
         assert payload["reliability"]["capacity"]["max_inflight_runs"] == 64
         assert payload["reliability"]["sqlite"]["status"] == "ok"
         assert payload["reliability"]["run_health"] == "healthy"
+        assert payload["reliability"]["backup"]["format_version"] == 1
+        assert payload["reliability"]["backup"]["restore_requires_shutdown"] is True
         assert payload["acceptance"]["passed"] is True
 
 

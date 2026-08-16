@@ -614,6 +614,18 @@ class StoreError(RuntimeErrorBase):
     """Base class for persistent store failures."""
 
 
+class BackupError(StoreError):
+    """Runtime backup creation, verification, or restore failed."""
+
+
+class BackupConflictError(BackupError):
+    """A backup operation would overwrite state without explicit approval."""
+
+
+class BackupTargetBusyError(BackupError):
+    """A restore target appears to be in use by another Runtime."""
+
+
 class StoreBusyError(StoreError):
     """SQLite remained locked after the configured retry budget."""
 

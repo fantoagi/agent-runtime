@@ -39,6 +39,9 @@ jobs:
       - name: Forced-crash recovery matrix
         run: python scripts/run_crash_recovery.py --repeat 20 --output crash-result.json
 
+      - name: Backup and restore drill
+        run: python scripts/run_backup_recovery.py --output backup-result.json
+
       - name: 100-run stress and soak
         env:
           SOAK_SECONDS: ${{ inputs.soak_seconds || '1800' }}
@@ -60,7 +63,7 @@ jobs:
         run: python -m build
 
       - name: Verify release artifact
-        run: python scripts/verify_distribution.py dist/agent_runtime-0.7.7-py3-none-any.whl
+        run: python scripts/verify_distribution.py dist
 
       - name: Upload reliability report
         uses: actions/upload-artifact@v4
@@ -70,4 +73,5 @@ jobs:
           path: |
             reliability-result.json
             crash-result.json
+            backup-result.json
           if-no-files-found: warn

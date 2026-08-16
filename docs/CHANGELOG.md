@@ -4,6 +4,63 @@
 
 ---
 
+<a id="e2026-08-16-001"></a>
+## E2026-08-16-001：v0.7.10 在线备份、校验与灾难恢复演练
+
+- **完成时间**：2026-08-16
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/backup.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/domain.py`
+  - `src/agent_runtime/lab/console.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/lab/static/app.js`
+  - `scripts/run_backup_recovery.py`
+  - `scripts/verify_distribution.py`
+  - `tests/test_backup.py`
+  - `tests/test_lab_api.py`
+  - `.github/workflows/quality.yml`
+  - `.github/workflows/nightly-reliability.yml`
+  - `docs/OPERATIONS.md`
+  - `docs/LEARNING.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0022](./adr/0022-runtime-backup-restore.md)
+
+### 变更摘要
+
+补齐独立于进程崩溃恢复的状态备份能力，为 SQLite、Artifact、migration checksum 和恢复前回滚状态建立可执行的灾难恢复合同，并将真实恢复演练加入持续质量门禁。
+
+### 系统架构
+
+新增 Runtime 外部运维组件 `RuntimeBackupManager`。创建路径使用 SQLite Online Backup API 获取一致性数据库快照，再复制 Artifact 并生成内容校验 Manifest；恢复路径要求 Runtime 离线，先校验、保存当前状态、安装恢复点，失败时回滚。该能力不进入 Agent 执行循环，也不改变 schema 8。
+
+### 实现方式
+
+`.agent-backup` ZIP 归档包含 `runtime.sqlite3`、`artifacts/` 和 `manifest.json`；Manifest 记录 format version、schema version、migration checksum、表记录数、字节数和 SHA-256。校验执行 ZIP 路径检查、重复 Entry 检查、hash、`quick_check`、`foreign_key_check` 和 migration 验证。恢复使用同目录 staging、WAL checkpoint、排他锁检查和 `pre-restore-*` 回滚副本。
+
+### 当前功能
+
+支持运行中创建在线备份、离线校验、原路径恢复、默认保留恢复前状态、可选丢弃回滚副本，以及 CLI `backup create/verify/restore`。PR、Nightly 和 Wheel smoke 均执行备份路径；独立演练验证备份前 Run 与 Artifact 恢复、备份后 Run 不越过恢复点。
+
+### 已知限制
+
+现有持久化记录包含绝对 Artifact 路径，因此 v0.7.10 不支持跨目录或跨机器恢复；归档未内建加密、远程上传、自动调度和保留清理；恢复前必须停止所有连接目标 SQLite 的进程。
+
+### 测试与验收
+
+```powershell
+python -m pytest
+python scripts/run_backup_recovery.py
+agent-runtime backup create --output runtime.agent-backup
+agent-runtime backup verify runtime.agent-backup
+python scripts/check_coverage.py coverage.json
+```
+
+### 后续计划
+
+先在 Nightly 和真实本地状态目录持续执行恢复演练；进入 v0.8 前，评估 Artifact 相对标识、跨目录恢复、备份加密和保留策略，但不扩大 Agent 执行能力。
 <a id="e2026-08-15-010"></a>
 ## E2026-08-15-010：v0.7.9 AgentDefinition 快照与确定性恢复
 

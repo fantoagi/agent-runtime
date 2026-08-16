@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .backup import RuntimeBackupManager
 from .doctor import RuntimeDoctor
+from .domain import BackupError
 from .evals import EvalCase, EvalRunner, EvalSuite
 from .observability import ObservabilityService
 from .sdk import (
@@ -112,6 +115,32 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subcommands.add_parser("doctor", help="Run read-only Runtime diagnostics")
     doctor.add_argument("--run-id", default=None, help="Limit diagnostics to one Run")
     doctor.add_argument("--json", action="store_true", help="Print the complete JSON report")
+
+    backup = subcommands.add_parser(
+        "backup", help="Create, verify, or restore a durable Runtime state archive"
+    )
+    backup_subcommands = backup.add_subparsers(dest="backup_command", required=True)
+    backup_create = backup_subcommands.add_parser(
+        "create", help="Create an online SQLite and Artifact backup"
+    )
+    backup_create.add_argument("--output", default=None, help="Destination .agent-backup file")
+    backup_create.add_argument("--overwrite", action="store_true")
+    backup_verify = backup_subcommands.add_parser(
+        "verify", help="Verify archive checksums and SQLite consistency"
+    )
+    backup_verify.add_argument("archive")
+    backup_restore = backup_subcommands.add_parser(
+        "restore", help="Restore state after every Runtime using it has stopped"
+    )
+    backup_restore.add_argument("archive")
+    backup_restore.add_argument(
+        "--force", action="store_true", help="Replace existing state after offline checks"
+    )
+    backup_restore.add_argument(
+        "--discard-previous",
+        action="store_true",
+        help="Delete the automatic pre-restore rollback copy after success",
+    )
     return parser
 
 
@@ -119,7 +148,50 @@ def _print(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
+def _runtime_state_paths(arguments: argparse.Namespace) -> tuple[Path, Path, Path]:
+    workspace = Path(arguments.workspace).resolve()
+    state_dir = Path(arguments.state_dir or workspace / ".agent-runtime").resolve()
+    return state_dir, state_dir / "runtime.sqlite3", state_dir / "artifacts"
+
+
 async def async_main(arguments: argparse.Namespace) -> int:
+    if arguments.command == "backup":
+        state_dir, database_path, artifact_path = _runtime_state_paths(arguments)
+        manager = RuntimeBackupManager(database_path, artifact_path)
+        try:
+            if arguments.backup_command == "create":
+                output = (
+                    Path(arguments.output).resolve()
+                    if arguments.output
+                    else state_dir
+                    / "backups"
+                    / f"runtime-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.agent-backup"
+                )
+                _print(manager.create(output, overwrite=arguments.overwrite).to_dict())
+                return 0
+            if arguments.backup_command == "verify":
+                verification = RuntimeBackupManager.verify(arguments.archive)
+                _print(verification.to_dict())
+                return verification.exit_code
+            if arguments.backup_command == "restore":
+                restored = manager.restore(
+                    arguments.archive,
+                    overwrite=arguments.force,
+                    keep_previous=not arguments.discard_previous,
+                )
+                _print(restored.to_dict())
+                return 0
+        except BackupError as error:
+            _print(
+                {
+                    "status": "error",
+                    "code": type(error).__name__,
+                    "detail": str(error),
+                }
+            )
+            return 2
+        raise AssertionError("unreachable")
+
     if arguments.command == "lab":
         try:
             import uvicorn

@@ -617,12 +617,13 @@ function renderSqliteInspector() {
   const sqlite = reliability.sqlite || {};
   const doctor = reliability.doctor || {};
   const capacity = reliability.capacity || {};
+  const backup = reliability.backup || {};
   return `
-    <section class="detail-block"><span class="detail-label">RELIABILITY STATUS</span><div class="kv-grid">${kv("Run", reliability.run_health)}${kv("Runtime 接受请求", reliability.runtime_accepting ? "yes" : "no")}${kv("活动任务", `${capacity.active_tasks ?? 0} / ${capacity.max_inflight_runs ?? "-"}`)}${kv("模型并发上限", capacity.max_concurrent_model_requests ?? "-")}${kv("SQLite", sqlite.status)}${kv("UNKNOWN Tool", reliability.unknown_tool_executions ?? 0)}${kv("Doctor", doctor.status || "unknown")}</div><p>${escapeHtml(reliability.guidance || "")}</p></section>
+    <section class="detail-block"><span class="detail-label">RELIABILITY STATUS</span><div class="kv-grid">${kv("Run", reliability.run_health)}${kv("Runtime 接受请求", reliability.runtime_accepting ? "yes" : "no")}${kv("活动任务", `${capacity.active_tasks ?? 0} / ${capacity.max_inflight_runs ?? "-"}`)}${kv("模型并发上限", capacity.max_concurrent_model_requests ?? "-")}${kv("SQLite", sqlite.status)}${kv("UNKNOWN Tool", reliability.unknown_tool_executions ?? 0)}${kv("Doctor", doctor.status || "unknown")}${kv("Backup format", backup.format_version ?? "-")}${kv("Restore", backup.restore_requires_shutdown ? "offline only" : "unknown")}</div><p>${escapeHtml(reliability.guidance || "")}</p></section>
     <section class="detail-block"><span class="detail-label">PERSISTENCE SOURCE</span><pre class="json-view">${escapeHtml(persistence.database)}</pre></section>
     <section class="detail-block"><span class="detail-label">SCHEMA VERSION</span><div class="kv-grid">${kv("Migration", persistence.schema_version)}${kv("Journal", sqlite.journal_mode)}${kv("事实来源", "SQLite")}</div></section>
     <section class="detail-block"><span class="detail-label">本次 RUN 相关记录</span><div class="kv-grid">${Object.entries(persistence.tables).map(([key, value]) => kv(key, value)).join("")}</div></section>
-    <section class="detail-block"><span class="detail-label">可靠性说明</span><p>Learning Console 展示持久化的 Run、Event、Step、ToolExecution、Approval 和 Checkpoint。Runtime 不接受请求、Run 为 failed/cancelled，或存在 UNKNOWN Tool 时都需要人工检查；UNKNOWN 必须先确认结果，再显式恢复 Run。</p></section>
+    <section class="detail-block"><span class="detail-label">可靠性说明</span><p>Learning Console 展示持久化的 Run、Event、Step、ToolExecution、Approval 和 Checkpoint。Runtime 不接受请求、Run 为 failed/cancelled，或存在 UNKNOWN Tool 时都需要人工检查；UNKNOWN 必须先确认结果，再显式恢复 Run。备份恢复位于执行循环之外，恢复前必须停止 Runtime；演练命令：${escapeHtml(backup.drill_command || "python scripts/run_backup_recovery.py")}。</p></section>
   `;
 }
 

@@ -1,8 +1,8 @@
 # Agent Runtime 当前架构
 
-> 最近更新：2026-08-15
-> 关联记录：[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
-> 关联决策：[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
+> 最近更新：2026-08-16
+> 关联记录：[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
+> 关联决策：[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
 
 ## 1. 系统目标和边界
 
@@ -33,6 +33,8 @@ flowchart TD
     Artifacts["Artifact Store"]
     Observe["Trace / TraceTree / Metrics"]
     Evals["Eval / Workflow Eval"]
+    Backup["RuntimeBackupManager"]
+    Archive["Verified .agent-backup"]
 
     CLI --> Runtime
     CLI --> Workflows
@@ -61,6 +63,9 @@ flowchart TD
     Evals --> Runtime
     Evals --> Workflows
     Evals --> Artifacts
+    State --> Backup
+    Artifacts --> Backup
+    Backup --> Archive
 ```
 
 核心依赖方向由入口指向 Runtime，再由 Runtime 依赖抽象化的 Provider、Tool 和 Store；模型厂商响应和具体工具实现不进入 Runtime Kernel 的领域模型。
@@ -234,6 +239,36 @@ ToolExecution 保存参数、状态、结果、错误、审批关系、side-effe
 
 Checkpoint 保存恢复所需的消息历史、模型步骤和工具调用计数。`ArtifactStore` 将大文本产物写入按 Run 隔离的目录；当 Tool Result 超过配置阈值时，Runtime 自动保存完整 Artifact，并让 ToolExecution 与 Checkpoint 只保留路径、大小和预览。
 
+
+## 7.1 在线备份与离线恢复
+
+`RuntimeBackupManager` 位于 Runtime Kernel 外部，操作状态文件而不参与 Run 状态机：
+
+```mermaid
+flowchart LR
+    LiveDB["Live SQLite WAL"]
+    Snapshot["SQLite Online Backup Snapshot"]
+    Artifacts["Artifact Store"]
+    Manifest["Manifest + SHA-256"]
+    Archive[".agent-backup"]
+    Verify["Verify"]
+    Restore["Offline Restore"]
+    Rollback["pre-restore rollback copy"]
+
+    LiveDB --> Snapshot
+    Snapshot --> Manifest
+    Artifacts --> Manifest
+    Manifest --> Archive
+    Archive --> Verify
+    Verify --> Restore
+    Restore --> Rollback
+```
+
+创建备份时先使用 SQLite Online Backup API 获得事务一致数据库，再复制 Artifact，记录 format version、schema version、migration checksum、关键表计数、文件大小和 SHA-256。生成的临时归档必须通过完整自校验后，才能原子替换最终备份文件。
+
+恢复不允许在活动 Runtime 上执行。恢复器先校验 ZIP 路径、重复 Entry、hash、`quick_check`、`foreign_key_check` 和 migration，再执行 WAL checkpoint 与排他锁检查。目标数据库和 Artifact 先改名为 `pre-restore-*`，安装失败则自动回滚；默认保留恢复前副本。
+
+当前历史记录保存绝对 Artifact 路径，因此恢复目标必须与 Manifest 中的原路径一致。该边界避免在 JSON、Event 和消息文本中进行不安全的全库字符串替换。
 ## 8. Event Log
 
 每个 Run 的事件使用从 1 开始的单调递增 `sequence`。当前事件覆盖：
@@ -356,7 +391,7 @@ Root 事件实时通知复用 `/runs/{run_id}/events/stream`。因为 Child Run 
 
 事件“回放”只移动浏览器展示游标。它不会暂停 Runtime asyncio Task，也不会改变 Run 状态机、Event sequence 或恢复语义。该边界保证 Learning Console 可以随功能演进扩展，而 Runtime Kernel 不依赖 UI。
 
-> 最近更新：2026-08-15
+> 最近更新：2026-08-16
 > 关联记录：[E2026-08-15-003](./CHANGELOG.md#e2026-08-15-003)
 > 关联决策：[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)、[ADR-0009](./adr/0009-learning-console.md)
 ## 9.5 Reliability、生命周期与发布门禁
@@ -395,6 +430,16 @@ flowchart LR
     Confirm --> Resume["Explicit resume()"]
     Resume --> Verify["Verify terminal state and no duplicate side effect"]
 ```
+
+## 9.7 Backup CLI 与恢复门禁
+
+CLI 提供：
+
+- `agent-runtime backup create`：运行中创建数据库和 Artifact 归档。
+- `agent-runtime backup verify`：离线校验归档，不修改 Runtime 状态。
+- `agent-runtime backup restore --force`：所有 Runtime 停止后恢复，并默认保留回滚副本。
+
+`scripts/run_backup_recovery.py` 创建恢复点后继续写入新 Run，再恢复旧备份，验证旧 Run/Artifact 存在而备份后的 Run 不存在。该脚本进入 PR 与 Nightly，Wheel smoke 也从安装产物执行 create、verify 和 restore。
 ## 10. 安全边界
 
 当前默认安全策略：

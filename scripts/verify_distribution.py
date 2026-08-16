@@ -23,6 +23,13 @@ def main() -> int:
     parser.add_argument("wheel", type=Path)
     args = parser.parse_args()
     wheel = args.wheel.resolve()
+    if wheel.is_dir():
+        candidates = sorted(wheel.glob("agent_runtime-*-py3-none-any.whl"))
+        if len(candidates) != 1:
+            parser.error(
+                f"expected exactly one agent-runtime wheel in {wheel}, found {len(candidates)}"
+            )
+        wheel = candidates[0]
     if not wheel.is_file():
         parser.error(f"wheel not found: {wheel}")
 
@@ -38,6 +45,36 @@ def main() -> int:
         run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=workspace)
         run([str(python), "-m", "pip", "install", f"{wheel}[api]"], cwd=workspace)
         run([str(cli), "--workspace", str(workspace), "demo", "19 * 23"], cwd=workspace)
+        backup = workspace / "runtime.agent-backup"
+        run(
+            [
+                str(cli),
+                "--workspace",
+                str(workspace),
+                "backup",
+                "create",
+                "--output",
+                str(backup),
+            ],
+            cwd=workspace,
+        )
+        run(
+            [str(cli), "--workspace", str(workspace), "backup", "verify", str(backup)],
+            cwd=workspace,
+        )
+        run(
+            [
+                str(cli),
+                "--workspace",
+                str(workspace),
+                "backup",
+                "restore",
+                str(backup),
+                "--force",
+                "--discard-previous",
+            ],
+            cwd=workspace,
+        )
 
         smoke = textwrap.dedent(
             """
