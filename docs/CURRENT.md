@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.7.11`
-- **当前里程碑**：v0.7.11 Operational Observability & Diagnostics
+- **当前版本**：`0.7.12`
+- **当前里程碑**：v0.7.12 Incident Diagnostics & Support Bundle
 - **Runtime 构建完成时间**：2026-08-16（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`62abc09`
-- **最近演进记录**：[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)
+- **当前代码基线 commit**：`pending`
+- **最近演进记录**：[E2026-08-16-003](./CHANGELOG.md#e2026-08-16-003)
 
 ## 状态定义
 
@@ -29,7 +29,7 @@
 | FastAPI 与 SSE | ✅ stable | 健康检查、heartbeat、断线恢复、Runtime 所有权、幂等提交和 429 背压 | E2026-08-15-007、E2026-08-15-009 |
 | 多 Agent Workflow | ✅ stable | Parent/Child、串行/并行、幂等委派、取消传播、Workflow 与 AgentDefinition 确切快照 | E2026-08-14-007、E2026-08-15-006、E2026-08-15-010 |
 | Context、Session、Memory 与 Artifact | ✅ stable | token budget、FTS5 scoped memory、TTL、软删除和大结果 Artifact 化 | E2026-08-15-001 |
-| Observability、Evals 与 Learning Console | ✅ stable | Trace Tree、p95/失败 Metrics、综合诊断、结构化日志、Eval、动态泳道和可靠性状态 | E2026-08-15-002、E2026-08-15-003、E2026-08-15-007、E2026-08-16-002 |
+| Observability、Evals 与 Learning Console | ✅ stable | Trace Tree、p95/失败 Metrics、综合诊断、结构化日志、确定性根因摘要、脱敏诊断包、Eval、动态泳道和可靠性状态 | E2026-08-15-002、E2026-08-15-003、E2026-08-15-007、E2026-08-16-002、E2026-08-16-003 |
 | Runtime Doctor 与 Crash Matrix | ✅ stable | 只读一致性诊断；模型、Tool、Approval、Workflow 强杀恢复，恢复进程无需重新注册 AgentDefinition | E2026-08-15-008、E2026-08-15-010 |
 | 在线备份与灾难恢复 | ✅ stable | SQLite Online Backup、Artifact 归档、SHA-256/quick_check 校验、离线恢复和回滚副本 | E2026-08-16-001 |
 | 质量与发布门禁 | ✅ stable | Ruff、Mypy strict、coverage、跨平台 CI、Wheel smoke、stress/soak/crash | E2026-08-15-004、E2026-08-15-007、E2026-08-15-008 |
@@ -45,7 +45,7 @@
 
 | 能力 | 状态 | 说明 | 演进记录 |
 | --- | --- | --- | --- |
-| v0.8 Sandbox / Capability / Secret | 📋 planned | 已后置，先观察 v0.7.11 Nightly 诊断信号与恢复演练并评估 Artifact 可迁移标识 | E2026-08-15-007、E2026-08-16-001、E2026-08-16-002 |
+| v0.8 Sandbox / Capability / Secret | 📋 planned | 已后置，先观察 v0.7.12 诊断包、Nightly 信号与恢复演练并评估 Artifact 可迁移标识 | E2026-08-15-007、E2026-08-16-001、E2026-08-16-002 |
 | 分布式 Worker 与 Queue | 📋 planned | 不属于当前单机可靠性范围 | E2026-08-15-007 |
 | 多租户与权限治理 | 📋 planned | 等待身份、审计和隔离模型设计 | E2026-08-15-007 |
 
@@ -64,12 +64,12 @@
 - 同步副作用 Tool 超时后只能标记 `UNKNOWN` 并等待人工确认，不能保证回滚。
 - Workflow 与普通 Run 可从不可变 AgentDefinition 快照恢复；Python Tool Handler 和 Model Provider 实现仍必须由新进程提供。
 - Nightly 的 30 分钟 soak 不作为每个 PR 的阻塞时长。
-- Learning Console 是教学与诊断 Adapter，不是生产运维控制台。`max_inflight_runs` 是单进程容量，不是分布式全局配额。`v0.7.10+` 备份只能恢复到原数据库和 Artifact 绝对路径。结构化日志不替代 SQLite 恢复事实。
+- Learning Console 是教学与诊断 Adapter，不是生产运维控制台。`max_inflight_runs` 是单进程容量，不是分布式全局配额。`v0.7.10+` 备份只能恢复到原数据库和 Artifact 绝对路径。结构化日志不替代 SQLite 恢复事实。诊断包采用允许列表且不能用于恢复，对外发送前仍需人工复核。
 
 ## 当前测试状态
 
-- 自动化测试：`189 passed`（2026-08-16，本地 Python 3.13），包含单元、集成、定义快照、幂等并发、容量背压、真实进程强杀与备份恢复测试。
-- Core line coverage：`92.37%`；core branch coverage：`80.78%`。
+- 自动化测试：`196 passed`（2026-08-16，本地 Python 3.13），包含单元、集成、定义快照、幂等并发、容量背压、真实进程强杀与备份恢复测试。
+- Core line coverage：`92.76%`；core branch coverage：`81.62%`。
 - PR：Ubuntu Python 3.11/3.12/3.13、Windows Python 3.13。
 - Nightly：100 并发、20 轮 Crash Matrix、备份恢复演练、故障测试重复、30 分钟 soak 和性能回退检查。
 

@@ -4,6 +4,62 @@
 
 ---
 
+<a id="e2026-08-16-003"></a>
+## E2026-08-16-003：v0.7.12 脱敏故障诊断包与根因摘要
+
+- **完成时间**：2026-08-16
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/incident.py`
+  - `src/agent_runtime/__init__.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/lab/console.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/lab/static/app.js`
+  - `scripts/verify_distribution.py`
+  - `scripts/check_docs.py`
+  - `tests/test_incident.py`
+  - `tests/test_api.py`
+  - `tests/test_lab_api.py`
+  - `docs/INCIDENTS.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0024](./adr/0024-incident-diagnostic-bundle.md)
+
+### 变更摘要
+
+在 v0.7.11 综合诊断基础上增加可直接交给维护者的脱敏 ZIP 诊断包，以及基于 durable Event 的确定性失败根因摘要。诊断包默认采用允许列表并排除原始执行内容，避免为了排障直接复制 SQLite、Artifact、Prompt、Tool 数据或 Memory。
+
+### 系统架构
+
+新增 `IncidentDiagnosticsService` 作为 Observability 的只读派生层。它组合 Runtime 生命周期、SQLite health、Doctor、Metrics、Run/Event 安全摘要与 FailureDiagnosis，但不写入 Event Log、不修改 Run 状态，也不承担恢复。`.agent-backup` 继续负责恢复，Incident Bundle 只负责排障和支持协作。
+
+### 实现方式
+
+Bundle format 1 包含 manifest、diagnostics、failure analysis、runs、events、collection 和 privacy 文档；Run/Event 数量使用显式上限并记录截断状态；每个数据条目记录大小和 SHA-256。Run input/result、原始错误、Model 内容、Tool 参数/结果、Memory、Checkpoint、Artifact、SQLite 和本机数据路径均被排除。CLI 使用临时文件、flush/fsync 和 `os.replace` 原子落盘并默认拒绝覆盖；HTTP 返回 `application/zip` 和 `Cache-Control: no-store`。
+
+### 当前功能
+
+支持 `agent-runtime observe incident-bundle`、HTTP `GET /observability/incident-bundle` 和 Learning Console 顶部下载入口。根因规则区分 Provider 401/403、429、5xx、Timeout/Transport、Tool Failure、Tool UNKNOWN 和 Runtime Failure；最终完成的 Run 会标记 recovered，避免把已经恢复的中间重试误认为当前事故。
+
+### 已知限制
+
+根因摘要是确定性规则而非完整因果推理；不采集 CPU/RSS/句柄/磁盘/网络趋势；不自动打包宿主日志、不上传远程工单或对象存储；报告读取运行中的多个持久化对象时不是跨表全局冻结快照；对外发送前仍需人工复核组织安全要求。
+
+### 测试与验收
+
+```powershell
+python -m pytest
+agent-runtime observe incident-bundle --output incident.zip
+Invoke-WebRequest http://127.0.0.1:8000/observability/incident-bundle -OutFile incident-api.zip
+python scripts/verify_distribution.py dist
+```
+
+### 后续计划
+
+继续在 v0.7.x 观察诊断包字段是否足够支持真实排障，再评估有界 CPU/RSS 趋势采样和可选宿主日志附加；在数据边界、保留和用户确认机制明确前，不增加自动远程上传。
 <a id="e2026-08-16-002"></a>
 ## E2026-08-16-002：v0.7.11 结构化日志与综合运行诊断
 

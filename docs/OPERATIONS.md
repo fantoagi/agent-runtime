@@ -1,6 +1,6 @@
 # Agent Runtime 运行与灾难恢复手册
 
-- **适用版本**：v0.7.11
+- **适用版本**：v0.7.12
 - **最近更新**：2026-08-16（Asia/Shanghai）
 - **适用范围**：单机、单用户、SQLite、默认 Artifact Store
 

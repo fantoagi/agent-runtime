@@ -19,6 +19,16 @@ agent-runtime demo "19 * 23"
 The demo uses a deterministic local provider. Set `OPENAI_API_KEY` and select the
 OpenAI-compatible provider in application code when connecting to a real model.
 
+## v0.7.12 Incident Diagnostics & Support Bundle
+
+当前版本可以一键生成采用允许列表的脱敏诊断 ZIP，并对 Provider、Tool、UNKNOWN 和 Runtime 失败生成确定性根因摘要：
+
+```powershell
+agent-runtime observe incident-bundle --output incident.zip
+Invoke-WebRequest http://127.0.0.1:8000/observability/incident-bundle -OutFile incident-api.zip
+```
+
+诊断包明确排除 Prompt、Tool 参数/结果、Memory、Checkpoint 消息、Artifact、SQLite 和原始错误文本。完整说明见 [故障诊断包与根因摘要指南](./docs/INCIDENTS.md)。
 ## v0.7.11 Operational Observability & Diagnostics
 
 当前版本增加结构化 JSON 日志、Provider attempt/retry 持久化事件、Model/Tool p95、失败聚合和综合运行诊断：

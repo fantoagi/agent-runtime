@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ from ..domain import (
     StoreError,
     ToolExecution,
 )
+from ..incident import IncidentDiagnosticsService
 from ..observability import ObservabilityService
 from ..runtime import Runtime
 from ..sdk import create_local_runtime, demo_agent
@@ -388,6 +390,34 @@ def create_app(
             metrics_limit=limit,
             recent_failure_limit=recent_failure_limit,
         ).to_dict()
+
+    @app.get("/observability/incident-bundle")
+    async def observability_incident_bundle(
+        run_id: str | None = None,
+        limit: int = Query(100, ge=1, le=1000),
+        recent_failure_limit: int = Query(20, ge=0, le=100),
+        event_limit: int = Query(5000, ge=0, le=50000),
+    ) -> StreamingResponse:
+        incidents = IncidentDiagnosticsService(runtime)
+        try:
+            content, _ = incidents.bundle_bytes(
+                run_id=run_id,
+                run_limit=limit,
+                recent_failure_limit=recent_failure_limit,
+                event_limit=event_limit,
+            )
+        except (KeyError, RunNotFound) as error:
+            raise _not_found(error) from error
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{incidents.suggested_filename()}"'
+                ),
+                "Cache-Control": "no-store",
+            },
+        )
 
     @app.get("/observability/metrics/prometheus")
     async def prometheus_metrics(

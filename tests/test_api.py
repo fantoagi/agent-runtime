@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import httpx
@@ -56,7 +58,7 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.7.11"
+        assert health.json()["version"] == "0.7.12"
         assert health.json()["store"]["schema_version"] == 8
 
         invalid = await client.post("/runs", json={"input": ""})
@@ -213,7 +215,7 @@ async def test_observability_api_exposes_trace_and_metrics(workspace: Path) -> N
     assert metrics.json()["total_runs"] == 1
     assert metrics.json()["model_requests"] == 1
     assert diagnostics.status_code == 200
-    assert diagnostics.json()["version"] == "0.7.11"
+    assert diagnostics.json()["version"] == "0.7.12"
     assert diagnostics.json()["runtime"]["state"] == "accepting"
     assert diagnostics.json()["store"]["status"] == "ok"
     assert diagnostics.json()["process"]["thread_count"] >= 1
@@ -481,3 +483,42 @@ async def test_api_returns_retryable_429_when_inflight_capacity_is_exhausted(
     release.set()
     await runtime.wait(first.json()["id"])
     await runtime.shutdown()
+
+@pytest.mark.asyncio
+async def test_incident_bundle_endpoint_returns_redacted_zip(workspace: Path) -> None:
+    runtime = make_api_runtime(workspace)
+    completed = await runtime.run("demo", "private prompt")
+    app = create_app(runtime)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            "/observability/incident-bundle",
+            params={"run_id": completed.id},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/zip")
+    assert response.headers["cache-control"] == "no-store"
+    assert "agent-runtime-incident-" in response.headers["content-disposition"]
+    assert b"private prompt" not in response.content
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["scope_run_id"] == completed.id
+        assert manifest["runtime_version"] == "0.7.12"
+
+
+@pytest.mark.asyncio
+async def test_incident_bundle_endpoint_returns_not_found(workspace: Path) -> None:
+    runtime = make_api_runtime(workspace)
+    app = create_app(runtime)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            "/observability/incident-bundle",
+            params={"run_id": "run_missing"},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "not_found"

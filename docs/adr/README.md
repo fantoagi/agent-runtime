@@ -26,6 +26,7 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
+| [ADR-0024](./0024-incident-diagnostic-bundle.md) | Accepted | 2026-08-16 | 故障诊断包允许列表、内容排除与原子导出 | E2026-08-16-003 |
 | [ADR-0023](./0023-operational-observability.md) | Accepted | 2026-08-16 | 持久化事实与瞬时运维信号分层 | E2026-08-16-002 |
 | [ADR-0022](./0022-runtime-backup-restore.md) | Accepted | 2026-08-16 | Runtime 状态归档与离线恢复 | E2026-08-16-001 |
 | [ADR-0021](./0021-agent-definition-snapshots.md) | Accepted | 2026-08-15 | AgentDefinition 不可变快照与恢复绑定 | E2026-08-15-010 |

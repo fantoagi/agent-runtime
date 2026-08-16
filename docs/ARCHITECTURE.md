@@ -421,7 +421,35 @@ Provider attempt 失败和重试决定会改变一次 Run 的执行解释，因�
 > 最近更新：2026-08-16
 > 关联记录：[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)
 > 关联决策：[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0008](./adr/0008-observability-evals.md)
-## 9.6 Reliability、生命周期与发布门禁
+## 9.6 Incident Diagnostics 与 Support Bundle
+
+v0.7.12 在 `OperationalSnapshot` 之上增加独立的 `IncidentDiagnosticsService`。该层只读取 Runtime 与 SQLite durable facts，生成可分享的安全摘要和 ZIP，不进入执行主循环，也不写入 Runtime Event sequence。
+
+```mermaid
+flowchart LR
+    Runtime["Runtime Lifecycle"] --> Incident["IncidentDiagnosticsService"]
+    Store["SQLite Durable Facts"] --> Incident
+    Observability["Diagnostics / Doctor / Metrics"] --> Incident
+    Incident --> Analysis["Deterministic FailureDiagnosis"]
+    Incident --> Safe["Allowlisted Run / Event Summaries"]
+    Analysis --> Zip["Incident Bundle v1"]
+    Safe --> Zip
+    Zip --> CLI["CLI atomic file export"]
+    Zip --> API["HTTP application/zip"]
+    Zip --> Console["Learning Console download"]
+```
+
+根因摘要只使用 durable failure events、HTTP status 和稳定错误类型，不调用模型。Provider 401/403、429、5xx、Timeout/Transport、Tool Failure、Tool UNKNOWN 与 Runtime Failure 使用固定类别和建议；Run 最终完成时标记 recovered。
+
+默认支持包使用允许列表：Run 不暴露 input/result，Event 不暴露模型文本、Tool 参数/结果和原始 error；Memory、Checkpoint、Artifact、SQLite 和本机数据库/Artifact 路径不进入 ZIP。manifest 为数据条目记录 size 与 SHA-256，但诊断包不具备恢复语义。
+
+CLI 文件导出先在内存构建 ZIP，再写入同目录临时文件并执行 flush/fsync 和 `os.replace`；存在目标默认失败。HTTP 直接流式返回内存 ZIP，并设置 `Cache-Control: no-store`。
+
+> 最近更新：2026-08-16
+> 关联记录：[E2026-08-16-003](./CHANGELOG.md#e2026-08-16-003)
+> 关联决策：[ADR-0024](./adr/0024-incident-diagnostic-bundle.md)、[ADR-0023](./adr/0023-operational-observability.md)
+
+## 9.7 Reliability、生命周期与发布门禁
 
 - `shutdown(timeout_seconds=30, cancel_running=False)` 先停止接收新工作，再排空任务；超时后协作取消，不能确认的副作用 Tool 保持 `UNKNOWN`。
 - `async with Runtime(...)` 自动执行相同关闭流程，重复关闭幂等。

@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
 - **最近更新**：2026-08-16
-- **当前版本**：v0.7.11
-- **当前阶段**：v0.7.11 Operational Observability & Diagnostics 完成；继续观察 Nightly，v0.8 Sandbox 暂缓
+- **当前版本**：v0.7.12
+- **当前阶段**：v0.7.12 Incident Diagnostics & Support Bundle 完成；继续观察真实排障与 Nightly，v0.8 Sandbox 暂缓
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -42,6 +42,7 @@
 | v0.7.9 | ✅ completed | AgentDefinition 快照与无重新注册恢复 | [E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010) |
 | v0.7.10 | ✅ completed | 在线备份、归档校验、离线恢复与灾难恢复演练 | [E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001) |
 | v0.7.11 | ✅ completed | 结构化日志、失败聚合、p95 与综合运行诊断 | [E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002) |
+| v0.7.12 | ✅ completed | 脱敏故障诊断包、确定性根因摘要与支持协作入口 | [E2026-08-16-003](./CHANGELOG.md#e2026-08-16-003) |
 | v0.8 | 📋 planned | Sandbox、Tool Capability 与 Secret 安全（后置） | — |
 | v0.9 | 📋 planned | 分布式 Worker、Queue 与 Lease | — |
 | v0.10 | 📋 planned | 多租户、权限、预算和生产治理 | — |
@@ -205,6 +206,30 @@
 - 不提供内建日志轮转、远程 Collector 或告警。
 - 不采集 CPU、RSS、句柄、磁盘和网络。
 - Metrics 使用最近 N 个 Run，而不是严格时间窗口或 Histogram Bucket。
+## v0.7.12：Incident Diagnostics & Support Bundle
+
+- **状态**：✅ completed
+- **前置版本**：v0.7.11
+- **完成记录**：[E2026-08-16-003](./CHANGELOG.md#e2026-08-16-003)
+- **目标**：在不复制数据库和原始执行内容的前提下，生成结构固定、可校验、可分享的本地故障诊断包，并给出可解释的根因类别和人工处理建议。
+
+### 已完成范围
+
+- CLI、FastAPI 和 Learning Console 统一诊断包入口。
+- Bundle format 1、manifest、条目 size 与 SHA-256。
+- Run/Event 允许列表与原始内容排除。
+- Provider、Tool、UNKNOWN 和 Runtime 确定性根因分类。
+- 已恢复中间失败与当前未恢复事故区分。
+- CLI 原子写入、默认不覆盖；HTTP `no-store`。
+- Wheel smoke 覆盖 CLI 与 HTTP 诊断包。
+
+### 当前边界
+
+- 不包含数据库、Artifact、宿主日志或原始错误文本。
+- 不提供自动上传、工单集成、加密或签名。
+- 不提供 CPU/RSS 等资源趋势。
+- 根因分类是规则系统，不是完整因果推理或模型诊断。
+
 ## v0.8：Sandbox、Tool Capability 与 Secret 安全
 
 - **状态**：📋 planned

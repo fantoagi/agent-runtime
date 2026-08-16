@@ -34,6 +34,12 @@ from .evals import (
     MemoryEvalRunner,
     WorkflowEvalRunner,
 )
+from .incident import (
+    FailureDiagnosis,
+    IncidentBundle,
+    IncidentDiagnosticsService,
+    IncidentReport,
+)
 from .observability import (
     MetricsSnapshot,
     ObservabilityService,
@@ -94,7 +100,11 @@ __all__ = [
     "EvalSuite",
     "ExactMatchEvaluator",
     "ExpectedStatusEvaluator",
+    "FailureDiagnosis",
     "IdempotencyConflict",
+    "IncidentBundle",
+    "IncidentDiagnosticsService",
+    "IncidentReport",
     "MemoryEvalRunner",
     "MemoryRecord",
     "MemoryScope",

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import textwrap
 import venv
+import zipfile
 from pathlib import Path
 from uuid import uuid4
 
@@ -90,8 +91,26 @@ def main() -> int:
             cwd=workspace,
         )
         diagnostics_payload = json.loads(diagnostics.stdout)
-        assert diagnostics_payload["version"] == "0.7.11", diagnostics_payload
+        assert diagnostics_payload["version"] == "0.7.12", diagnostics_payload
         assert diagnostics_payload["store"]["status"] == "ok", diagnostics_payload
+
+        incident = workspace / "incident.zip"
+        run(
+            [
+                str(cli),
+                "--workspace",
+                str(workspace),
+                "observe",
+                "incident-bundle",
+                "--output",
+                str(incident),
+            ],
+            cwd=workspace,
+        )
+        with zipfile.ZipFile(incident) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            assert manifest["runtime_version"] == "0.7.12", manifest
+            assert "diagnostics.json" in archive.namelist()
 
         backup = workspace / "runtime.agent-backup"
         run(
@@ -163,6 +182,10 @@ def main() -> int:
                     health = await client.get("/health")
                     health.raise_for_status()
                     assert health.json()["status"] == "ok"
+                    assert health.json()["version"] == "0.7.12"
+                    incident_bundle = await client.get("/observability/incident-bundle")
+                    incident_bundle.raise_for_status()
+                    assert incident_bundle.headers["content-type"].startswith("application/zip")
                     created = await client.post("/runs", json={"input": "8 * 8"})
                     created.raise_for_status()
                     run_id = created.json()["id"]

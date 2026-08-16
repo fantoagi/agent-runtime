@@ -11,6 +11,7 @@ from .backup import RuntimeBackupManager
 from .doctor import RuntimeDoctor
 from .domain import BackupError
 from .evals import EvalCase, EvalRunner, EvalSuite
+from .incident import IncidentDiagnosticsService
 from .observability import ObservabilityService
 from .sdk import (
     create_local_runtime,
@@ -80,6 +81,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     diagnostics.add_argument("--limit", type=int, default=1000)
     diagnostics.add_argument("--recent-failures", type=int, default=20)
+    incident_bundle = observe_subcommands.add_parser(
+        "incident-bundle",
+        help="Create a redacted support-safe diagnostic ZIP",
+    )
+    incident_bundle.add_argument("--output", default=None)
+    incident_bundle.add_argument("--run-id", default=None)
+    incident_bundle.add_argument("--limit", type=int, default=100)
+    incident_bundle.add_argument("--recent-failures", type=int, default=20)
+    incident_bundle.add_argument("--event-limit", type=int, default=5000)
+    incident_bundle.add_argument("--overwrite", action="store_true")
     trace = observe_subcommands.add_parser("trace", help="Show the trace for one run")
     trace.add_argument("run_id")
     trace_tree = observe_subcommands.add_parser(
@@ -306,6 +317,23 @@ async def async_main(arguments: argparse.Namespace) -> int:
                     recent_failure_limit=arguments.recent_failures,
                 ).to_dict()
             )
+            return 0
+        if arguments.observe_command == "incident-bundle":
+            incidents = IncidentDiagnosticsService(runtime)
+            output = (
+                Path(arguments.output).resolve()
+                if arguments.output
+                else Path.cwd() / incidents.suggested_filename()
+            )
+            bundle = incidents.create_bundle(
+                output,
+                run_id=arguments.run_id,
+                run_limit=arguments.limit,
+                recent_failure_limit=arguments.recent_failures,
+                event_limit=arguments.event_limit,
+                overwrite=arguments.overwrite,
+            )
+            _print(bundle.to_dict())
             return 0
         if arguments.observe_command == "trace":
             _print(observability.trace(arguments.run_id).to_dict())

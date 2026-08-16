@@ -7,6 +7,7 @@ from typing import Any
 
 from ..doctor import RuntimeDoctor
 from ..domain import AgentDefinition, MemoryScope, Message, ModelConfig, ToolCall, ToolDefinition
+from ..incident import IncidentDiagnosticsService
 from ..observability import ObservabilityService
 from ..orchestration import AggregationStrategy, ParallelWorkflow, SequentialWorkflow, WorkflowStep
 from ..providers import (
@@ -190,6 +191,9 @@ class LearningConsole:
         operational = observability.diagnostics(
             runtime, metrics_limit=1000, recent_failure_limit=5
         )
+        failure_analysis = IncidentDiagnosticsService(runtime).failure_analysis(
+            run_id=root_run_id, limit=5, run_limit=100
+        )
         acceptance = self._evaluate(
             scenario,
             root.to_dict(),
@@ -245,6 +249,7 @@ class LearningConsole:
                 ),
                 "doctor": doctor.to_dict(),
                 "diagnostics": operational.to_dict(),
+                "failure_analysis": [item.to_dict() for item in failure_analysis],
                 "unknown_tool_executions": sum(
                     item.status.value == "unknown" for item in executions
                 ),

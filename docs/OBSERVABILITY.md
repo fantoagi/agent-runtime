@@ -1,6 +1,6 @@
 # Agent Runtime 可观测性与运行诊断
 
-- **适用版本**：v0.7.11
+- **适用版本**：v0.7.12
 - **最近更新**：2026-08-16（Asia/Shanghai）
 - **适用范围**：单机 Runtime、CLI、FastAPI、Learning Console
 
@@ -151,3 +151,12 @@ Prometheus 输出增加对应 gauge。当前没有内置 HTTP 拉取鉴权、外
 - JSON 日志默认不启用，由 CLI `--json-logs` 或应用代码显式配置。
 - 没有日志滚动、保留、上传和远端 Collector；这些应由宿主进程或日志平台负责。
 - Learning Console 只展示诊断快照，不是生产监控平台。
+## 9. v0.7.12 故障诊断包
+
+综合诊断需要跨人员或跨任务分享时，不要直接发送 SQLite、Artifact 或完整 Event。使用：
+
+```powershell
+agent-runtime observe incident-bundle --output incident.zip
+```
+
+诊断包复用本页的 OperationalSnapshot，同时增加允许列表 Run/Event 摘要和确定性根因分类，并排除 Prompt、Tool 数据、Memory、Checkpoint、Artifact、数据库、本机数据路径和原始错误文本。详细格式和安全边界见 [INCIDENTS.md](./INCIDENTS.md)。
