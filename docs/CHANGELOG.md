@@ -25,7 +25,7 @@
   - `.github/workflows/nightly-reliability.yml`
   - `docs/OPERATIONS.md`
   - `docs/LEARNING.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`03cfae4`
 - **关联 ADR**：[ADR-0022](./adr/0022-runtime-backup-restore.md)
 
 ### 变更摘要
