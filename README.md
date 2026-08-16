@@ -19,6 +19,17 @@ agent-runtime demo "19 * 23"
 The demo uses a deterministic local provider. Set `OPENAI_API_KEY` and select the
 OpenAI-compatible provider in application code when connecting to a real model.
 
+## v0.7.11 Operational Observability & Diagnostics
+
+当前版本增加结构化 JSON 日志、Provider attempt/retry 持久化事件、Model/Tool p95、失败聚合和综合运行诊断：
+
+```powershell
+agent-runtime observe diagnostics
+agent-runtime --json-logs demo "19 * 23" 2> runtime.jsonl
+Invoke-RestMethod http://127.0.0.1:8000/observability/diagnostics
+```
+
+完整信号语义和排障顺序见 [可观测性与运行诊断指南](./docs/OBSERVABILITY.md)。
 ## v0.7.10 Operational Backup & Recovery
 
 当前版本提供 SQLite Online Backup、Artifact 归档、Manifest/SHA-256 校验、离线恢复与自动回滚副本：
@@ -179,6 +190,7 @@ The project treats documentation as part of the implementation contract:
 - [Evolution log](./docs/CHANGELOG.md): feature and architecture changes in reverse completion-time order.
 - [Architecture Decision Records](./docs/adr/README.md): why important public, data, reliability, or security decisions were made.
 - [Operations and disaster recovery](./docs/OPERATIONS.md): backup, verification, offline restore, rollback, and recovery drills.
+- [Observability and diagnostics](./docs/OBSERVABILITY.md): structured logs, p95, failure aggregation, and troubleshooting.
 - [Documentation workflow](./docs/README.md): Change IDs, templates, update rules, and quality gates.
 
 Every independently verifiable feature, fix, or architecture change should have a
@@ -194,6 +206,6 @@ boundaries must also add or update an ADR.
 - **Storage**: SQLite schema v8 for runs, relations, sessions, memories, AgentDefinition snapshots, event log, checkpoints, FTS5, file-backed artifacts, and verified backup archives.
 - **Orchestration**: AgentRegistry, RunRelation, sequential/parallel workflows, aggregation, timeout, cancellation propagation, and idempotent recovery.
 - **Context and memory**: ContextBuilder, Session, scoped MemoryStore search, lifecycle, provenance, and large Tool Result artifactization.
-- **Observability**: per-Run trace, Parent/Child trace tree, and metrics derived from persisted runs/events/relations, with JSON and Prometheus outputs.
+- **Observability**: per-Run trace, Parent/Child trace tree, p95/failure metrics, operational diagnostics, and bounded structured JSON logs.
 - **Evals**: deterministic suites that execute through the real Runtime path and persist reports.
 - **Interfaces**: Python SDK, CLI, FastAPI/SSE, and a local Learning Console; the core has no UI dependency.

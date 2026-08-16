@@ -19,6 +19,7 @@ from .sdk import (
     demo_agent,
     multi_agent_demo_workflow,
 )
+from .telemetry import configure_structured_logging
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--state-dir",
         default=None,
         help="Runtime state directory (default: <workspace>/.agent-runtime)",
+    )
+    parser.add_argument(
+        "--json-logs",
+        action="store_true",
+        help="Emit bounded structured Runtime logs as JSON lines on stderr",
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
@@ -69,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     observe_subcommands = observe.add_subparsers(dest="observe_command", required=True)
     metrics = observe_subcommands.add_parser("metrics", help="Show a JSON metrics snapshot")
     metrics.add_argument("--limit", type=int, default=1000)
+    diagnostics = observe_subcommands.add_parser(
+        "diagnostics", help="Show runtime, process, SQLite, metrics, and recent failures"
+    )
+    diagnostics.add_argument("--limit", type=int, default=1000)
+    diagnostics.add_argument("--recent-failures", type=int, default=20)
     trace = observe_subcommands.add_parser("trace", help="Show the trace for one run")
     trace.add_argument("run_id")
     trace_tree = observe_subcommands.add_parser(
@@ -155,6 +166,9 @@ def _runtime_state_paths(arguments: argparse.Namespace) -> tuple[Path, Path, Pat
 
 
 async def async_main(arguments: argparse.Namespace) -> int:
+    if arguments.json_logs:
+        configure_structured_logging()
+
     if arguments.command == "backup":
         state_dir, database_path, artifact_path = _runtime_state_paths(arguments)
         manager = RuntimeBackupManager(database_path, artifact_path)
@@ -283,6 +297,15 @@ async def async_main(arguments: argparse.Namespace) -> int:
         observability = ObservabilityService(runtime.store)
         if arguments.observe_command == "metrics":
             _print(observability.metrics(limit=arguments.limit).to_dict())
+            return 0
+        if arguments.observe_command == "diagnostics":
+            _print(
+                observability.diagnostics(
+                    runtime,
+                    metrics_limit=arguments.limit,
+                    recent_failure_limit=arguments.recent_failures,
+                ).to_dict()
+            )
             return 0
         if arguments.observe_command == "trace":
             _print(observability.trace(arguments.run_id).to_dict())

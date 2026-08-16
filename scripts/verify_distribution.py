@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
+import sys
 import textwrap
 import venv
 from pathlib import Path
@@ -16,6 +18,25 @@ from uuid import uuid4
 def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(command), flush=True)
     subprocess.run(command, cwd=cwd, env=env, check=True)
+
+
+def run_capture(
+    command: list[str], *, cwd: Path, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    print("+", " ".join(command), flush=True)
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        env=env,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    if completed.stdout:
+        print(completed.stdout, end="")
+    if completed.stderr:
+        print(completed.stderr, end="", file=sys.stderr)
+    return completed
 
 
 def main() -> int:
@@ -44,7 +65,34 @@ def main() -> int:
         cli = scripts / ("agent-runtime.exe" if os.name == "nt" else "agent-runtime")
         run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=workspace)
         run([str(python), "-m", "pip", "install", f"{wheel}[api]"], cwd=workspace)
-        run([str(cli), "--workspace", str(workspace), "demo", "19 * 23"], cwd=workspace)
+        demo = run_capture(
+            [
+                str(cli),
+                "--workspace",
+                str(workspace),
+                "--json-logs",
+                "demo",
+                "19 * 23",
+            ],
+            cwd=workspace,
+        )
+        assert '"event":"runtime.started"' in demo.stderr.replace(" ", "")
+        assert '"event":"run.execution.finished"' in demo.stderr.replace(" ", "")
+
+        diagnostics = run_capture(
+            [
+                str(cli),
+                "--workspace",
+                str(workspace),
+                "observe",
+                "diagnostics",
+            ],
+            cwd=workspace,
+        )
+        diagnostics_payload = json.loads(diagnostics.stdout)
+        assert diagnostics_payload["version"] == "0.7.11", diagnostics_payload
+        assert diagnostics_payload["store"]["status"] == "ok", diagnostics_payload
+
         backup = workspace / "runtime.agent-backup"
         run(
             [

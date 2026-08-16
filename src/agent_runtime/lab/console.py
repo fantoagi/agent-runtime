@@ -187,6 +187,9 @@ class LearningConsole:
         trace = observability.trace(root_run_id)
         trace_tree = observability.trace_tree(root_run_id)
         metrics = observability.metrics(limit=1000)
+        operational = observability.diagnostics(
+            runtime, metrics_limit=1000, recent_failure_limit=5
+        )
         acceptance = self._evaluate(
             scenario,
             root.to_dict(),
@@ -241,6 +244,7 @@ class LearningConsole:
                     else "healthy"
                 ),
                 "doctor": doctor.to_dict(),
+                "diagnostics": operational.to_dict(),
                 "unknown_tool_executions": sum(
                     item.status.value == "unknown" for item in executions
                 ),

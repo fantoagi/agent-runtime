@@ -618,8 +618,14 @@ function renderSqliteInspector() {
   const doctor = reliability.doctor || {};
   const capacity = reliability.capacity || {};
   const backup = reliability.backup || {};
+  const diagnostics = reliability.diagnostics || {};
+  const process = diagnostics.process || {};
+  const diagnosticMetrics = diagnostics.metrics || {};
+  const durations = diagnosticMetrics.duration_ms || {};
+  const failures = diagnosticMetrics.failures || {};
   return `
-    <section class="detail-block"><span class="detail-label">RELIABILITY STATUS</span><div class="kv-grid">${kv("Run", reliability.run_health)}${kv("Runtime 接受请求", reliability.runtime_accepting ? "yes" : "no")}${kv("活动任务", `${capacity.active_tasks ?? 0} / ${capacity.max_inflight_runs ?? "-"}`)}${kv("模型并发上限", capacity.max_concurrent_model_requests ?? "-")}${kv("SQLite", sqlite.status)}${kv("UNKNOWN Tool", reliability.unknown_tool_executions ?? 0)}${kv("Doctor", doctor.status || "unknown")}${kv("Backup format", backup.format_version ?? "-")}${kv("Restore", backup.restore_requires_shutdown ? "offline only" : "unknown")}</div><p>${escapeHtml(reliability.guidance || "")}</p></section>
+    <section class="detail-block"><span class="detail-label">RELIABILITY STATUS</span><div class="kv-grid">${kv("Run", reliability.run_health)}${kv("Runtime 接受请求", reliability.runtime_accepting ? "yes" : "no")}${kv("活动任务", `${capacity.active_tasks ?? 0} / ${capacity.max_inflight_runs ?? "-"}`)}${kv("模型并发上限", capacity.max_concurrent_model_requests ?? "-")}${kv("SQLite", sqlite.status)}${kv("UNKNOWN Tool", reliability.unknown_tool_executions ?? 0)}${kv("Doctor", doctor.status || "unknown")}${kv("Diagnostics", diagnostics.status || "unknown")}${kv("Backup format", backup.format_version ?? "-")}${kv("Restore", backup.restore_requires_shutdown ? "offline only" : "unknown")}</div><p>${escapeHtml(reliability.guidance || "")}</p></section>
+    <section class="detail-block"><span class="detail-label">OPERATIONAL DIAGNOSTICS</span><div class="kv-grid">${kv("PID", process.pid ?? "-")}${kv("Threads", process.thread_count ?? "-")}${kv("Async tasks", process.asyncio_task_count ?? "-")}${kv("Run p95", `${durations.run_p95 ?? 0} ms`)}${kv("Model p95", `${durations.model_p95 ?? 0} ms`)}${kv("Tool p95", `${durations.tool_p95 ?? 0} ms`)}${kv("Provider failures", failures.provider_attempts ?? 0)}${kv("Provider retries", failures.provider_retries ?? 0)}</div><p>????? Runtime ??????????SQLite?Doctor??????????????????????? JSON ?????????????????</p></section>
     <section class="detail-block"><span class="detail-label">PERSISTENCE SOURCE</span><pre class="json-view">${escapeHtml(persistence.database)}</pre></section>
     <section class="detail-block"><span class="detail-label">SCHEMA VERSION</span><div class="kv-grid">${kv("Migration", persistence.schema_version)}${kv("Journal", sqlite.journal_mode)}${kv("事实来源", "SQLite")}</div></section>
     <section class="detail-block"><span class="detail-label">本次 RUN 相关记录</span><div class="kv-grid">${Object.entries(persistence.tables).map(([key, value]) => kv(key, value)).join("")}</div></section>

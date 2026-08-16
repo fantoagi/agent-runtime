@@ -26,6 +26,7 @@ REQUIRED_FILES = (
     "docs/MULTI_AGENT.md",
     "docs/CONTEXT_MEMORY.md",
     "docs/OPERATIONS.md",
+    "docs/OBSERVABILITY.md",
     "docs/adr/README.md",
     "docs/templates/change-entry.md",
     "docs/templates/adr.md",
@@ -42,6 +43,7 @@ CORE_PATHS = {
     "src/agent_runtime/context.py",
     "src/agent_runtime/memory.py",
     "src/agent_runtime/observability.py",
+    "src/agent_runtime/telemetry.py",
     "src/agent_runtime/evals.py",
 }
 

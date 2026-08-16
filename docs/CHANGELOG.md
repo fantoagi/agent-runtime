@@ -4,6 +4,64 @@
 
 ---
 
+<a id="e2026-08-16-002"></a>
+## E2026-08-16-002：v0.7.11 结构化日志与综合运行诊断
+
+- **完成时间**：2026-08-16
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/tools.py`
+  - `src/agent_runtime/observability.py`
+  - `src/agent_runtime/telemetry.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/lab/console.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/lab/static/app.js`
+  - `tests/test_observability.py`
+  - `tests/test_telemetry.py`
+  - `tests/test_api.py`
+  - `tests/test_lab_api.py`
+  - `docs/OBSERVABILITY.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0023](./adr/0023-operational-observability.md)
+
+### 变更摘要
+
+在不增加 Agent 能力和外部监控依赖的前提下，将 Runtime 生命周期、容量、进程资源、SQLite、Doctor、持久化 Metrics 与最近失败汇总为统一诊断快照，并增加显式启用、自动脱敏和有界输出的 JSON Lines 结构化日志。
+
+### 系统架构
+
+保持 SQLite durable facts 与进程级 transient signals 分层：Run、Event、Checkpoint、ToolExecution 和 Approval 继续承担恢复与审计；Runtime 启停、进程 PID、线程数和 asyncio Task 数通过日志和 `OperationalSnapshot` 暴露。Provider attempt 失败与重试决策会影响 Run 解释，因此新增 durable `model.attempt.failed` 和 `model.retry.scheduled` Event。
+
+### 实现方式
+
+`ObservabilityService.diagnostics()` 聚合 `Runtime.lifecycle_snapshot()`、Tool executor 容量、进程采样、SQLite health、Runtime Doctor、扩展 Metrics 与最近失败。Metrics 增加 Model/Tool p95、Provider attempt failure/retry、Tool failure、UNKNOWN 和失败分类。`StructuredLogFormatter` 输出单行 JSON，对常见凭据字段脱敏，并限制字符串长度和嵌套深度；CLI 通过 `--json-logs` 显式启用。
+
+### 当前功能
+
+支持 CLI `observe diagnostics`、HTTP `GET /observability/diagnostics`、Python `configure_structured_logging()`、Prometheus 新增失败和 p95 指标，以及 Learning Console Operational Diagnostics 面板。API 和 `/health` 使用统一 `__version__`，避免适配层版本漂移。
+
+### 已知限制
+
+当前进程采样只包含 PID、线程和 asyncio Task，不包含 CPU、RSS、句柄、磁盘与网络；Metrics 按最近 N 个 Run 派生而非严格时间窗口；日志滚动、保留、上传和 Collector 由宿主环境负责；Learning Console 仍不是生产监控平台。
+
+### 测试与验收
+
+```powershell
+python -m pytest
+agent-runtime observe diagnostics
+agent-runtime --json-logs demo "19 * 23" 2> runtime.jsonl
+Invoke-RestMethod http://127.0.0.1:8000/observability/diagnostics
+python scripts/check_coverage.py coverage.json
+```
+
+### 后续计划
+
+先通过 Nightly 和真实本地运行观察失败分类、p95 与资源计数是否稳定，再决定是否引入时间窗口指标、CPU/RSS 采样或 OpenTelemetry Exporter；在 v0.7.x 可靠性结论明确前继续后置 v0.8。
 <a id="e2026-08-16-001"></a>
 ## E2026-08-16-001：v0.7.10 在线备份、校验与灾难恢复演练
 

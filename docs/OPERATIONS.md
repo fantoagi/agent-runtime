@@ -1,6 +1,6 @@
-﻿# Agent Runtime 运行与灾难恢复手册
+# Agent Runtime 运行与灾难恢复手册
 
-- **适用版本**：v0.7.10
+- **适用版本**：v0.7.11
 - **最近更新**：2026-08-16（Asia/Shanghai）
 - **适用范围**：单机、单用户、SQLite、默认 Artifact Store
 
@@ -145,7 +145,7 @@ python scripts/run_backup_recovery.py
 
 1. 不要删除原数据库、WAL 或 SHM。
 2. 复制整个状态目录作为故障现场。
-3. 运行 `agent-runtime doctor --json`。
+3. 运行 `agent-runtime observe diagnostics` 与 `agent-runtime doctor --json`。
 4. 校验最近备份。
 5. 停止 Runtime 后执行恢复。
 

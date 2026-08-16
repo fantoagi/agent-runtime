@@ -1,8 +1,8 @@
 # Agent Runtime 当前架构
 
 > 最近更新：2026-08-16
-> 关联记录：[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
-> 关联决策：[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
+> 关联记录：[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
+> 关联决策：[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
 
 ## 1. 系统目标和边界
 
@@ -339,7 +339,7 @@ v0.4 起，SSE 仍然只有一个事件流协议；客户端根据 `type` 区分
 
 - `RunTrace`：包含一个 Run root span，以及 Model、Tool、Approval 子 span。
 - `TraceTree`：使用 `RunRelation` 将多个独立 RunTrace 组合为 Parent/Child 树。
-- `MetricsSnapshot`：包含 Run 状态分布、Root/Child/Workflow/Delegation 计数、Session/Memory 数量、Memory Search、Context Compaction、事件计数、模型/工具/审批次数、token usage、平均延迟和 p95 Run 延迟。
+- `MetricsSnapshot`：包含 Run 状态分布、Root/Child/Workflow/Delegation 计数、Session/Memory 数量、Memory Search、Context Compaction、事件计数、模型/工具/审批次数、token usage、Run/Model/Tool 平均与 p95 延迟，以及 Provider/Tool/UNKNOWN 失败分类。
 - Prometheus 文本：通过固定 `agent_runtime_*` 指标名称导出。
 
 每个新 Run 的 metadata 自动包含 `trace_id`。Trace Span 使用事件 sequence 和 timestamp 构造，因此可以回溯到原始事件，但当前没有修改 SQLite Event schema，也没有依赖 OpenTelemetry SDK。
@@ -394,7 +394,34 @@ Root 事件实时通知复用 `/runs/{run_id}/events/stream`。因为 Child Run 
 > 最近更新：2026-08-16
 > 关联记录：[E2026-08-15-003](./CHANGELOG.md#e2026-08-15-003)
 > 关联决策：[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)、[ADR-0009](./adr/0009-learning-console.md)
-## 9.5 Reliability、生命周期与发布门禁
+## 9.5 Operational Observability 与结构化日志
+
+v0.7.11 将已有 Trace、Metrics、Runtime Doctor 和当前进程采样组合为 `OperationalSnapshot`，同时保持 durable facts 与 transient signals 分层：
+
+- `Runtime.lifecycle_snapshot()`：状态、启动时间、uptime、活动任务和配置上限。
+- `ToolRegistry.capacity_snapshot()`：同步 Tool worker、pending 上限与当前未完成 future。
+- `ObservabilityService.diagnostics()`：合并 Runtime、Tool、PID、线程、asyncio Task、SQLite health、Doctor、Metrics 和最近失败。
+- `StructuredLogFormatter`：输出 JSON Lines，对常见凭据字段脱敏，并限制字符串长度与嵌套深度。
+- CLI `observe diagnostics` 与 HTTP `/observability/diagnostics`：提供相同诊断模型。
+
+```mermaid
+flowchart LR
+    Facts["SQLite Durable Facts"] --> Metrics["Trace / Metrics / Recent Failures"]
+    Runtime["Runtime Lifecycle + Capacity"] --> Snapshot["OperationalSnapshot"]
+    Process["PID / Threads / Asyncio Tasks"] --> Snapshot
+    Doctor["Runtime Doctor"] --> Snapshot
+    Metrics --> Snapshot
+    Snapshot --> CLI["CLI observe diagnostics"]
+    Snapshot --> API["GET /observability/diagnostics"]
+    Runtime --> Logs["Structured JSON Logs"]
+```
+
+Provider attempt 失败和重试决定会改变一次 Run 的执行解释，因此 `model.attempt.failed` 与 `model.retry.scheduled` 进入 durable Event Log。Runtime 启停、PID、线程和 Task 数属于进程级信号，不占用 Run Event sequence。结构化日志默认关闭，不修改 root logger；CLI 通过 `--json-logs` 显式启用，Python 应用通过 `configure_structured_logging()` 配置。
+
+> 最近更新：2026-08-16
+> 关联记录：[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)
+> 关联决策：[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0008](./adr/0008-observability-evals.md)
+## 9.6 Reliability、生命周期与发布门禁
 
 - `shutdown(timeout_seconds=30, cancel_running=False)` 先停止接收新工作，再排空任务；超时后协作取消，不能确认的副作用 Tool 保持 `UNKNOWN`。
 - `async with Runtime(...)` 自动执行相同关闭流程，重复关闭幂等。
@@ -413,8 +440,8 @@ flowchart TD
     Close --> Closed["Closed (idempotent)"]
 ```
 
-PR 执行静态检查、126 项测试、覆盖率、20 并发和 Wheel smoke；Nightly 执行 100 并发、故障测试重复、30 分钟 soak 和性能检查。
-## 9.6 Runtime Doctor 与 Crash Recovery Matrix
+PR 执行静态检查、189 项测试、覆盖率、20 并发和 Wheel smoke；Nightly 执行 100 并发、故障测试重复、30 分钟 soak 和性能检查。
+## 9.7 Runtime Doctor 与 Crash Recovery Matrix
 
 `RuntimeDoctor` 是只读诊断层，不修改 SQLite。它检查 quick_check、schema、foreign_keys、非终态 Run、UNKNOWN/Running ToolExecution、Pending Approval、Event sequence、孤儿记录和 Workflow snapshot。CLI 使用 `agent-runtime doctor`，HTTP 使用 `GET /doctor`。
 
@@ -431,7 +458,7 @@ flowchart LR
     Resume --> Verify["Verify terminal state and no duplicate side effect"]
 ```
 
-## 9.7 Backup CLI 与恢复门禁
+## 9.8 Backup CLI 与恢复门禁
 
 CLI 提供：
 

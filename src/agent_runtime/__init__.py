@@ -37,6 +37,8 @@ from .evals import (
 from .observability import (
     MetricsSnapshot,
     ObservabilityService,
+    OperationalFailure,
+    OperationalSnapshot,
     RunTrace,
     TraceSpan,
     TraceTree,
@@ -65,7 +67,9 @@ from .sdk import (
     memory_demo_agent,
     multi_agent_demo_workflow,
 )
+from .telemetry import StructuredLogFormatter, configure_structured_logging
 from .tools import ToolRegistry
+from .version import __version__
 
 __all__ = [
     "AgentDefinition",
@@ -101,6 +105,8 @@ __all__ = [
     "ModelTokenDelta",
     "ObservabilityService",
     "OpenAICompatibleProvider",
+    "OperationalFailure",
+    "OperationalSnapshot",
     "ParallelWorkflow",
     "RestoreResult",
     "RunRelation",
@@ -116,6 +122,7 @@ __all__ = [
     "SequentialWorkflow",
     "Session",
     "StreamingModelProvider",
+    "StructuredLogFormatter",
     "ToolCallDelta",
     "ToolDefinition",
     "ToolRegistry",
@@ -126,6 +133,8 @@ __all__ = [
     "WorkflowEvalRunner",
     "WorkflowExecution",
     "WorkflowStep",
+    "__version__",
+    "configure_structured_logging",
     "create_memory_demo_runtime",
     "create_multi_agent_demo_runtime",
     "memory_demo_agent",

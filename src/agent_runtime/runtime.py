@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import random
 import time
 from collections.abc import AsyncIterator
@@ -54,6 +55,9 @@ from .providers import (
 )
 from .storage import ArtifactStore, SQLiteStore
 from .tools import CancellationToken, ToolContext, ToolRegistry
+
+_LOGGER = logging.getLogger("agent_runtime.runtime")
+
 
 if TYPE_CHECKING:
     from .orchestration import WorkflowExecution
@@ -160,7 +164,15 @@ class Runtime:
         self._closed = False
         self._shutdown_run_ids: set[str] = set()
         self._pause_run_ids: set[str] = set()
+        self._started_at = utc_now()
+        self._started_monotonic = time.monotonic()
         self._reconcile_incomplete_runs()
+        self._log_operation(
+            logging.INFO,
+            "runtime.started",
+            database_path=str(self.config.database_path),
+            artifact_path=str(self.config.artifact_path),
+        )
 
     @property
     def is_accepting(self) -> bool:
@@ -175,6 +187,19 @@ class Runtime:
             "active_tasks": self.active_task_count,
             "max_inflight_runs": self.config.max_inflight_runs,
             "max_concurrent_model_requests": self.config.max_concurrent_model_requests,
+        }
+
+    def lifecycle_snapshot(self) -> dict[str, Any]:
+        state = "closed" if self._closed else "closing" if self._closing else "accepting"
+        return {
+            "state": state,
+            "accepting": self.is_accepting,
+            "started_at": self._started_at.isoformat(),
+            "uptime_seconds": round(
+                max(0.0, time.monotonic() - self._started_monotonic), 3
+            ),
+            "capacity": self.capacity_snapshot(),
+            "tools": self.tools.capacity_snapshot(),
         }
 
     async def __aenter__(self) -> Runtime:
@@ -221,6 +246,12 @@ class Runtime:
         if self._closed:
             return
         self._closing = True
+        self._log_operation(
+            logging.INFO,
+            "runtime.shutdown.started",
+            active_tasks=self.active_task_count,
+            cancel_running=cancel_running,
+        )
         timeout = self.config.shutdown_timeout_seconds if timeout_seconds is None else timeout_seconds
         deadline = time.monotonic() + max(0.0, timeout)
         tasks = {run_id: task for run_id, task in self._tasks.items() if not task.done()}
@@ -256,6 +287,7 @@ class Runtime:
         if self._owns_store:
             self.store.close()
         self._closed = True
+        self._log_operation(logging.INFO, "runtime.shutdown.completed")
 
     def register_agent(self, agent: AgentDefinition) -> None:
         self.agent_registry.register(agent)
@@ -403,6 +435,12 @@ class Runtime:
         if normalized_key is not None:
             existing = self.store.idempotent_run(normalized_key, fingerprint)
             if existing is not None:
+                self._log_operation(
+                    logging.INFO,
+                    "run.submission.replayed",
+                    run_id=existing.id,
+                    agent_name=existing.agent_name,
+                )
                 return RunSubmission(existing, True)
         agent_checksum = self.store.save_agent_definition(definition)
         run_metadata = dict(requested_metadata)
@@ -425,6 +463,13 @@ class Runtime:
                 event_payload,
                 session_id=str(session_id) if session_id is not None else None,
             )
+            self._log_operation(
+                logging.INFO,
+                "run.submitted",
+                run_id=run.id,
+                agent_name=run.agent_name,
+                idempotent=False,
+            )
             return RunSubmission(run, False)
         durable_run, replayed = self.store.create_run_idempotently(
             run,
@@ -433,6 +478,13 @@ class Runtime:
             idempotency_key=normalized_key,
             request_fingerprint=fingerprint,
             session_id=str(session_id) if session_id is not None else None,
+        )
+        self._log_operation(
+            logging.INFO,
+            "run.submission.replayed" if replayed else "run.submitted",
+            run_id=durable_run.id,
+            agent_name=durable_run.agent_name,
+            idempotent=True,
         )
         return RunSubmission(durable_run, replayed)
 
@@ -1222,6 +1274,23 @@ class Runtime:
                 )
             return run
         finally:
+            completed_run = self.store.get_run(run_id)
+            self._log_operation(
+                logging.ERROR if completed_run.status is RunStatus.FAILED else logging.INFO,
+                "run.execution.finished",
+                run_id=completed_run.id,
+                agent_name=completed_run.agent_name,
+                status=completed_run.status.value,
+                duration_ms=round(
+                    max(
+                        0.0,
+                        (completed_run.updated_at - completed_run.created_at).total_seconds()
+                        * 1000,
+                    ),
+                    3,
+                ),
+                has_error=completed_run.error is not None,
+            )
             self._tasks.pop(run_id, None)
             self._cancellation_tokens.pop(run_id, None)
             self._shutdown_run_ids.discard(run_id)
@@ -1591,13 +1660,37 @@ class Runtime:
                 raise
             except Exception as error:
                 last_error = error
+                retryable = not isinstance(error, ProviderError) or error.retryable
+                failure_payload: dict[str, Any] = {
+                    "step": step_index,
+                    "attempt": attempt + 1,
+                    "max_attempts": self.config.max_model_retries + 1,
+                    "error": str(error),
+                    "error_type": type(error).__name__,
+                    "retryable": retryable,
+                }
+                if isinstance(error, ProviderHTTPError):
+                    failure_payload["status_code"] = error.status_code
+                self._event(run.id, "model.attempt.failed", failure_payload)
+                self._log_operation(
+                    logging.WARNING,
+                    "model.attempt.failed",
+                    run_id=run.id,
+                    step=step_index,
+                    attempt=attempt + 1,
+                    max_attempts=self.config.max_model_retries + 1,
+                    error_type=type(error).__name__,
+                    retryable=retryable,
+                    status_code=(
+                        error.status_code if isinstance(error, ProviderHTTPError) else None
+                    ),
+                )
                 if callable(getattr(self.provider, "stream", None)):
                     self._event(
                         run.id,
                         "model.stream.failed",
                         {"step": step_index, "attempt": attempt + 1, "error": str(error)},
                     )
-                retryable = not isinstance(error, ProviderError) or error.retryable
                 if attempt >= self.config.max_model_retries or not retryable:
                     break
                 retry_after = (
@@ -1606,7 +1699,17 @@ class Runtime:
                     else None
                 )
                 delay = retry_after if retry_after is not None else 0.25 * (2**attempt)
-                await asyncio.sleep(delay + random.uniform(0.0, min(0.25, delay * 0.2)))
+                sleep_seconds = delay + random.uniform(0.0, min(0.25, delay * 0.2))
+                self._event(
+                    run.id,
+                    "model.retry.scheduled",
+                    {
+                        "step": step_index,
+                        "next_attempt": attempt + 2,
+                        "delay_seconds": round(sleep_seconds, 3),
+                    },
+                )
+                await asyncio.sleep(sleep_seconds)
         assert last_error is not None
         raise last_error
 
@@ -1841,6 +1944,14 @@ class Runtime:
         payload: dict[str, Any] | None = None,
     ) -> None:
         self.store.append_event(run_id, event_type, payload)
+
+    @staticmethod
+    def _log_operation(level: int, event: str, **context: Any) -> None:
+        _LOGGER.log(
+            level,
+            event,
+            extra={"runtime_event": event, "runtime_context": context},
+        )
 
     def _resolve_agent(
         self, agent: AgentDefinition | str

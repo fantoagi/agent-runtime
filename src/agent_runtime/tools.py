@@ -100,6 +100,16 @@ class ToolRegistry:
         self._sync_futures: set[asyncio.Future[Any]] = set()
         self._closed = False
 
+    def capacity_snapshot(self) -> dict[str, int | bool]:
+        return {
+            "closed": self._closed,
+            "pending_sync_tools": sum(
+                1 for future in self._sync_futures if not future.done()
+            ),
+            "max_sync_workers": self._max_sync_workers,
+            "max_pending_sync_tools": self._max_pending_sync_tools,
+        }
+
     def configure_execution(self, *, max_sync_workers: int, max_pending_sync_tools: int) -> None:
         if self._executor is not None:
             if (

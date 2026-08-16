@@ -24,6 +24,7 @@ from ..domain import (
 from ..observability import ObservabilityService
 from ..runtime import Runtime
 from ..sdk import create_local_runtime, demo_agent
+from ..version import __version__
 
 try:
     from fastapi import FastAPI, HTTPException, Query, Request, Response, status
@@ -159,7 +160,7 @@ def create_app(
 
     app = FastAPI(
         title="Agent Runtime API",
-        version="0.7.9",
+        version=__version__,
         description="HTTP and SSE adapter for the durable Agent Runtime kernel.",
         lifespan=lifespan,
     )
@@ -296,7 +297,7 @@ def create_app(
         return {
             "status": "ok",
             "runtime": "agent-runtime",
-            "version": "0.7.9",
+            "version": __version__,
             "store": store,
             "capacity": runtime.capacity_snapshot(),
         }
@@ -376,6 +377,17 @@ def create_app(
     @app.get("/observability/metrics")
     async def observability_metrics(limit: int = Query(1000, ge=1, le=10000)) -> dict[str, Any]:
         return ObservabilityService(runtime.store).metrics(limit=limit).to_dict()
+
+    @app.get("/observability/diagnostics")
+    async def observability_diagnostics(
+        limit: int = Query(1000, ge=1, le=10000),
+        recent_failure_limit: int = Query(20, ge=0, le=100),
+    ) -> dict[str, Any]:
+        return ObservabilityService(runtime.store).diagnostics(
+            runtime,
+            metrics_limit=limit,
+            recent_failure_limit=recent_failure_limit,
+        ).to_dict()
 
     @app.get("/observability/metrics/prometheus")
     async def prometheus_metrics(

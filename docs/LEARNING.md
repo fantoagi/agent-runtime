@@ -294,7 +294,7 @@ Learning Console 测试覆盖：9 个场景目录、真实 Runtime、Approval、
 
 ## v0.7.7：如何学习崩溃恢复和 Doctor
 
-Learning Console 的 SQLite Inspector 会显示 `Doctor` 状态和 UNKNOWN 数量。它只展示持久化事实，不会替你自动修复。建议同时在终端运行：
+Learning Console 的 SQLite Inspector 会显示 `Doctor`、`Diagnostics`、PID、线程、asyncio Task、p95、Provider failure/retry 和 UNKNOWN 数量。它只展示持久化事实，不会替你自动修复。建议同时在终端运行：
 
 ```powershell
 agent-runtime doctor --json

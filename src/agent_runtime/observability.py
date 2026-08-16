@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import math
+import os
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
+from .doctor import RuntimeDoctor
 from .domain import AgentRun, RunRelation, RuntimeEvent, utc_now
 from .storage import SQLiteStore
+from .version import __version__
+
+if TYPE_CHECKING:
+    from .runtime import Runtime
 
 
 @dataclass(slots=True)
@@ -122,7 +130,14 @@ class MetricsSnapshot:
     run_duration_ms_average: float
     run_duration_ms_p95: float
     model_duration_ms_average: float
+    model_duration_ms_p95: float
     tool_duration_ms_average: float
+    tool_duration_ms_p95: float
+    failures_by_type: dict[str, int]
+    provider_attempt_failures: int
+    provider_retries: int
+    tool_failures: int
+    unknown_tool_outcomes: int
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -158,7 +173,16 @@ class MetricsSnapshot:
                 "run_average": self.run_duration_ms_average,
                 "run_p95": self.run_duration_ms_p95,
                 "model_average": self.model_duration_ms_average,
+                "model_p95": self.model_duration_ms_p95,
                 "tool_average": self.tool_duration_ms_average,
+                "tool_p95": self.tool_duration_ms_p95,
+            },
+            "failures": {
+                "by_type": self.failures_by_type,
+                "provider_attempts": self.provider_attempt_failures,
+                "provider_retries": self.provider_retries,
+                "tool_failures": self.tool_failures,
+                "unknown_tool_outcomes": self.unknown_tool_outcomes,
             },
         }
 
@@ -199,10 +223,68 @@ class MetricsSnapshot:
                 f"agent_runtime_run_duration_ms_average {self.run_duration_ms_average}",
                 f"agent_runtime_run_duration_ms_p95 {self.run_duration_ms_p95}",
                 f"agent_runtime_model_duration_ms_average {self.model_duration_ms_average}",
+                f"agent_runtime_model_duration_ms_p95 {self.model_duration_ms_p95}",
                 f"agent_runtime_tool_duration_ms_average {self.tool_duration_ms_average}",
+                f"agent_runtime_tool_duration_ms_p95 {self.tool_duration_ms_p95}",
+                f"agent_runtime_provider_attempt_failures_total {self.provider_attempt_failures}",
+                f"agent_runtime_provider_retries_total {self.provider_retries}",
+                f"agent_runtime_tool_failures_total {self.tool_failures}",
+                f"agent_runtime_tool_unknown_outcomes_total {self.unknown_tool_outcomes}",
             ]
         )
+        for failure_type, value in sorted(self.failures_by_type.items()):
+            lines.append(
+                f'agent_runtime_failures_total{{type="{failure_type}"}} {value}'
+            )
         return "\n".join(lines) + "\n"
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalFailure:
+    run_id: str
+    event_type: str
+    timestamp: datetime
+    error: str
+    error_type: str | None
+    retryable: bool | None
+    attributes: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "event_type": self.event_type,
+            "timestamp": self.timestamp.isoformat(),
+            "error": self.error,
+            "error_type": self.error_type,
+            "retryable": self.retryable,
+            "attributes": self.attributes,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalSnapshot:
+    status: Literal["ok", "attention_required", "unhealthy"]
+    generated_at: datetime
+    version: str
+    runtime: dict[str, Any]
+    process: dict[str, Any]
+    store: dict[str, Any]
+    doctor: dict[str, Any]
+    metrics: MetricsSnapshot
+    recent_failures: tuple[OperationalFailure, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "generated_at": self.generated_at.isoformat(),
+            "version": self.version,
+            "runtime": self.runtime,
+            "process": self.process,
+            "store": self.store,
+            "doctor": self.doctor,
+            "metrics": self.metrics.to_dict(),
+            "recent_failures": [item.to_dict() for item in self.recent_failures],
+        }
 
 
 class ObservabilityService:
@@ -266,6 +348,7 @@ class ObservabilityService:
         workflow_runs = sum(run.metadata.get("run_kind") == "workflow" for run in runs)
         root_runs = len(runs) - child_runs
         event_counts: Counter[str] = Counter()
+        failure_counts: Counter[str] = Counter()
         run_durations: list[float] = []
         model_durations: list[float] = []
         tool_durations: list[float] = []
@@ -285,6 +368,9 @@ class ObservabilityService:
                     tool_durations.append(span.duration_ms)
             for event in trace.events:
                 event_counts[event.type] += 1
+                failure_type = _failure_type(event)
+                if failure_type is not None:
+                    failure_counts[failure_type] += 1
                 if event.type == "model.completed":
                     usage = event.payload.get("usage") or {}
                     prompt_tokens += _usage_value(usage, "prompt_tokens", "input_tokens")
@@ -322,7 +408,82 @@ class ObservabilityService:
             run_duration_ms_average=_average(run_durations),
             run_duration_ms_p95=_percentile(run_durations, 0.95),
             model_duration_ms_average=_average(model_durations),
+            model_duration_ms_p95=_percentile(model_durations, 0.95),
             tool_duration_ms_average=_average(tool_durations),
+            tool_duration_ms_p95=_percentile(tool_durations, 0.95),
+            failures_by_type=dict(sorted(failure_counts.items())),
+            provider_attempt_failures=event_counts["model.attempt.failed"],
+            provider_retries=event_counts["model.retry.scheduled"],
+            tool_failures=event_counts["tool.failed"],
+            unknown_tool_outcomes=event_counts["tool.outcome_unknown"],
+        )
+
+    def recent_failures(
+        self, *, limit: int = 20, run_limit: int = 1000
+    ) -> tuple[OperationalFailure, ...]:
+        failures: list[OperationalFailure] = []
+        for run in self.store.list_runs(limit=run_limit):
+            for event in self.store.events_since(run.id):
+                if _failure_type(event) is None:
+                    continue
+                failures.append(
+                    OperationalFailure(
+                        run_id=run.id,
+                        event_type=event.type,
+                        timestamp=event.timestamp,
+                        error=str(event.payload.get("error") or run.error or event.type),
+                        error_type=(
+                            str(event.payload["error_type"])
+                            if event.payload.get("error_type") is not None
+                            else None
+                        ),
+                        retryable=(
+                            bool(event.payload["retryable"])
+                            if "retryable" in event.payload
+                            else None
+                        ),
+                        attributes={
+                            key: value
+                            for key, value in event.payload.items()
+                            if key != "error"
+                        },
+                    )
+                )
+        failures.sort(key=lambda item: item.timestamp, reverse=True)
+        return tuple(failures[: max(0, limit)])
+
+    def diagnostics(
+        self,
+        runtime: Runtime,
+        *,
+        metrics_limit: int = 1000,
+        recent_failure_limit: int = 20,
+    ) -> OperationalSnapshot:
+        doctor = RuntimeDoctor(self.store).run()
+        try:
+            asyncio_tasks = len(asyncio.all_tasks())
+        except RuntimeError:
+            asyncio_tasks = 0
+        runtime_state = runtime.lifecycle_snapshot()
+        status: Literal["ok", "attention_required", "unhealthy"] = doctor.status
+        if status == "ok" and not runtime.is_accepting:
+            status = "attention_required"
+        return OperationalSnapshot(
+            status=status,
+            generated_at=utc_now(),
+            version=__version__,
+            runtime=runtime_state,
+            process={
+                "pid": os.getpid(),
+                "thread_count": threading.active_count(),
+                "asyncio_task_count": asyncio_tasks,
+            },
+            store=self.store.health_check(),
+            doctor=doctor.to_dict(),
+            metrics=self.metrics(limit=metrics_limit),
+            recent_failures=self.recent_failures(
+                limit=recent_failure_limit, run_limit=metrics_limit
+            ),
         )
 
     @staticmethod
@@ -450,3 +611,15 @@ def _percentile(values: list[float], percentile: float) -> float:
     ordered = sorted(values)
     index = max(0, min(len(ordered) - 1, math.ceil(percentile * len(ordered)) - 1))
     return round(ordered[index], 3)
+
+
+def _failure_type(event: RuntimeEvent) -> str | None:
+    if event.type in {"run.failed", "workflow.failed"}:
+        return "run"
+    if event.type == "model.attempt.failed":
+        return "provider"
+    if event.type == "tool.failed":
+        return "tool"
+    if event.type == "tool.outcome_unknown":
+        return "tool_unknown"
+    return None

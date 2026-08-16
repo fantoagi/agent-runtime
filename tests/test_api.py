@@ -56,7 +56,7 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.7.9"
+        assert health.json()["version"] == "0.7.11"
         assert health.json()["store"]["schema_version"] == 8
 
         invalid = await client.post("/runs", json={"input": ""})
@@ -203,6 +203,7 @@ async def test_observability_api_exposes_trace_and_metrics(workspace: Path) -> N
         trace = await client.get(f"/runs/{run_id}/trace")
         metrics = await client.get("/observability/metrics")
         prometheus = await client.get("/observability/metrics/prometheus")
+        diagnostics = await client.get("/observability/diagnostics")
 
     assert trace.status_code == 200
     assert trace.json()["run_id"] == run_id
@@ -211,6 +212,11 @@ async def test_observability_api_exposes_trace_and_metrics(workspace: Path) -> N
     assert metrics.status_code == 200
     assert metrics.json()["total_runs"] == 1
     assert metrics.json()["model_requests"] == 1
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()["version"] == "0.7.11"
+    assert diagnostics.json()["runtime"]["state"] == "accepting"
+    assert diagnostics.json()["store"]["status"] == "ok"
+    assert diagnostics.json()["process"]["thread_count"] >= 1
     assert prometheus.status_code == 200
     assert "agent_runtime_runs_total" in prometheus.text
 
