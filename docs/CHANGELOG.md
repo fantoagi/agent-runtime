@@ -26,7 +26,7 @@
   - `tests/test_api.py`
   - `tests/test_lab_api.py`
   - `docs/OBSERVABILITY.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`62abc09`
 - **关联 ADR**：[ADR-0023](./adr/0023-operational-observability.md)
 
 ### 变更摘要

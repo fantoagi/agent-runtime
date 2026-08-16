@@ -4,7 +4,7 @@
 - **当前里程碑**：v0.7.11 Operational Observability & Diagnostics
 - **Runtime 构建完成时间**：2026-08-16（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`
+- **当前代码基线 commit**：`62abc09`
 - **最近演进记录**：[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)
 
 ## 状态定义
