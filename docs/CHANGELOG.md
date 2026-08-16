@@ -33,7 +33,7 @@
   - `tests/test_lab_api.py`
   - `tests/test_lab_scenarios.py`
   - `docs/SANDBOX.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`0ccff33`
 - **关联 ADR**：[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)
 
 ### 变更摘要

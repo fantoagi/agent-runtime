@@ -4,7 +4,7 @@
 - **当前里程碑**：v0.8.0 Local Process Sandbox & Tool Capability
 - **Runtime 构建完成时间**：2026-08-16（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`pending`
+- **当前代码基线 commit**：`0ccff33`
 - **最近演进记录**：[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)
 
 ## 状态定义
