@@ -30,7 +30,7 @@
   - `docs/LOCAL_RUNTIME.md`
   - `docs/adr/0026-local-runtime-bootstrap-single-owner.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`6532120`
 - **关联 ADR**：[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)
 
 ### 变更摘要
