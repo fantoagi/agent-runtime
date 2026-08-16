@@ -25,7 +25,7 @@
   - `tests/test_api.py`
   - `tests/test_lab_api.py`
   - `docs/INCIDENTS.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`89c8fcd`
 - **关联 ADR**：[ADR-0024](./adr/0024-incident-diagnostic-bundle.md)
 
 ### 变更摘要
