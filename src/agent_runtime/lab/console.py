@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from ..providers import (
     arithmetic_demo_responder,
 )
 from ..runtime import Runtime
+from ..sandbox import LocalProcessSandbox, SandboxLimits, register_process_tool
 from ..tools import ToolContext, ToolRegistry, register_builtin_tools
 from .explanations import explain_event, project_event_states
 from .scenarios import LearningScenario, ScenarioRegistry, default_scenarios
@@ -253,6 +255,7 @@ class LearningConsole:
                 "unknown_tool_executions": sum(
                     item.status.value == "unknown" for item in executions
                 ),
+                "sandbox": runtime.sandbox_snapshot(),
                 "backup": {
                     "format_version": 1,
                     "online_create": True,
@@ -326,6 +329,21 @@ class LearningConsole:
                 tools.register(publish_note, _publish_learning_note)
                 provider = MockProvider(_approval_responder)
                 agent_definitions.append(self._agent(scenario.agent_name, scenario.id, [publish_note]))
+            elif scenario.id == "sandbox-process":
+                sandbox = LocalProcessSandbox(
+                    config.workspace_path,
+                    allowed_executables=[sys.executable],
+                    limits=SandboxLimits(
+                        timeout_seconds=5.0,
+                        max_output_bytes=64 * 1024,
+                        max_concurrent_processes=1,
+                    ),
+                )
+                process_tool = register_process_tool(tools, sandbox)
+                provider = MockProvider(_sandbox_responder)
+                agent_definitions.append(
+                    self._agent(scenario.agent_name, scenario.id, [process_tool])
+                )
             elif scenario.id == "multi-agent-sequential":
                 provider = MockProvider(_multi_agent_responder)
                 names = ["lab-planner", "lab-worker", "lab-reviewer"]
@@ -518,6 +536,29 @@ def _approval_responder(messages: list[Message], tools: list[ToolDefinition], co
     user_text = last.content or ""
     note = user_text.removeprefix("发布学习笔记：").strip() or user_text
     return ModelResponse(tool_calls=[ToolCall(id="lab_publish_note", name="publish_learning_note", arguments={"content": note})], finish_reason="tool_calls")
+
+
+def _sandbox_responder(
+    messages: list[Message], tools: list[ToolDefinition], config: ModelConfig
+) -> ModelResponse:
+    del tools, config
+    if messages[-1].role == "tool":
+        return ModelResponse(
+            content=f"Sandbox 已完成受限进程执行：{(messages[-1].content or '').strip()}",
+            finish_reason="stop",
+        )
+    return ModelResponse(
+        tool_calls=[
+            ToolCall(
+                id="lab_sandbox_process",
+                name="run_process",
+                arguments={
+                    "argv": [sys.executable, "-c", "print('sandbox-v0.8')"],
+                },
+            )
+        ],
+        finish_reason="tool_calls",
+    )
 
 
 def _multi_agent_responder(messages: list[Message], tools: list[ToolDefinition], config: ModelConfig) -> ModelResponse:

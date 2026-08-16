@@ -13,6 +13,7 @@
 - [OPERATIONS.md](./OPERATIONS.md)：备份、校验、恢复、回滚与灾难恢复演练。
 - [OBSERVABILITY.md](./OBSERVABILITY.md)：结构化日志、综合诊断、失败分类、p95 与排障顺序。
 - [INCIDENTS.md](./INCIDENTS.md)：脱敏故障诊断包、根因摘要、内容边界与分享流程。
+- [SANDBOX.md](./SANDBOX.md)：Tool Capability、LocalProcessSandbox、安全边界和使用方式。
 - [CHANGELOG.md](./CHANGELOG.md)：按完成时间倒序维护的功能与架构演进记录。
 - [adr/README.md](./adr/README.md)：关键架构决策记录（ADR）索引。
 - [templates/change-entry.md](./templates/change-entry.md)：演进记录模板。
@@ -31,6 +32,7 @@
 | `OPERATIONS.md` | 如何备份、校验、恢复并处理数据故障？ | 备份格式、恢复语义或运维流程变化时 |
 | `OBSERVABILITY.md` | 如何观察生命周期、容量、失败、延迟和进程状态？ | 日志、指标、诊断或失败分类变化时 |
 | `INCIDENTS.md` | 如何生成、检查和分享脱敏故障诊断包？ | 诊断包格式、根因规则或隐私边界变化时 |
+| `SANDBOX.md` | 如何声明 Tool Capability 并受限执行本地进程？ | Sandbox、进程、网络、Secret 或安全策略变化时 |
 | `CHANGELOG.md` | 系统何时、为何、如何发生变化？ | 每个可独立验收的功能、修复或架构变更完成时 |
 | `adr/*.md` | 为什么选择这一方案而不是其他方案？ | 公共接口、数据、可靠性或安全决策变化时 |
 

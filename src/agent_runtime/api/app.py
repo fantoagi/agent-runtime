@@ -419,6 +419,10 @@ def create_app(
             },
         )
 
+    @app.get("/observability/sandbox")
+    async def sandbox_status() -> dict[str, Any]:
+        return runtime.sandbox_snapshot()
+
     @app.get("/observability/metrics/prometheus")
     async def prometheus_metrics(
         limit: int = Query(1000, ge=1, le=10000),

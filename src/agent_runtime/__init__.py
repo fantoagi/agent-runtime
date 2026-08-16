@@ -10,6 +10,7 @@ from .domain import (
     BackupConflictError,
     BackupError,
     BackupTargetBusyError,
+    CapabilityPolicyAction,
     IdempotencyConflict,
     MemoryRecord,
     MemoryScope,
@@ -18,7 +19,12 @@ from .domain import (
     RunRelationType,
     RunStatus,
     RuntimeCapacityError,
+    SandboxExecutionError,
+    SandboxOutputLimitError,
+    SandboxTimeoutError,
+    SandboxViolationError,
     Session,
+    ToolCapability,
     ToolDefinition,
     UnknownToolResolution,
 )
@@ -67,6 +73,14 @@ from .providers import (
     ToolCallDelta,
 )
 from .runtime import RunSubmission, Runtime, RuntimeConfig
+from .sandbox import (
+    LocalProcessSandbox,
+    SandboxExecutor,
+    SandboxLimits,
+    SandboxRequest,
+    SandboxResult,
+    register_process_tool,
+)
 from .sdk import (
     create_memory_demo_runtime,
     create_multi_agent_demo_runtime,
@@ -74,7 +88,7 @@ from .sdk import (
     multi_agent_demo_workflow,
 )
 from .telemetry import StructuredLogFormatter, configure_structured_logging
-from .tools import ToolRegistry
+from .tools import CapabilityPolicy, ToolAuthorization, ToolRegistry
 from .version import __version__
 
 __all__ = [
@@ -88,6 +102,8 @@ __all__ = [
     "BackupError",
     "BackupTargetBusyError",
     "BackupVerification",
+    "CapabilityPolicy",
+    "CapabilityPolicyAction",
     "ContainsEvaluator",
     "ContextBuildResult",
     "ContextBuilder",
@@ -105,6 +121,7 @@ __all__ = [
     "IncidentBundle",
     "IncidentDiagnosticsService",
     "IncidentReport",
+    "LocalProcessSandbox",
     "MemoryEvalRunner",
     "MemoryRecord",
     "MemoryScope",
@@ -129,11 +146,21 @@ __all__ = [
     "RuntimeCapacityError",
     "RuntimeConfig",
     "RuntimeDoctor",
+    "SandboxExecutionError",
+    "SandboxExecutor",
+    "SandboxLimits",
+    "SandboxOutputLimitError",
+    "SandboxRequest",
+    "SandboxResult",
+    "SandboxTimeoutError",
+    "SandboxViolationError",
     "SequentialWorkflow",
     "Session",
     "StreamingModelProvider",
     "StructuredLogFormatter",
+    "ToolAuthorization",
     "ToolCallDelta",
+    "ToolCapability",
     "ToolDefinition",
     "ToolRegistry",
     "TraceSpan",
@@ -149,4 +176,5 @@ __all__ = [
     "create_multi_agent_demo_runtime",
     "memory_demo_agent",
     "multi_agent_demo_workflow",
+    "register_process_tool",
 ]

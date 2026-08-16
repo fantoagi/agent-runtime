@@ -2,7 +2,7 @@
 
 A small, durable single-agent and multi-agent runtime with model-provider abstraction, structured tool
 execution, SQLite migrations, durable steps, idempotent recovery, event streaming, token streaming,
-checkpoints, approval gates, cooperative cancellation, persistent Parent/Child delegation, sequential and parallel workflows, budgeted context building, sessions, scoped long-term memory, trace trees, metrics, evals, a CLI, and a visual Learning Console.
+checkpoints, approval gates, cooperative cancellation, persistent Parent/Child delegation, sequential and parallel workflows, budgeted context building, sessions, scoped long-term memory, trace trees, metrics, evals, Tool Capability policy, a bounded local process sandbox, a CLI, and a visual Learning Console.
 
 ## Quick start
 
@@ -18,6 +18,18 @@ agent-runtime demo "19 * 23"
 
 The demo uses a deterministic local provider. Set `OPENAI_API_KEY` and select the
 OpenAI-compatible provider in application code when connecting to a real model.
+
+## v0.8.0 Local Process Sandbox & Tool Capability
+
+当前版本开始建立代码型 Agent 的安全执行边界：Tool 可以声明 `file.read`、`file.write`、`process.exec`、`network.access` 和 `secret.read` capability，Runtime 在执行前统一合并 allow、deny、require_approval 和 sandbox_only 策略。
+
+```powershell
+agent-runtime observe sandbox
+Invoke-RestMethod http://127.0.0.1:8000/observability/sandbox
+agent-runtime lab
+```
+
+`LocalProcessSandbox` 使用 argv、可执行文件白名单、Workspace cwd、环境变量白名单、timeout、输出限制、并发和进程树取消；它不是容器或虚拟机，当前不承诺任意不可信代码或网络强隔离。完整说明见 [Sandbox 与 Tool Capability 指南](./docs/SANDBOX.md)。
 
 ## v0.7.12 Incident Diagnostics & Support Bundle
 
@@ -83,7 +95,7 @@ agent-runtime doctor --json
 agent-runtime lab
 ```
 
-浏览器会打开 `http://127.0.0.1:8000/lab`。v0.7.7 内置 9 个确定性场景，覆盖单 Run、v0.6 多 Agent 和 v0.7 Context/Memory，并提供：
+浏览器会打开 `http://127.0.0.1:8000/lab`。v0.8.0 内置 10 个确定性场景，覆盖单 Run、v0.6 多 Agent、v0.7 Context/Memory 和 v0.8 Sandbox/Capability，并提供：
 
 - 多 Agent 场景按 Workflow Parent 与每个 Child Agent 动态拆分独立泳道；单 Run 场景按实际出现的 Context / Model / Tool / Approval / State 领域展示。
 - 连线区分 Run 内部执行、Parent 委派和 Child 汇聚，避免把并行分支误画成串行依赖。

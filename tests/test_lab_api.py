@@ -14,7 +14,7 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         page = await client.get("/lab")
         assert page.status_code == 200
         assert "Agent Runtime Learning Console" in page.text
-        assert "v0.7.12" in page.text
+        assert "v0.8.0" in page.text
         assert "诊断包" in page.text
         assert 'data-tab="context"' in page.text
         assert 'data-tab="memory"' in page.text
@@ -49,6 +49,7 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         assert "Backup format" in script.text
         assert "offline only" in script.text
         assert "OPERATIONAL DIAGNOSTICS" in script.text
+        assert "SANDBOX & CAPABILITY" in script.text
         assert 'id="swimlaneBoard"' in page.text
         assert 'id="swimlaneViewport"' in page.text
         assert 'class="swimlane-label agent"' not in page.text
@@ -60,6 +61,7 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
             "tool-calling",
             "token-streaming",
             "human-approval",
+            "sandbox-process",
             "multi-agent-sequential",
             "multi-agent-parallel",
             "session-memory",
@@ -109,7 +111,7 @@ async def test_learning_scenarios_run_through_real_runtime(
         assert payload["reliability"]["backup"]["format_version"] == 1
         assert payload["reliability"]["backup"]["restore_requires_shutdown"] is True
         diagnostics = payload["reliability"]["diagnostics"]
-        assert diagnostics["version"] == "0.7.12"
+        assert diagnostics["version"] == "0.8.0"
         assert diagnostics["runtime"]["state"] == "accepting"
         assert diagnostics["process"]["thread_count"] >= 1
         assert payload["reliability"]["failure_analysis"] == []
@@ -146,6 +148,38 @@ async def test_human_approval_scenario_pauses_and_resumes(workspace) -> None:
         assert after["tool_executions"][0]["status"] == "completed"
         assert after["acceptance"]["passed"] is True
         assert "approval.resolved" in [event["type"] for event in after["events"]]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_learning_scenario_shows_policy_and_process_state(workspace) -> None:
+    app = create_demo_app(workspace, enable_learning_console=True)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post("/lab/api/scenarios/sandbox-process/runs", json={"input": None})
+        run_id = created.json()["id"]
+        runtime = app.state.learning_console.runtime_for_run(run_id)
+        waiting = await runtime.wait(run_id)
+        assert waiting.status.value == "waiting_for_approval"
+
+        before = (await client.get(f"/lab/api/runs/{run_id}/snapshot")).json()
+        approval_id = before["pending_approval"]["id"]
+        authorization = next(
+            event["payload"]
+            for event in before["events"]
+            if event["type"] == "tool.policy.evaluated"
+        )
+        assert authorization["sandbox_required"] is True
+        assert before["reliability"]["sandbox"]["sandboxes"][0]["kind"] == "local-process"
+
+        resolved = await client.post(
+            f"/lab/api/approvals/{approval_id}/resolve",
+            json={"approved": True, "reason": "sandbox test approval"},
+        )
+        assert resolved.status_code == 200
+        after = (await client.get(f"/lab/api/runs/{run_id}/snapshot")).json()
+        assert after["run"]["status"] == "completed"
+        assert "sandbox-v0.8" in after["run"]["result"]
+        assert after["acceptance"]["passed"] is True
 
 
 @pytest.mark.asyncio

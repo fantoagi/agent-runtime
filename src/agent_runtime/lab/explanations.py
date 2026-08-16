@@ -71,6 +71,13 @@ EVENT_EXPLANATIONS: dict[str, dict[str, Any]] = {
             "SQLiteStore.complete_run_from_model()",
         ],
     },
+    "tool.policy.evaluated": {
+        "title": "评估 Tool Capability 策略",
+        "summary": "Runtime 将工具声明的 capability 与 allow、deny、require_approval、sandbox_only 规则合并。",
+        "why": "安全边界必须在工具执行和审批之前由 Runtime 决定，不能依赖模型自觉或前端约定。",
+        "next": "允许的调用继续进入审批或执行；被拒绝的 capability 不会启动 handler。",
+        "code": ["CapabilityPolicy.evaluate()", "ToolRegistry.require_authorized()"],
+    },
     "tool.requested": {
         "title": "建立 ToolExecution",
         "summary": "模型的 ToolCall 被规范化为持久化 ToolExecution，包含参数、位置和幂等键。",

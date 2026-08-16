@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-runtime"
-version = "0.7.12"
+version = "0.8.0"
 description = "A durable runtime for tool-calling agents and multi-agent workflows."
 readme = "README.md"
 requires-python = ">=3.11"

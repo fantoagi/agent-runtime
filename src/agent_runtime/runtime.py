@@ -7,7 +7,7 @@ import logging
 import random
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -189,6 +189,9 @@ class Runtime:
             "max_concurrent_model_requests": self.config.max_concurrent_model_requests,
         }
 
+    def sandbox_snapshot(self) -> dict[str, Any]:
+        return self.tools.security_snapshot()
+
     def lifecycle_snapshot(self) -> dict[str, Any]:
         state = "closed" if self._closed else "closing" if self._closing else "accepting"
         return {
@@ -290,8 +293,9 @@ class Runtime:
         self._log_operation(logging.INFO, "runtime.shutdown.completed")
 
     def register_agent(self, agent: AgentDefinition) -> None:
-        self.agent_registry.register(agent)
-        self.store.save_agent_definition(agent)
+        normalized = replace(agent, tools=self.tools.definitions_for(agent.tools))
+        self.agent_registry.register(normalized)
+        self.store.save_agent_definition(normalized)
 
     def list_agents(self) -> list[AgentDefinition]:
         return self.agent_registry.list()
@@ -1201,20 +1205,19 @@ class Runtime:
                         return run
 
                     executions: list[ToolExecution] = []
+                    authorizations: dict[str, dict[str, Any]] = {}
                     for position, call in enumerate(response.tool_calls):
                         registered = self.tools.get(call.name)
+                        authorization = self.tools.require_authorized(call.name)
+                        authorizations[call.id] = authorization.to_dict()
                         executions.append(
                             ToolExecution.create(
                                 run.id,
                                 step.id,
                                 position,
                                 call,
-                                requires_approval=(
-                                    registered.definition.requires_approval
-                                ),
-                                side_effecting=(
-                                    registered.definition.side_effecting
-                                ),
+                                requires_approval=authorization.requires_approval,
+                                side_effecting=registered.definition.side_effecting,
                             )
                         )
                     step.status = StepStatus.WAITING_FOR_TOOLS
@@ -1228,6 +1231,18 @@ class Runtime:
                         model_payload,
                         delta_payload=delta_payload,
                     )
+                    for execution in executions:
+                        self._event(
+                            run.id,
+                            "tool.policy.evaluated",
+                            {
+                                "step": run.step_count,
+                                "tool_execution_id": execution.id,
+                                "tool_call_id": execution.tool_call.id,
+                                "tool_name": execution.tool_call.name,
+                                **authorizations[execution.tool_call.id],
+                            },
+                        )
                     if not await self._process_step(
                         run, step, messages, agent, token
                     ):
@@ -1397,6 +1412,9 @@ class Runtime:
                             "tool_call_id": execution.tool_call.id,
                             "tool_name": execution.tool_call.name,
                             "arguments": execution.tool_call.arguments,
+                            "authorization": self.tools.authorization(
+                                execution.tool_call.name
+                            ).to_dict(),
                         },
                     )
                     self._checkpoint(run, messages)
@@ -1426,6 +1444,7 @@ class Runtime:
         token: CancellationToken,
     ) -> None:
         call = execution.tool_call
+        authorization = self.tools.require_authorized(call.name)
         self._event(
             run.id,
             "tool.requested",
@@ -1436,6 +1455,7 @@ class Runtime:
                 "tool_name": call.name,
                 "arguments": call.arguments,
                 "idempotency_key": execution.idempotency_key,
+                "authorization": authorization.to_dict(),
             },
         )
         execution.status = ToolExecutionStatus.RUNNING
@@ -1447,6 +1467,7 @@ class Runtime:
                 "tool_execution_id": execution.id,
                 "tool_call_id": call.id,
                 "tool_name": call.name,
+                "authorization": authorization.to_dict(),
             },
         )
         context = ToolContext(
@@ -1958,7 +1979,7 @@ class Runtime:
     ) -> AgentDefinition:
         if isinstance(agent, AgentDefinition):
             self.register_agent(agent)
-            return agent
+            return self.agent_registry.get(agent.name)
         try:
             return self.agent_registry.get(agent)
         except KeyError:
@@ -1971,4 +1992,4 @@ class Runtime:
                 raise AgentDefinitionUnavailable(
                     f"Persisted AgentDefinition {agent!r} cannot be restored: {error}"
                 ) from error
-            return persisted
+            return self.agent_registry.get(persisted.name)

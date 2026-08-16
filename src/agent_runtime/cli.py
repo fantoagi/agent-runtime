@@ -81,6 +81,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     diagnostics.add_argument("--limit", type=int, default=1000)
     diagnostics.add_argument("--recent-failures", type=int, default=20)
+    observe_subcommands.add_parser(
+        "sandbox", help="Show tool capability policy and managed sandbox state"
+    )
     incident_bundle = observe_subcommands.add_parser(
         "incident-bundle",
         help="Create a redacted support-safe diagnostic ZIP",
@@ -317,6 +320,9 @@ async def async_main(arguments: argparse.Namespace) -> int:
                     recent_failure_limit=arguments.recent_failures,
                 ).to_dict()
             )
+            return 0
+        if arguments.observe_command == "sandbox":
+            _print(runtime.sandbox_snapshot())
             return 0
         if arguments.observe_command == "incident-bundle":
             incidents = IncidentDiagnosticsService(runtime)

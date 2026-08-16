@@ -1,14 +1,14 @@
 # Agent Runtime 当前架构
 
 > 最近更新：2026-08-16
-> 关联记录：[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
-> 关联决策：[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
+> 关联记录：[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
+> 关联决策：[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
 
 ## 1. 系统目标和边界
 
 当前系统是一个面向开发者的、可持久化 Agent Runtime。它既支持单 Agent 模型/工具循环，也支持由 Parent Run 委派独立 Child Run 的单机多 Agent Workflow，并通过 ContextBuilder、Session 和 Scoped Memory 管理模型输入与跨 Run 信息复用。
 
-当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。它不是分布式调度平台，也不是不可信代码沙箱。
+当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
 
 ## 2. 总体架构
 
@@ -26,6 +26,8 @@ flowchart TD
     Memory["MemoryStore / SQLite FTS5"]
     Model["Model Provider"]
     Tools["Tool Registry / Executor"]
+    Policy["Capability Policy"]
+    Sandbox["SandboxExecutor / LocalProcessSandbox"]
     State["SQLite State Store"]
     Relations["RunRelation Store"]
     Events["Persistent Event Log"]
@@ -49,6 +51,8 @@ flowchart TD
     Runtime --> Sessions
     Runtime --> Memory
     Runtime --> Tools
+    Tools --> Policy
+    Tools --> Sandbox
     Runtime --> State
     Runtime --> Relations
     Runtime --> Events
@@ -196,7 +200,7 @@ stateDiagram-v2
 当前实现：
 
 - `MockProvider`：确定性测试和本地 Demo。
-- `OpenAICompatibleProvider`：通过标准库 HTTP 客户端调用 Chat Completions 兼容端点。
+- `OpenAICompatibleProvider`：复用受管理的 `httpx.AsyncClient` 调用 Chat Completions 兼容端点。
 
 Provider 调用由 Runtime 统一处理超时和指数退避重试。实现 `StreamingModelProvider` 的 Provider 可以输出 `ModelTokenDelta`；Runtime 在不改变既有 Run / Step / ToolExecution / Checkpoint 语义的前提下，将增量写入 `model.delta` 事件，并在模型步骤结束时合并为完整 `ModelResponse`。不支持 `stream()` 的 Provider 自动回退到 `complete()`。
 
@@ -212,7 +216,32 @@ Provider 调用由 Runtime 统一处理超时和指数退避重试。实现 `Str
 - 工具异常标准化并回传给模型。
 - `requires_approval` 人工审批标记。
 - `side_effecting` 副作用标记。
+- `capabilities` 与 `sandbox_only` 安全声明。
+- `CapabilityPolicy` 合并 allow、deny、require_approval 与 sandbox_only。
 - `CancellationToken` 协作式取消和稳定的 `idempotency_key`。
+
+## 6.1 SandboxExecutor 与 Capability Policy
+
+v0.8.0 在 Tool Handler 之前增加显式授权层。默认 capability 规则为 `file.read=allow`、`file.write=require_approval`、`process.exec=sandbox_only`、`network.access=deny` 和 `secret.read=deny`。deny 优先于其他动作；要求 Sandbox 的 Tool 必须以 `sandboxed=True` 注册。
+
+`LocalProcessSandbox` 通过 `asyncio.create_subprocess_exec()` 运行 argv，不使用 shell；显式限制可执行文件、Workspace cwd、环境变量、timeout、输出字节和并发。Run Cancel、输出超限、超时与 Runtime shutdown 会终止进程树。它当前不提供网络、CPU、内存、PID 或系统调用强隔离。
+
+```mermaid
+flowchart LR
+    Call["Model ToolCall"] --> Policy["CapabilityPolicy.evaluate"]
+    Policy -->|deny| Rejected["拒绝注册或执行"]
+    Policy -->|require approval| Approval["Durable Approval"]
+    Policy -->|sandbox only| Sandbox["SandboxExecutor"]
+    Approval --> Sandbox
+    Sandbox --> Process["Allowed argv process"]
+    Process --> Result["ToolResult / ToolExecution"]
+```
+
+Capability 决策通过 `tool.policy.evaluated` 进入 durable Event Log；Sandbox active process 与容量通过 `Runtime.sandbox_snapshot()`、CLI `observe sandbox` 和 HTTP `/observability/sandbox` 暴露，但不占用 Run sequence。完整边界见 [SANDBOX.md](./SANDBOX.md)。
+
+> 最近更新：2026-08-16
+> 关联记录：[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)
+> 关联决策：[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)
 
 ## 7. SQLite、Step、ToolExecution、Checkpoint 和 Artifact Store
 
@@ -233,7 +262,7 @@ memory_records
 memory_fts
 ```
 
-数据库启用 WAL 和 foreign keys，并通过编号 migration 初始化和升级 schema。v0.7 schema version 为 `4`；`run_relations` 对 `child_run_id` 和 `parent_run_id + delegation_key` 建立唯一约束，`session_runs` 限制一个 Run 最多属于一个 Session，`memory_fts` 为活动 Memory 提供 FTS5 索引。`Step` 表示一次模型决策，`ToolExecution` 表示该决策内有序的工具调用。
+数据库启用 WAL 和 foreign keys，并通过编号 migration 初始化和升级 schema。当前 schema version 为 `8`；`run_relations` 对 `child_run_id` 和 `parent_run_id + delegation_key` 建立唯一约束，`session_runs` 限制一个 Run 最多属于一个 Session，`memory_fts` 为活动 Memory 提供 FTS5 索引。`Step` 表示一次模型决策，`ToolExecution` 表示该决策内有序的工具调用。
 
 ToolExecution 保存参数、状态、结果、错误、审批关系、side-effect 标记和 idempotency key。工具完成状态、Run 计数、Checkpoint 和对应 Event 可以在同一 SQLite 事务中提交，降低半状态风险。
 
@@ -276,7 +305,7 @@ flowchart LR
 ```text
 run.created / started / recovered / paused / completed / failed / cancelled
 model.requested / stream.started / delta / stream.completed / stream.failed / completed
-tool.requested / started / completed / failed / rejected / cancelled / outcome_unknown / unknown_resolved
+tool.policy.evaluated / requested / started / completed / failed / rejected / cancelled / outcome_unknown / unknown_resolved
 checkpoint.created
 approval.requested / resolved
 step.completed
@@ -419,8 +448,8 @@ flowchart LR
 Provider attempt 失败和重试决定会改变一次 Run 的执行解释，因此 `model.attempt.failed` 与 `model.retry.scheduled` 进入 durable Event Log。Runtime 启停、PID、线程和 Task 数属于进程级信号，不占用 Run Event sequence。结构化日志默认关闭，不修改 root logger；CLI 通过 `--json-logs` 显式启用，Python 应用通过 `configure_structured_logging()` 配置。
 
 > 最近更新：2026-08-16
-> 关联记录：[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)
-> 关联决策：[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0008](./adr/0008-observability-evals.md)
+> 关联记录：[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)
+> 关联决策：[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0008](./adr/0008-observability-evals.md)
 ## 9.6 Incident Diagnostics 与 Support Bundle
 
 v0.7.12 在 `OperationalSnapshot` 之上增加独立的 `IncidentDiagnosticsService`。该层只读取 Runtime 与 SQLite durable facts，生成可分享的安全摘要和 ZIP，不进入执行主循环，也不写入 Runtime Event sequence。

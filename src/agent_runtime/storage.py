@@ -35,6 +35,7 @@ from .domain import (
     StoreCorruptionError,
     StoreError,
     ToolCall,
+    ToolCapability,
     ToolDefinition,
     ToolExecution,
     ToolExecutionStatus,
@@ -889,6 +890,8 @@ class SQLiteStore:
                     "input_schema": tool.input_schema,
                     "requires_approval": tool.requires_approval,
                     "side_effecting": tool.side_effecting,
+                    "capabilities": [capability.value for capability in tool.capabilities],
+                    "sandbox_only": tool.sandbox_only,
                 }
                 for tool in agent.tools
             ],
@@ -908,7 +911,20 @@ class SQLiteStore:
         return AgentDefinition(
             name=str(payload["name"]),
             system_prompt=str(payload["system_prompt"]),
-            tools=[ToolDefinition(**tool) for tool in payload.get("tools", [])],
+            tools=[
+                ToolDefinition(
+                    name=str(tool["name"]),
+                    description=str(tool["description"]),
+                    input_schema=dict(tool["input_schema"]),
+                    requires_approval=bool(tool.get("requires_approval", False)),
+                    side_effecting=bool(tool.get("side_effecting", False)),
+                    capabilities=tuple(
+                        ToolCapability(value) for value in tool.get("capabilities", ())
+                    ),
+                    sandbox_only=bool(tool.get("sandbox_only", False)),
+                )
+                for tool in payload.get("tools", [])
+            ],
             model=ModelConfig(**payload.get("model", {})),
             max_steps=int(payload.get("max_steps", 20)),
             max_tool_calls=int(payload.get("max_tool_calls", 40)),

@@ -117,6 +117,7 @@ async def test_runtime_completes_tool_loop_and_persists_events(workspace: Path) 
         "context.built",
         "model.completed",
         "checkpoint.created",
+        "tool.policy.evaluated",
         "tool.requested",
         "tool.started",
         "tool.completed",

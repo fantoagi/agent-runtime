@@ -91,7 +91,7 @@ def main() -> int:
             cwd=workspace,
         )
         diagnostics_payload = json.loads(diagnostics.stdout)
-        assert diagnostics_payload["version"] == "0.7.12", diagnostics_payload
+        assert diagnostics_payload["version"] == "0.8.0", diagnostics_payload
         assert diagnostics_payload["store"]["status"] == "ok", diagnostics_payload
 
         incident = workspace / "incident.zip"
@@ -109,7 +109,7 @@ def main() -> int:
         )
         with zipfile.ZipFile(incident) as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            assert manifest["runtime_version"] == "0.7.12", manifest
+            assert manifest["runtime_version"] == "0.8.0", manifest
             assert "diagnostics.json" in archive.namelist()
 
         backup = workspace / "runtime.agent-backup"
@@ -182,7 +182,10 @@ def main() -> int:
                     health = await client.get("/health")
                     health.raise_for_status()
                     assert health.json()["status"] == "ok"
-                    assert health.json()["version"] == "0.7.12"
+                    assert health.json()["version"] == "0.8.0"
+                    sandbox_status = await client.get("/observability/sandbox")
+                    sandbox_status.raise_for_status()
+                    assert sandbox_status.json()["policy"]["network.access"] == "deny"
                     incident_bundle = await client.get("/observability/incident-bundle")
                     incident_bundle.raise_for_status()
                     assert incident_bundle.headers["content-type"].startswith("application/zip")

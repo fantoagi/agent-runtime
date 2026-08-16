@@ -618,6 +618,9 @@ function renderSqliteInspector() {
   const doctor = reliability.doctor || {};
   const capacity = reliability.capacity || {};
   const backup = reliability.backup || {};
+  const sandbox = reliability.sandbox || {};
+  const sandboxes = sandbox.sandboxes || [];
+  const activeSandbox = sandboxes[0] || {};
   const diagnostics = reliability.diagnostics || {};
   const failureAnalysis = reliability.failure_analysis || [];
   const process = diagnostics.process || {};
@@ -626,6 +629,7 @@ function renderSqliteInspector() {
   const failures = diagnosticMetrics.failures || {};
   return `
     <section class="detail-block"><span class="detail-label">RELIABILITY STATUS</span><div class="kv-grid">${kv("Run", reliability.run_health)}${kv("Runtime 接受请求", reliability.runtime_accepting ? "yes" : "no")}${kv("活动任务", `${capacity.active_tasks ?? 0} / ${capacity.max_inflight_runs ?? "-"}`)}${kv("模型并发上限", capacity.max_concurrent_model_requests ?? "-")}${kv("SQLite", sqlite.status)}${kv("UNKNOWN Tool", reliability.unknown_tool_executions ?? 0)}${kv("Doctor", doctor.status || "unknown")}${kv("Diagnostics", diagnostics.status || "unknown")}${kv("Backup format", backup.format_version ?? "-")}${kv("Restore", backup.restore_requires_shutdown ? "offline only" : "unknown")}</div><p>${escapeHtml(reliability.guidance || "")}</p></section>
+    <section class="detail-block"><span class="detail-label">SANDBOX & CAPABILITY</span><div class="kv-grid">${kv("Sandbox", activeSandbox.kind || "not configured")}${kv("接受进程", activeSandbox.accepting ?? "-")}${kv("活动进程", activeSandbox.active_processes ?? 0)}${kv("进程并发", activeSandbox.max_concurrent_processes ?? "-")}${kv("强隔离", activeSandbox.strong_isolation ? "yes" : "no")}${kv("网络隔离", activeSandbox.network_isolation ? "yes" : "no")}</div><pre class="json-view">${escapeHtml(JSON.stringify(sandbox.policy || {}, null, 2))}</pre><p>LocalProcessSandbox 使用 argv、可执行文件白名单、Workspace、环境变量白名单、超时和输出上限；它不是容器或虚拟机，当前不提供网络强隔离。</p></section>
     <section class="detail-block"><span class="detail-label">OPERATIONAL DIAGNOSTICS</span><div class="kv-grid">${kv("PID", process.pid ?? "-")}${kv("Threads", process.thread_count ?? "-")}${kv("Async tasks", process.asyncio_task_count ?? "-")}${kv("Run p95", `${durations.run_p95 ?? 0} ms`)}${kv("Model p95", `${durations.model_p95 ?? 0} ms`)}${kv("Tool p95", `${durations.tool_p95 ?? 0} ms`)}${kv("Provider failures", failures.provider_attempts ?? 0)}${kv("Provider retries", failures.provider_retries ?? 0)}</div><p>综合快照汇总 Runtime 生命周期、容量、SQLite、Doctor、耗时与失败信号；详细 JSON 可通过 Diagnostics API 查看。</p></section>
     <section class="detail-block"><span class="detail-label">FAILURE ROOT CAUSE</span>${failureAnalysis.length ? `<div class="execution-list">${failureAnalysis.map((item) => `<div class="execution-row"><div class="execution-row-top"><strong>${escapeHtml(item.category)}</strong><small>${escapeHtml(item.severity)} · ${item.recovered ? "recovered" : "active"}</small></div><p>${escapeHtml(item.summary)}</p><p><strong>建议：</strong>${escapeHtml(item.recommended_action)}</p><div class="kv-grid">${kv("Run", item.run_id)}${kv("状态", item.run_status)}${kv("可重试", item.retryable ?? "unknown")}</div></div>`).join("")}</div>` : `<p>本次流程没有可归类的持久化失败事件。</p>`}</section>
     <section class="detail-block"><span class="detail-label">SUPPORT BUNDLE</span><p>点击页面顶部“诊断包”可下载脱敏 ZIP。诊断包不包含 Prompt、Tool 参数/结果、Memory、Checkpoint 消息、Artifact 或 SQLite 数据库。</p></section>

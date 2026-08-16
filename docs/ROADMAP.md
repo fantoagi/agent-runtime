@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
 - **最近更新**：2026-08-16
-- **当前版本**：v0.7.12
-- **当前阶段**：v0.7.12 Incident Diagnostics & Support Bundle 完成；继续观察真实排障与 Nightly，v0.8 Sandbox 暂缓
+- **当前版本**：v0.8.0
+- **当前阶段**：v0.8.0 Local Process Sandbox 与 Tool Capability 完成；继续 v0.8.x Secret 与可选 Docker 强隔离
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -43,7 +43,7 @@
 | v0.7.10 | ✅ completed | 在线备份、归档校验、离线恢复与灾难恢复演练 | [E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001) |
 | v0.7.11 | ✅ completed | 结构化日志、失败聚合、p95 与综合运行诊断 | [E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002) |
 | v0.7.12 | ✅ completed | 脱敏故障诊断包、确定性根因摘要与支持协作入口 | [E2026-08-16-003](./CHANGELOG.md#e2026-08-16-003) |
-| v0.8 | 📋 planned | Sandbox、Tool Capability 与 Secret 安全（后置） | — |
+| v0.8.0 | ✅ completed | LocalProcessSandbox、Tool Capability、审批与安全观测 | [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004) |
 | v0.9 | 📋 planned | 分布式 Worker、Queue 与 Lease | — |
 | v0.10 | 📋 planned | 多租户、权限、预算和生产治理 | — |
 | v1.0 | 📋 planned | 稳定 Runtime Contract 与生产发布 | — |
@@ -232,18 +232,19 @@
 
 ## v0.8：Sandbox、Tool Capability 与 Secret 安全
 
-- **状态**：📋 planned
-- **前置版本**：v0.7
-- **目标**：为代码、进程、文件和网络工具建立明确的执行隔离和能力授权边界。
+- **状态**：🚧 in-progress
+- **前置版本**：v0.7.12
+- **已完成阶段**：v0.8.0 [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)
+- **目标**：为代码、进程、文件、网络和 Secret 工具建立明确的执行隔离和能力授权边界。
 
 ### 计划范围
 
-- `SandboxExecutor` 协议。
-- `LocalProcessSandbox`：无 `shell=True`、超时、输出限制、环境变量白名单和子进程取消。
-- 可选 `DockerSandbox`：非 root、只读根文件系统、CPU/内存/PID 限制和默认禁网。
-- Tool Capability 声明和 `allow`、`deny`、`require_approval`、`sandbox_only` 策略。
-- `SecretProvider` 和运行时临时注入。
-- Artifact MIME、大小、SHA-256、provenance 和生命周期。
+- ✅ `SandboxExecutor` 协议。
+- ✅ `LocalProcessSandbox`：无 `shell=True`、可执行文件/cwd/环境白名单、超时、输出限制、并发和进程树取消。
+- 📋 可选 `DockerSandbox`：非 root、只读根文件系统、CPU/内存/PID 限制和默认禁网。
+- ✅ Tool Capability 声明和 `allow`、`deny`、`require_approval`、`sandbox_only` 策略。
+- 📋 `SecretProvider`、运行时临时注入和值级输出脱敏。
+- 📋 Artifact MIME、大小、SHA-256、provenance 和生命周期增强。
 
 ### 验收重点
 
@@ -260,7 +261,8 @@
 
 ### 预计 ADR
 
-- `ADR-0017`：Sandbox、Tool Capability 与 Secret 安全边界。
+- [ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)：LocalProcessSandbox 与 Tool Capability 显式允许边界。
+- 后续 ADR：SecretProvider、DockerSandbox 与强隔离边界。
 
 ## v0.9：分布式 Worker、Queue 与 Lease
 

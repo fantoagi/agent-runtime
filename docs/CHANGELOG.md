@@ -4,6 +4,73 @@
 
 ---
 
+<a id="e2026-08-16-004"></a>
+## E2026-08-16-004：v0.8.0 本地进程 Sandbox 与 Tool Capability 策略
+
+- **完成时间**：2026-08-16
+- **状态**：🧪 experimental
+- **类型**：security
+- **影响范围**：
+  - `src/agent_runtime/sandbox.py`
+  - `src/agent_runtime/domain.py`
+  - `src/agent_runtime/tools.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/__init__.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/lab/console.py`
+  - `src/agent_runtime/lab/scenarios.py`
+  - `src/agent_runtime/lab/explanations.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/lab/static/app.js`
+  - `scripts/check_docs.py`
+  - `scripts/verify_distribution.py`
+  - `tests/test_sandbox.py`
+  - `tests/test_runtime.py`
+  - `tests/test_api.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_lab_scenarios.py`
+  - `docs/SANDBOX.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)
+
+### 变更摘要
+
+开始 v0.8 安全执行阶段，先建立可替换的 Sandbox 协议、受限本地进程实现和 Tool Capability 决策模型。Runtime 不再把“Tool 已注册”直接视为“Tool 可执行”，而是在模型 ToolCall 进入审批或 handler 前合并 allow、deny、require_approval 和 sandbox_only 策略。
+
+### 系统架构
+
+新增 `SandboxExecutor`、`LocalProcessSandbox`、`CapabilityPolicy` 和 `ToolAuthorization`。`ToolDefinition` 增加向后兼容的 `capabilities` 与 `sandbox_only` 字段，并进入 AgentDefinition 不可变快照。Capability 决策新增 durable `tool.policy.evaluated` Event；活动进程与 Sandbox 容量属于 transient operational state，通过 Runtime、CLI、HTTP 和 Learning Console 快照读取，不占用 Event sequence。
+
+### 实现方式
+
+`LocalProcessSandbox` 只使用 argv 和 `asyncio.create_subprocess_exec()`，不使用 `shell=True`；执行前校验可执行文件白名单、Workspace cwd、环境变量白名单、timeout、总输出和并发。Run Cancel、输出超限、超时和 Runtime shutdown 会终止进程树。内置 `run_process` 同时声明 `process.exec`、`file.read` 和 `file.write`，默认要求 Sandbox 与人工审批；网络和 Secret capability 默认拒绝。
+
+### 当前功能
+
+支持 Python `LocalProcessSandbox`、`register_process_tool()`、`runtime.sandbox_snapshot()`、CLI `agent-runtime observe sandbox`、HTTP `GET /observability/sandbox`，以及 Learning Console“受限进程沙箱”审批场景。安全测试覆盖 argv 执行、可执行文件/环境/cwd 拒绝、timeout、输出上限、取消、进程树终止、Capability deny、Sandbox 强制、Approval 和 durable Event。
+
+### 已知限制
+
+`LocalProcessSandbox` 是受限本地进程适配器，不是容器或虚拟机；当前不提供网络强隔离、CPU/内存/PID 限制、系统调用过滤和不可信代码安全承诺。v0.8.0 尚未实现 DockerSandbox、SecretProvider、Secret 临时注入或 Secret 输出脱敏。包含 ToolCall 的事件序列新增一条 additive Event。
+
+### 测试与验收
+
+```powershell
+python scripts/check_docs.py
+python -m ruff check src tests scripts
+python -m mypy src\agent_runtime
+python -m pytest
+agent-runtime observe sandbox
+agent-runtime lab
+Invoke-RestMethod http://127.0.0.1:8000/observability/sandbox
+```
+
+### 后续计划
+
+继续 v0.8.x：优先实现 SecretProvider 与值级脱敏合同，再评估可选 DockerSandbox 的非 root、只读根文件系统、资源限制和默认禁网；在攻击面测试完成前不宣称强隔离。
 <a id="e2026-08-16-003"></a>
 ## E2026-08-16-003：v0.7.12 脱敏故障诊断包与根因摘要
 

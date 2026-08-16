@@ -28,6 +28,7 @@ REQUIRED_FILES = (
     "docs/OPERATIONS.md",
     "docs/OBSERVABILITY.md",
     "docs/INCIDENTS.md",
+    "docs/SANDBOX.md",
     "docs/adr/README.md",
     "docs/templates/change-entry.md",
     "docs/templates/adr.md",
@@ -45,6 +46,7 @@ CORE_PATHS = {
     "src/agent_runtime/memory.py",
     "src/agent_runtime/observability.py",
     "src/agent_runtime/incident.py",
+    "src/agent_runtime/sandbox.py",
     "src/agent_runtime/telemetry.py",
     "src/agent_runtime/evals.py",
 }

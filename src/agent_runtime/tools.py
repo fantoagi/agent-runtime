@@ -5,21 +5,115 @@ import inspect
 import json
 import os
 import tempfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .domain import (
+    CapabilityPolicyAction,
     RuntimeClosedError,
+    ToolCapability,
     ToolDefinition,
     ToolExecutionError,
     ToolOutcomeUnknown,
+    ToolPolicyDeniedError,
     ToolValidationError,
 )
 
 ToolHandler = Callable[[dict[str, Any], "ToolContext"], Any | Awaitable[Any]]
+
+
+class ManagedToolResource(Protocol):
+    def close(self) -> None: ...
+
+    async def aclose(self) -> None: ...
+
+    def snapshot(self) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ToolAuthorization:
+    allowed: bool
+    requires_approval: bool
+    sandbox_required: bool
+    capabilities: tuple[ToolCapability, ...]
+    reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "allowed": self.allowed,
+            "requires_approval": self.requires_approval,
+            "sandbox_required": self.sandbox_required,
+            "capabilities": [capability.value for capability in self.capabilities],
+            "reason": self.reason,
+        }
+
+
+class CapabilityPolicy:
+    """Combines capability rules; deny wins, then sandbox, then approval."""
+
+    def __init__(
+        self,
+        rules: Mapping[ToolCapability | str, CapabilityPolicyAction | str] | None = None,
+    ) -> None:
+        defaults: dict[ToolCapability, CapabilityPolicyAction] = {
+            ToolCapability.FILE_READ: CapabilityPolicyAction.ALLOW,
+            ToolCapability.FILE_WRITE: CapabilityPolicyAction.REQUIRE_APPROVAL,
+            ToolCapability.PROCESS_EXEC: CapabilityPolicyAction.SANDBOX_ONLY,
+            ToolCapability.NETWORK_ACCESS: CapabilityPolicyAction.DENY,
+            ToolCapability.SECRET_READ: CapabilityPolicyAction.DENY,
+        }
+        if rules:
+            defaults.update(
+                {
+                    ToolCapability(capability): CapabilityPolicyAction(action)
+                    for capability, action in rules.items()
+                }
+            )
+        self._rules = defaults
+
+    def evaluate(self, definition: ToolDefinition, *, sandboxed: bool) -> ToolAuthorization:
+        capabilities = tuple(ToolCapability(value) for value in definition.capabilities)
+        actions = [self._rules.get(capability, CapabilityPolicyAction.DENY) for capability in capabilities]
+        if CapabilityPolicyAction.DENY in actions:
+            denied = [
+                capability.value
+                for capability, action in zip(capabilities, actions, strict=True)
+                if action == CapabilityPolicyAction.DENY
+            ]
+            return ToolAuthorization(
+                allowed=False,
+                requires_approval=False,
+                sandbox_required=False,
+                capabilities=capabilities,
+                reason="Denied capabilities: " + ", ".join(denied),
+            )
+        sandbox_required = definition.sandbox_only or CapabilityPolicyAction.SANDBOX_ONLY in actions
+        if sandbox_required and not sandboxed:
+            return ToolAuthorization(
+                allowed=False,
+                requires_approval=False,
+                sandbox_required=True,
+                capabilities=capabilities,
+                reason="Tool policy requires a managed sandbox executor.",
+            )
+        return ToolAuthorization(
+            allowed=True,
+            requires_approval=(
+                definition.requires_approval
+                or CapabilityPolicyAction.REQUIRE_APPROVAL in actions
+            ),
+            sandbox_required=sandbox_required,
+            capabilities=capabilities,
+        )
+
+    def snapshot(self) -> dict[str, str]:
+        return {
+            capability.value: action.value
+            for capability, action in sorted(self._rules.items(), key=lambda item: item[0].value)
+        }
 
 
 class CancellationToken:
@@ -79,6 +173,7 @@ class RegisteredTool:
     definition: ToolDefinition
     handler: ToolHandler
     timeout_seconds: float = 30.0
+    sandboxed: bool = False
 
 
 class ToolRegistry:
@@ -87,6 +182,7 @@ class ToolRegistry:
         *,
         max_sync_workers: int = 8,
         max_pending_sync_tools: int = 32,
+        capability_policy: CapabilityPolicy | None = None,
     ) -> None:
         if max_sync_workers < 1:
             raise ValueError("max_sync_workers must be at least 1.")
@@ -98,6 +194,8 @@ class ToolRegistry:
         self._executor: ThreadPoolExecutor | None = None
         self._capacity = asyncio.Semaphore(max_pending_sync_tools)
         self._sync_futures: set[asyncio.Future[Any]] = set()
+        self._capability_policy = capability_policy or CapabilityPolicy()
+        self._managed_resources: list[ManagedToolResource] = []
         self._closed = False
 
     def capacity_snapshot(self) -> dict[str, int | bool]:
@@ -108,6 +206,7 @@ class ToolRegistry:
             ),
             "max_sync_workers": self._max_sync_workers,
             "max_pending_sync_tools": self._max_pending_sync_tools,
+            "managed_resources": len(self._managed_resources),
         }
 
     def configure_execution(self, *, max_sync_workers: int, max_pending_sync_tools: int) -> None:
@@ -128,6 +227,8 @@ class ToolRegistry:
         if self._closed:
             return
         self._closed = True
+        for resource in self._managed_resources:
+            resource.close()
         if self._executor is not None:
             self._executor.shutdown(wait=False, cancel_futures=True)
             self._executor = None
@@ -138,6 +239,27 @@ class ToolRegistry:
         pending = [future for future in self._sync_futures if not future.done()]
         if pending:
             await asyncio.wait(pending, timeout=max(0.0, timeout_seconds))
+        if self._managed_resources:
+            await asyncio.gather(
+                *(resource.aclose() for resource in self._managed_resources),
+                return_exceptions=True,
+            )
+
+    def manage(self, resource: ManagedToolResource) -> None:
+        if self._closed:
+            raise RuntimeClosedError("Tool registry is closed.")
+        if resource not in self._managed_resources:
+            self._managed_resources.append(resource)
+
+    def security_snapshot(self) -> dict[str, Any]:
+        return {
+            "policy": self._capability_policy.snapshot(),
+            "tools": {
+                name: self.authorization(name).to_dict()
+                for name in sorted(self._tools)
+            },
+            "sandboxes": [resource.snapshot() for resource in self._managed_resources],
+        }
 
     def _sync_executor(self) -> ThreadPoolExecutor:
         if self._closed:
@@ -154,11 +276,13 @@ class ToolRegistry:
         definition: ToolDefinition,
         handler: ToolHandler,
         timeout_seconds: float = 30.0,
+        *,
+        sandboxed: bool = False,
     ) -> None:
         if definition.name in self._tools:
             raise ValueError(f"Tool {definition.name!r} is already registered.")
         self._tools[definition.name] = RegisteredTool(
-            definition, handler, timeout_seconds
+            definition, handler, timeout_seconds, sandboxed
         )
 
     def get(self, name: str) -> RegisteredTool:
@@ -167,12 +291,25 @@ class ToolRegistry:
         except KeyError as error:
             raise ToolExecutionError(f"Tool {name!r} is not registered.") from error
 
+    def authorization(self, name: str) -> ToolAuthorization:
+        tool = self.get(name)
+        return self._capability_policy.evaluate(tool.definition, sandboxed=tool.sandboxed)
+
+    def require_authorized(self, name: str) -> ToolAuthorization:
+        authorization = self.authorization(name)
+        if not authorization.allowed:
+            raise ToolPolicyDeniedError(
+                f"Tool {name!r} is denied by capability policy: {authorization.reason}"
+            )
+        return authorization
+
     def definitions_for(
         self, definitions: list[ToolDefinition]
     ) -> list[ToolDefinition]:
         registered: list[ToolDefinition] = []
         for definition in definitions:
             tool = self.get(definition.name)
+            self.require_authorized(definition.name)
             registered.append(tool.definition)
         return registered
 
@@ -182,6 +319,7 @@ class ToolRegistry:
         if self._closed:
             raise RuntimeClosedError("Tool registry is closed.")
         tool = self.get(name)
+        self.require_authorized(name)
         validate_input(arguments, tool.definition.input_schema)
         context.raise_if_cancelled()
         started = False
@@ -303,6 +441,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
                 "additionalProperties": False,
             },
+            capabilities=(ToolCapability.FILE_READ,),
         ),
         _read_text_file,
     )
@@ -321,6 +460,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             requires_approval=True,
             side_effecting=True,
+            capabilities=(ToolCapability.FILE_WRITE,),
         ),
         _write_text_file,
     )

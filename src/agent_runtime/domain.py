@@ -50,6 +50,21 @@ class ToolExecutionStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ToolCapability(StrEnum):
+    FILE_READ = "file.read"
+    FILE_WRITE = "file.write"
+    PROCESS_EXEC = "process.exec"
+    NETWORK_ACCESS = "network.access"
+    SECRET_READ = "secret.read"
+
+
+class CapabilityPolicyAction(StrEnum):
+    ALLOW = "allow"
+    DENY = "deny"
+    REQUIRE_APPROVAL = "require_approval"
+    SANDBOX_ONLY = "sandbox_only"
+
+
 TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
 TERMINAL_TOOL_EXECUTION_STATUSES = {
     ToolExecutionStatus.COMPLETED,
@@ -134,6 +149,8 @@ class ToolDefinition:
     input_schema: dict[str, Any]
     requires_approval: bool = False
     side_effecting: bool = False
+    capabilities: tuple[ToolCapability, ...] = field(default_factory=tuple)
+    sandbox_only: bool = False
 
 
 @dataclass(slots=True)
@@ -549,6 +566,30 @@ class ToolOutcomeUnknown(ToolExecutionError):
 
 class ToolValidationError(ToolExecutionError):
     pass
+
+
+class ToolPolicyDeniedError(ToolExecutionError):
+    """A tool or capability is blocked by the configured execution policy."""
+
+
+class SandboxError(ToolExecutionError):
+    """Base class for bounded sandbox execution failures."""
+
+
+class SandboxViolationError(SandboxError):
+    """A sandbox request attempted to cross an explicit security boundary."""
+
+
+class SandboxExecutionError(SandboxError):
+    """The sandbox process could not be started or managed safely."""
+
+
+class SandboxTimeoutError(SandboxExecutionError):
+    """The sandbox terminated a process after its bounded timeout."""
+
+
+class SandboxOutputLimitError(SandboxExecutionError):
+    """The sandbox terminated a process after its output budget was exceeded."""
 
 
 class RunLimitExceeded(RuntimeErrorBase):

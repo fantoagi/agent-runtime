@@ -1,8 +1,8 @@
 # Agent Runtime Learning Console 使用指南
 
-Learning Console v0.7.12 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context 和 Artifact 的真实执行事实放到同一个浏览器页面中。
+Learning Console v0.8.0 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context、Artifact 和 v0.8 Sandbox/Capability 的真实执行事实放到同一个浏览器页面中。
 
-> 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。v0.7.12 的 SQLite Inspector 还展示确定性失败根因，顶部“诊断包”入口可以下载脱敏支持 ZIP。
+> 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。v0.8.0 的 SQLite Inspector 还展示确定性失败根因，顶部“诊断包”入口可以下载脱敏支持 ZIP。
 
 ## 1. 一条命令启动
 
@@ -43,17 +43,18 @@ uvicorn agent_runtime.api.app:app --reload
 
 ### 左侧：Learning Path
 
-选择确定性学习场景。v0.7.7 提供以下 9 个真实 Runtime 场景：
+选择确定性学习场景。v0.8.0 提供以下 10 个真实 Runtime 场景：
 
 1. 纯文本响应。
 2. Tool Calling。
 3. Token Streaming。
 4. Human Approval。
-5. v0.6 多 Agent 串行协作。
-6. v0.6 多 Agent 并行协作。
-7. v0.7 Session 与作用域记忆。
-8. v0.7 Context Compaction。
-9. v0.7 大 Tool Result Artifact 化。
+5. v0.8 受限进程 Sandbox 与 Capability 审批。
+6. v0.6 多 Agent 串行协作。
+7. v0.6 多 Agent 并行协作。
+8. v0.7 Session 与作用域记忆。
+9. v0.7 Context Compaction。
+10. v0.7 大 Tool Result Artifact 化。
 每张卡片都包含默认输入、学习目标、预期事件路径和自动验收规则。
 
 ### 中间：Durable Event Log
@@ -274,7 +275,7 @@ python -m pytest -p no:cacheprovider -q
 python scripts/check_docs.py
 ```
 
-Learning Console 测试覆盖：9 个场景目录、真实 Runtime、Approval、串行/并行 Parent/Child、TraceTree、Session/Memory 检索、Context Compaction、Artifact 文件、聚合 Snapshot、SQLite 统计和自动验收；当前全量测试为 `55 passed`，并验证串行/并行 Child metadata 可稳定生成独立泳道顺序。
+Learning Console 测试覆盖：10 个场景目录、真实 Runtime、Approval、串行/并行 Parent/Child、TraceTree、Session/Memory 检索、Context Compaction、Artifact 文件、聚合 Snapshot、SQLite 统计和自动验收；并验证串行/并行 Child metadata 可稳定生成独立泳道顺序。
 
 ## 可靠性状态怎么读
 从 v0.7.10 起，`SQLite` Inspector 会显示 Backup format 与 `offline only` 恢复边界，并给出 `python scripts/run_backup_recovery.py` 演练命令。备份恢复属于 Runtime 外部运维流程，不会伪装成新的 Agent 场景或 Event。
@@ -302,3 +303,8 @@ python scripts/run_crash_recovery.py
 ```
 
 观察重点：进程崩溃后 Run 不会被误标记成功；副作用 Tool 进入 UNKNOWN 后必须确认结果；确认动作会产生 `tool.outcome_confirmed`，Run 保持 PAUSED，只有显式 `resume()` 才继续。
+## v0.8 Sandbox 场景怎么学
+
+选择“受限进程沙箱”后，模型先生成结构化 `run_process` ToolCall。事件泳道会先出现 `tool.policy.evaluated`，显示 `process.exec`、`file.read` 和 `file.write` 的组合决策；随后 Run 停在 `approval.requested`。批准后才会进入 `tool.requested` 和 `tool.started`。
+
+SQLite Inspector 的 `SANDBOX & CAPABILITY` 区域展示默认 policy、Sandbox 类型、active process、并发和隔离声明。请重点区分：`sandbox_only` 表示必须经过受管理执行器，不等于已经获得容器级强隔离。完整边界见 [SANDBOX.md](./SANDBOX.md)。

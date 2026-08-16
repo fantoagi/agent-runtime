@@ -58,7 +58,7 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.7.12"
+        assert health.json()["version"] == "0.8.0"
         assert health.json()["store"]["schema_version"] == 8
 
         invalid = await client.post("/runs", json={"input": ""})
@@ -206,6 +206,7 @@ async def test_observability_api_exposes_trace_and_metrics(workspace: Path) -> N
         metrics = await client.get("/observability/metrics")
         prometheus = await client.get("/observability/metrics/prometheus")
         diagnostics = await client.get("/observability/diagnostics")
+        sandbox = await client.get("/observability/sandbox")
 
     assert trace.status_code == 200
     assert trace.json()["run_id"] == run_id
@@ -215,10 +216,12 @@ async def test_observability_api_exposes_trace_and_metrics(workspace: Path) -> N
     assert metrics.json()["total_runs"] == 1
     assert metrics.json()["model_requests"] == 1
     assert diagnostics.status_code == 200
-    assert diagnostics.json()["version"] == "0.7.12"
+    assert diagnostics.json()["version"] == "0.8.0"
     assert diagnostics.json()["runtime"]["state"] == "accepting"
     assert diagnostics.json()["store"]["status"] == "ok"
     assert diagnostics.json()["process"]["thread_count"] >= 1
+    assert sandbox.status_code == 200
+    assert sandbox.json()["policy"]["network.access"] == "deny"
     assert prometheus.status_code == 200
     assert "agent_runtime_runs_total" in prometheus.text
 
@@ -505,7 +508,7 @@ async def test_incident_bundle_endpoint_returns_redacted_zip(workspace: Path) ->
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         manifest = json.loads(archive.read("manifest.json"))
         assert manifest["scope_run_id"] == completed.id
-        assert manifest["runtime_version"] == "0.7.12"
+        assert manifest["runtime_version"] == "0.8.0"
 
 
 @pytest.mark.asyncio
