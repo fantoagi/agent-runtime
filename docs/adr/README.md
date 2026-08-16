@@ -26,6 +26,7 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
+| [ADR-0026](./0026-local-runtime-bootstrap-single-owner.md) | Accepted | 2026-08-16 | 本地 Runtime 配置驱动启动与单执行 Owner | E2026-08-16-005 |
 | [ADR-0025](./0025-local-process-sandbox-capability-policy.md) | Accepted | 2026-08-16 | LocalProcessSandbox 与 Tool Capability 显式允许边界 | E2026-08-16-004 |
 | [ADR-0024](./0024-incident-diagnostic-bundle.md) | Accepted | 2026-08-16 | 故障诊断包允许列表、内容排除与原子导出 | E2026-08-16-003 |
 | [ADR-0023](./0023-operational-observability.md) | Accepted | 2026-08-16 | 持久化事实与瞬时运维信号分层 | E2026-08-16-002 |

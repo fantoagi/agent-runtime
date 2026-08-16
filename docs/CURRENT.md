@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.8.0`
-- **当前里程碑**：v0.8.0 Local Process Sandbox & Tool Capability
+- **当前版本**：`0.8.1`
+- **当前里程碑**：v0.8.1 Local Stable Runtime
 - **Runtime 构建完成时间**：2026-08-16（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
-- **当前代码基线 commit**：`0ccff33`
-- **最近演进记录**：[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)
+- **当前代码基线 commit**：`pending`
+- **最近演进记录**：[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)
 
 ## 状态定义
 
@@ -26,6 +26,7 @@
 | Tool Registry 与安全执行 | ✅ stable | 参数校验、有界线程池、背压、超时、取消、UNKNOWN、原子文件写入和 capability 决策 | E2026-08-15-005、E2026-08-16-004 |
 | SQLite Event Log 与恢复 | ✅ stable | WAL、FULL、quick_check、busy retry、事务 sequence、AgentDefinition 快照和 schema 1–8 迁移 | E2026-08-15-006、E2026-08-15-009、E2026-08-15-010 |
 | Runtime 生命周期与准入 | ✅ stable | `shutdown()`、跨进程 `wait()`、崩溃协调、顶层 Run 容量限制和模型请求并发限制 | E2026-08-15-006、E2026-08-15-008、E2026-08-15-009 |
+| 本地稳定 Runtime 入口 | ✅ stable | TOML 配置、`init/serve/status`、loopback、单 Owner Lock、轮转日志和本地验收脚本 | E2026-08-16-005 |
 | FastAPI 与 SSE | ✅ stable | 健康检查、heartbeat、断线恢复、Runtime 所有权、幂等提交和 429 背压 | E2026-08-15-007、E2026-08-15-009 |
 | 多 Agent Workflow | ✅ stable | Parent/Child、串行/并行、幂等委派、取消传播、Workflow 与 AgentDefinition 确切快照 | E2026-08-14-007、E2026-08-15-006、E2026-08-15-010 |
 | Context、Session、Memory 与 Artifact | ✅ stable | token budget、FTS5 scoped memory、TTL、软删除和大结果 Artifact 化 | E2026-08-15-001 |
@@ -46,7 +47,7 @@
 
 | 能力 | 状态 | 说明 | 演进记录 |
 | --- | --- | --- | --- |
-| v0.8 Docker Sandbox / Secret | 📋 planned | LocalProcessSandbox 与 capability 已完成第一阶段；后续补充 SecretProvider 和可选 Docker 强隔离 | E2026-08-16-004 |
+| Docker Sandbox / SecretProvider | 📋 planned | 已移出本地稳定版关键路径；只有真实本地使用产生明确需求后再启动 | E2026-08-16-004、E2026-08-16-005 |
 | 分布式 Worker 与 Queue | 📋 planned | 不属于当前单机可靠性范围 | E2026-08-15-007 |
 | 多租户与权限治理 | 📋 planned | 等待身份、审计和隔离模型设计 | E2026-08-15-007 |
 
@@ -66,12 +67,14 @@
 - Workflow 与普通 Run 可从不可变 AgentDefinition 快照恢复；Python Tool Handler 和 Model Provider 实现仍必须由新进程提供。
 - Nightly 的 30 分钟 soak 不作为每个 PR 的阻塞时长。
 - LocalProcessSandbox 不提供网络、系统调用或解释器内部行为的强隔离，不能用于执行任意不可信代码。
+- `runtime.lock` 是标准 `serve` 的本机单 Owner 约束，不是跨主机 Lease；Python SDK 仍由调用方负责实例所有权。
+- 本地服务只允许 loopback，不提供认证、公网访问或后台 Windows Service 安装。
 - Learning Console 是教学与诊断 Adapter，不是生产运维控制台。`max_inflight_runs` 是单进程容量，不是分布式全局配额。`v0.7.10+` 备份只能恢复到原数据库和 Artifact 绝对路径。结构化日志不替代 SQLite 恢复事实。诊断包采用允许列表且不能用于恢复，对外发送前仍需人工复核。
 
 ## 当前测试状态
 
-- 自动化测试：`204 passed`（2026-08-16，本地 Python 3.13），包含单元、集成、定义快照、幂等并发、容量背压、真实进程强杀与备份恢复测试。
-- Core line coverage：`92.47%`；core branch coverage：`80.92%`。
+- 自动化测试：`214 passed`（2026-08-16，本地 Python 3.13），包含单元、集成、配置边界、跨进程 Owner Lock、定义快照、幂等并发、容量背压、真实进程强杀与备份恢复测试。
+- Core line coverage：`91.71%`；core branch coverage：`80.10%`。
 - PR：Ubuntu Python 3.11/3.12/3.13、Windows Python 3.13。
 - Nightly：100 并发、20 轮 Crash Matrix、备份恢复演练、故障测试重复、30 分钟 soak 和性能回退检查。
 
@@ -83,16 +86,21 @@ cd D:\AICoding\Agent
 python -m pip install -e ".[api,quality]"
 python scripts/check_docs.py
 python -m pytest
-agent-runtime observe sandbox
-agent-runtime lab
+agent-runtime init
+agent-runtime status
+agent-runtime serve
 ```
 
 ### FastAPI / SSE
 
+标准本地入口：
+
 ```powershell
-uvicorn agent_runtime.api.app:app --reload
+agent-runtime serve
 Invoke-RestMethod http://127.0.0.1:8000/health
 ```
+
+确定性教学 Demo 仍可使用 `uvicorn agent_runtime.api.app:app --reload`。
 
 ### 可靠性快速验证
 

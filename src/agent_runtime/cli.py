@@ -12,6 +12,19 @@ from .doctor import RuntimeDoctor
 from .domain import BackupError
 from .evals import EvalCase, EvalRunner, EvalSuite
 from .incident import IncidentDiagnosticsService
+from .local_config import (
+    LocalConfigError,
+    LocalRuntimeSettings,
+    load_local_settings,
+    resolve_local_config_path,
+    write_default_local_config,
+)
+from .local_runtime import (
+    LocalRuntimeLock,
+    LocalRuntimeLockError,
+    create_configured_local_runtime,
+    local_runtime_status,
+)
 from .observability import ObservabilityService
 from .sdk import (
     create_local_runtime,
@@ -30,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--workspace",
-        default=".",
+        default=None,
         help="Workspace available to built-in tools (default: current directory)",
     )
     parser.add_argument(
@@ -39,11 +52,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Runtime state directory (default: <workspace>/.agent-runtime)",
     )
     parser.add_argument(
+        "--config",
+        default=None,
+        help="Local Runtime TOML configuration (default: <workspace>/agent-runtime.toml)",
+    )
+    parser.add_argument(
         "--json-logs",
         action="store_true",
         help="Emit bounded structured Runtime logs as JSON lines on stderr",
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
+
+    init = subcommands.add_parser("init", help="Create a local single-user Runtime configuration")
+    init.add_argument("--force", action="store_true", help="Replace an existing configuration")
+
+    serve = subcommands.add_parser("serve", help="Run the configured local Runtime API")
+    serve.add_argument("--host", default=None, help="Loopback host override")
+    serve.add_argument("--port", type=int, default=None, help="HTTP port override")
+
+    subcommands.add_parser("status", help="Show local Runtime ownership and state health")
 
     lab = subcommands.add_parser("lab", help="Launch the visual Agent Runtime Learning Console")
     lab.add_argument("--host", default="127.0.0.1")
@@ -174,14 +201,110 @@ def _print(value: Any) -> None:
 
 
 def _runtime_state_paths(arguments: argparse.Namespace) -> tuple[Path, Path, Path]:
-    workspace = Path(arguments.workspace).resolve()
+    workspace = Path(arguments.workspace or ".").resolve()
     state_dir = Path(arguments.state_dir or workspace / ".agent-runtime").resolve()
     return state_dir, state_dir / "runtime.sqlite3", state_dir / "artifacts"
+
+
+def _local_settings(arguments: argparse.Namespace) -> LocalRuntimeSettings:
+    config_path = resolve_local_config_path(arguments.config, arguments.workspace)
+    return load_local_settings(
+        config_path,
+        workspace_override=arguments.workspace,
+        state_dir_override=arguments.state_dir,
+        host_override=getattr(arguments, "host", None),
+        port_override=getattr(arguments, "port", None),
+    )
+
+
+async def _serve_local(arguments: argparse.Namespace) -> int:
+    try:
+        import uvicorn
+    except ImportError as error:
+        raise RuntimeError(
+            "Local Runtime server requires API dependencies. Run `pip install -e .[api]`.",
+        ) from error
+    from .api.app import create_app
+
+    settings = _local_settings(arguments)
+    configure_structured_logging(
+        level=settings.log_level,
+        file_path=settings.log_file,
+        max_bytes=settings.log_max_bytes,
+        backup_count=settings.log_backup_count,
+    )
+    lock = LocalRuntimeLock(settings.lock_path)
+    lock.acquire()
+    runtime = None
+    try:
+        runtime = create_configured_local_runtime(settings)
+        app = create_app(
+            runtime,
+            default_agent=settings.agent_name,
+            shutdown_runtime=True,
+        )
+        print(f"Local Runtime: http://{settings.host}:{settings.port}")
+        print(f"Configuration: {settings.config_path}")
+        print(f"State: {settings.state_dir}")
+        server = uvicorn.Server(
+            uvicorn.Config(
+                app,
+                host=settings.host,
+                port=settings.port,
+                log_level=settings.log_level.lower(),
+            )
+        )
+        await server.serve()
+        return 0
+    finally:
+        if runtime is not None:
+            await runtime.shutdown(timeout_seconds=settings.shutdown_timeout_seconds)
+        lock.release()
 
 
 async def async_main(arguments: argparse.Namespace) -> int:
     if arguments.json_logs:
         configure_structured_logging()
+
+    if arguments.command == "init":
+        try:
+            workspace = Path(arguments.workspace or ".").resolve()
+            config_path = resolve_local_config_path(arguments.config, workspace)
+            created = write_default_local_config(
+                config_path,
+                workspace=workspace,
+                state_dir=arguments.state_dir,
+                force=arguments.force,
+            )
+            settings = load_local_settings(created)
+            settings.state_dir.mkdir(parents=True, exist_ok=True)
+            _print(
+                {
+                    "status": "initialized",
+                    "configuration": str(created),
+                    "state_dir": str(settings.state_dir),
+                    "next": f"agent-runtime --config {created} serve",
+                }
+            )
+            return 0
+        except LocalConfigError as error:
+            _print({"status": "error", "code": type(error).__name__, "detail": str(error)})
+            return 2
+
+    if arguments.command == "status":
+        try:
+            _print(local_runtime_status(_local_settings(arguments)))
+            return 0
+        except LocalConfigError as error:
+            _print({"status": "error", "code": type(error).__name__, "detail": str(error)})
+            return 2
+
+    if arguments.command == "serve":
+        try:
+            return await _serve_local(arguments)
+        except (LocalConfigError, LocalRuntimeLockError) as error:
+            _print({"status": "error", "code": type(error).__name__, "detail": str(error)})
+            return 2
 
     if arguments.command == "backup":
         state_dir, database_path, artifact_path = _runtime_state_paths(arguments)
@@ -230,7 +353,7 @@ async def async_main(arguments: argparse.Namespace) -> int:
         from .api.app import create_demo_app
 
         app = create_demo_app(
-            arguments.workspace,
+            arguments.workspace or ".",
             arguments.state_dir,
             enable_learning_console=True,
         )
@@ -253,7 +376,7 @@ async def async_main(arguments: argparse.Namespace) -> int:
 
     if arguments.command == "memory":
         runtime = create_memory_demo_runtime(
-            Path(arguments.workspace), arguments.state_dir
+            Path(arguments.workspace or "."), arguments.state_dir
         )
         session = runtime.create_session({"demo": "memory"})
         memory = runtime.remember(
@@ -283,7 +406,7 @@ async def async_main(arguments: argparse.Namespace) -> int:
 
     if arguments.command == "workflow":
         runtime = create_multi_agent_demo_runtime(
-            Path(arguments.workspace), arguments.state_dir
+            Path(arguments.workspace or "."), arguments.state_dir
         )
         execution = await multi_agent_demo_workflow().run(runtime, arguments.input)
         _print(
@@ -296,7 +419,7 @@ async def async_main(arguments: argparse.Namespace) -> int:
         )
         return 0 if execution.parent.status == "completed" else 1
 
-    runtime = create_local_runtime(Path(arguments.workspace), arguments.state_dir)
+    runtime = create_local_runtime(Path(arguments.workspace or "."), arguments.state_dir)
     runtime.register_agent(demo_agent())
 
     if arguments.command == "demo":

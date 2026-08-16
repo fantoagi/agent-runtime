@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
 - **最近更新**：2026-08-16
-- **当前版本**：v0.8.0
-- **当前阶段**：v0.8.0 Local Process Sandbox 与 Tool Capability 完成；继续 v0.8.x Secret 与可选 Docker 强隔离
+- **当前版本**：v0.8.1
+- **当前阶段**：v0.8.1 Local Stable Runtime 已完成；进入真实本地使用、问题收集和稳定性修复
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -15,6 +15,7 @@
 | 🚧 in-progress | 正在实现，同一时间最多存在一个主里程碑 |
 | 📋 planned | 已确定方向和顺序，但尚未开始实现 |
 | 💡 candidate | 候选方向，需要进一步验证价值和依赖 |
+| ⏸ deferred | 已明确延期，不是当前下一步 |
 | ⛔ out-of-scope | 当前路线明确不优先实现 |
 
 ## 版本总览
@@ -44,9 +45,10 @@
 | v0.7.11 | ✅ completed | 结构化日志、失败聚合、p95 与综合运行诊断 | [E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002) |
 | v0.7.12 | ✅ completed | 脱敏故障诊断包、确定性根因摘要与支持协作入口 | [E2026-08-16-003](./CHANGELOG.md#e2026-08-16-003) |
 | v0.8.0 | ✅ completed | LocalProcessSandbox、Tool Capability、审批与安全观测 | [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004) |
-| v0.9 | 📋 planned | 分布式 Worker、Queue 与 Lease | — |
-| v0.10 | 📋 planned | 多租户、权限、预算和生产治理 | — |
-| v1.0 | 📋 planned | 稳定 Runtime Contract 与生产发布 | — |
+| v0.8.1 | ✅ completed | 配置驱动本地服务、单 Owner Lock、轮转日志与独立运行验收 | [E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005) |
+| v0.9 | ⏸ deferred | 分布式 Worker、Queue 与 Lease | — |
+| v0.10 | ⏸ deferred | 多租户、权限、预算和生产治理 | — |
+| v1.0 | ⏸ deferred | 稳定 Runtime Contract 与生产发布 | — |
 
 ## 演进原则
 
@@ -230,43 +232,41 @@
 - 不提供 CPU/RSS 等资源趋势。
 - 根因分类是规则系统，不是完整因果推理或模型诊断。
 
-## v0.8：Sandbox、Tool Capability 与 Secret 安全
+## v0.8：本地可执行与本地稳定运行
 
-- **状态**：🚧 in-progress
+- **状态**：✅ completed
 - **前置版本**：v0.7.12
-- **已完成阶段**：v0.8.0 [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)
-- **目标**：为代码、进程、文件、网络和 Secret 工具建立明确的执行隔离和能力授权边界。
+- **完成阶段**：v0.8.0 [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、v0.8.1 [E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)
+- **目标**：在单机、单用户、本地可信环境中，既能受限执行本地进程，又能通过统一配置和 CLI 长期、稳定、可恢复地运行 Runtime。
 
-### 计划范围
+### 已完成范围
 
-- ✅ `SandboxExecutor` 协议。
-- ✅ `LocalProcessSandbox`：无 `shell=True`、可执行文件/cwd/环境白名单、超时、输出限制、并发和进程树取消。
-- 📋 可选 `DockerSandbox`：非 root、只读根文件系统、CPU/内存/PID 限制和默认禁网。
-- ✅ Tool Capability 声明和 `allow`、`deny`、`require_approval`、`sandbox_only` 策略。
-- 📋 `SecretProvider`、运行时临时注入和值级输出脱敏。
-- 📋 Artifact MIME、大小、SHA-256、provenance 和生命周期增强。
+- v0.8.0：`SandboxExecutor`、`LocalProcessSandbox`、Tool Capability、Approval、argv、白名单、timeout、输出限制、并发限制和进程树取消。
+- v0.8.1：`agent-runtime.toml`、`init/serve/status`、loopback 绑定、状态目录单 Owner Lock、强杀遗留锁回收、轮转结构化日志和本地验收脚本。
+- FastAPI 默认 `app` 惰性构造，import Adapter 不再产生隐藏 Runtime 或 SQLite 副作用。
+- Wheel 验证覆盖本地初始化、状态、服务健康、重复 Owner 拒绝和重启。
 
-### 验收重点
+### 当前支持边界
 
-- Run Cancel 可以终止 Sandbox 中的活动任务。
-- Secret 不进入 Prompt、Event、Checkpoint、Trace 和 Eval Report。
-- Workspace 和容器文件边界不能被路径逃逸绕过。
-- 高风险能力默认需要审批或拒绝。
+- 支持单机 Windows，兼容 Linux；使用本地 SQLite 和可信 Tool/脚本。
+- `LocalProcessSandbox` 是受限进程适配器，不是容器或虚拟机。
+- API 只监听 loopback；API Key 由本机环境变量提供。
+- 不承诺任意不可信代码执行、网络强隔离或公网服务。
 
-### 明确非目标
+### 延期候选
 
-- 在所有操作系统上提供完全一致的强隔离。
-- Kubernetes 和 Firecracker 调度。
-- 自动安装任意不可信依赖。
+- 💡 DockerSandbox：只有在真实本地任务需要运行不可信代码时再评估。
+- 💡 SecretProvider：只有在环境变量无法满足本地凭据管理时再评估。
+- 💡 Artifact 生命周期增强：由真实文件规模和清理需求触发。
 
-### 预计 ADR
+### 关联 ADR
 
 - [ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)：LocalProcessSandbox 与 Tool Capability 显式允许边界。
-- 后续 ADR：SecretProvider、DockerSandbox 与强隔离边界。
+- [ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)：配置驱动本地启动与单执行 Owner。
 
 ## v0.9：分布式 Worker、Queue 与 Lease
 
-- **状态**：📋 planned
+- **状态**：⏸ deferred
 - **前置版本**：v0.8
 - **目标**：将 API、调度和执行分离，使 Run 可以被多个 Worker 安全领取、续租、恢复和接管。
 
@@ -300,7 +300,7 @@
 
 ## v0.10：多租户、权限、预算和生产治理
 
-- **状态**：📋 planned
+- **状态**：⏸ deferred
 - **前置版本**：v0.9
 - **目标**：让 Runtime 可以被多个用户和应用安全使用，并具备成本、权限和审计边界。
 
@@ -334,7 +334,7 @@
 
 ## v1.0：稳定 Runtime Contract 与生产发布
 
-- **状态**：📋 planned
+- **状态**：⏸ deferred
 - **前置版本**：v0.10
 - **目标**：冻结关键公共协议，提供可升级、可部署、可恢复和有兼容性保证的第一个稳定版本。
 

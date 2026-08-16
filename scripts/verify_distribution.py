@@ -66,6 +66,118 @@ def main() -> int:
         cli = scripts / ("agent-runtime.exe" if os.name == "nt" else "agent-runtime")
         run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=workspace)
         run([str(python), "-m", "pip", "install", f"{wheel}[api]"], cwd=workspace)
+        run([str(cli), "--workspace", str(workspace), "init"], cwd=workspace)
+        initialized_status = run_capture(
+            [str(cli), "--workspace", str(workspace), "status"],
+            cwd=workspace,
+        )
+        initialized_payload = json.loads(initialized_status.stdout)
+        assert initialized_payload["status"] == "stopped", initialized_payload
+        assert initialized_payload["version"] == "0.8.1", initialized_payload
+
+        local_service_smoke = textwrap.dedent(
+            """
+            import json
+            import os
+            import socket
+            import subprocess
+            import sys
+            import time
+            from pathlib import Path
+
+            import httpx
+
+
+            workspace = Path.cwd()
+            scripts = Path(sys.executable).parent
+            cli = scripts / ("agent-runtime.exe" if os.name == "nt" else "agent-runtime")
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            command = [
+                str(cli),
+                "--workspace",
+                str(workspace),
+                "serve",
+                "--port",
+                str(port),
+            ]
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+            def start_and_wait():
+                process = subprocess.Popen(
+                    command,
+                    cwd=workspace,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=creationflags,
+                )
+                for _ in range(200):
+                    if process.poll() is not None:
+                        raise AssertionError(f"local serve exited early: {process.returncode}")
+                    try:
+                        response = httpx.get(
+                            f"http://127.0.0.1:{port}/health",
+                            timeout=0.5,
+                        )
+                        if response.status_code == 200:
+                            payload = response.json()
+                            assert payload["status"] == "ok", payload
+                            assert payload["version"] == "0.8.1", payload
+                            return process
+                    except httpx.HTTPError:
+                        pass
+                    time.sleep(0.05)
+                process.terminate()
+                process.wait(timeout=10)
+                raise AssertionError("local serve did not become healthy")
+
+
+            first = start_and_wait()
+            try:
+                status = subprocess.run(
+                    [str(cli), "--workspace", str(workspace), "status"],
+                    cwd=workspace,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                status_payload = json.loads(status.stdout)
+                assert status_payload["status"] == "running", status_payload
+                assert status_payload["lock"]["status"] == "active", status_payload
+
+                duplicate = subprocess.run(
+                    command,
+                    cwd=workspace,
+                    text=True,
+                    capture_output=True,
+                    creationflags=creationflags,
+                )
+                assert duplicate.returncode == 2, duplicate
+                duplicate_payload = json.loads(duplicate.stdout)
+                assert duplicate_payload["code"] == "LocalRuntimeLockError", duplicate_payload
+            finally:
+                first.terminate()
+                first.wait(timeout=10)
+
+            # A forced stop leaves a stale file; the next standard serve must reclaim it.
+            second = start_and_wait()
+            second.terminate()
+            second.wait(timeout=10)
+            stopped = subprocess.run(
+                [str(cli), "--workspace", str(workspace), "status"],
+                cwd=workspace,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            stopped_payload = json.loads(stopped.stdout)
+            assert stopped_payload["status"] == "stopped", stopped_payload
+            """
+        )
+        run([str(python), "-c", local_service_smoke], cwd=workspace)
+
         demo = run_capture(
             [
                 str(cli),
@@ -91,7 +203,7 @@ def main() -> int:
             cwd=workspace,
         )
         diagnostics_payload = json.loads(diagnostics.stdout)
-        assert diagnostics_payload["version"] == "0.8.0", diagnostics_payload
+        assert diagnostics_payload["version"] == "0.8.1", diagnostics_payload
         assert diagnostics_payload["store"]["status"] == "ok", diagnostics_payload
 
         incident = workspace / "incident.zip"
@@ -109,7 +221,7 @@ def main() -> int:
         )
         with zipfile.ZipFile(incident) as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            assert manifest["runtime_version"] == "0.8.0", manifest
+            assert manifest["runtime_version"] == "0.8.1", manifest
             assert "diagnostics.json" in archive.namelist()
 
         backup = workspace / "runtime.agent-backup"
@@ -182,7 +294,7 @@ def main() -> int:
                     health = await client.get("/health")
                     health.raise_for_status()
                     assert health.json()["status"] == "ok"
-                    assert health.json()["version"] == "0.8.0"
+                    assert health.json()["version"] == "0.8.1"
                     sandbox_status = await client.get("/observability/sandbox")
                     sandbox_status.raise_for_status()
                     assert sandbox_status.json()["policy"]["network.access"] == "deny"

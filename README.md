@@ -1,233 +1,109 @@
 # Agent Runtime
 
-A small, durable single-agent and multi-agent runtime with model-provider abstraction, structured tool
-execution, SQLite migrations, durable steps, idempotent recovery, event streaming, token streaming,
-checkpoints, approval gates, cooperative cancellation, persistent Parent/Child delegation, sequential and parallel workflows, budgeted context building, sessions, scoped long-term memory, trace trees, metrics, evals, Tool Capability policy, a bounded local process sandbox, a CLI, and a visual Learning Console.
+一个以 Python + SQLite 实现的可持久化 Agent Runtime。当前版本是 **v0.8.1 Local Stable Runtime**，优先解决单机、单用户、本地可信环境下的稳定启动、持续运行、恢复、诊断和学习问题。
 
-## Quick start
+当前支持单 Agent、多 Agent Workflow、Tool Calling、Model Streaming、Approval、Checkpoint、Session/Memory、FastAPI/SSE、备份恢复、诊断、Learning Console，以及受限本地进程 Sandbox。当前不把公网部署、分布式 Worker、多租户、Docker 强隔离和 Secret 生命周期作为本地稳定版的前置条件。
+
+## 最短路径：启动本地 Runtime
 
 ```powershell
 cd D:\AICoding\Agent
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e .[api]
-python -m pip install pytest pytest-asyncio
+python -m pip install -e ".[api]"
+
+agent-runtime init
+agent-runtime status
+agent-runtime serve
+```
+
+默认配置使用离线 `MockProvider`，服务只监听 `127.0.0.1:8000`。另开一个 PowerShell 验证：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+agent-runtime status
+```
+
+停止服务时在运行窗口按 `Ctrl+C`。完整配置、单实例锁、日志和恢复说明见 [本地稳定 Runtime 运行指南](./docs/LOCAL_RUNTIME.md)。
+
+## 接入真实模型
+
+初始化后编辑 `agent-runtime.toml`：
+
+```toml
+[model]
+provider = "openai-compatible"
+model = "your-model"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+```
+
+然后在本机设置环境变量并启动：
+
+```powershell
+$env:OPENAI_API_KEY = "..."
+agent-runtime serve
+```
+
+配置文件只保存环境变量名称，不保存 API Key 明文。
+
+## 可视化学习
+
+```powershell
 agent-runtime lab
-# Or run the CLI-only demo:
+```
+
+浏览器中的 Learning Console 会展示真实 Runtime 执行产生的事件、独立 Agent 泳道、Parent/Child 委派、Tool、Model Delta、Checkpoint、Memory、Artifact 和 Sandbox 状态。它是教学入口，不替代正式的 `agent-runtime serve` 本地服务入口。
+
+详见 [Learning Console 使用指南](./docs/LEARNING.md)。
+
+## 常用命令
+
+```powershell
+# 离线算术 Demo
 agent-runtime demo "19 * 23"
-```
 
-The demo uses a deterministic local provider. Set `OPENAI_API_KEY` and select the
-OpenAI-compatible provider in application code when connecting to a real model.
+# 多 Agent 串行 Workflow
+agent-runtime workflow demo "分析一个需求并给出结论"
 
-## v0.8.0 Local Process Sandbox & Tool Capability
-
-当前版本开始建立代码型 Agent 的安全执行边界：Tool 可以声明 `file.read`、`file.write`、`process.exec`、`network.access` 和 `secret.read` capability，Runtime 在执行前统一合并 allow、deny、require_approval 和 sandbox_only 策略。
-
-```powershell
-agent-runtime observe sandbox
-Invoke-RestMethod http://127.0.0.1:8000/observability/sandbox
-agent-runtime lab
-```
-
-`LocalProcessSandbox` 使用 argv、可执行文件白名单、Workspace cwd、环境变量白名单、timeout、输出限制、并发和进程树取消；它不是容器或虚拟机，当前不承诺任意不可信代码或网络强隔离。完整说明见 [Sandbox 与 Tool Capability 指南](./docs/SANDBOX.md)。
-
-## v0.7.12 Incident Diagnostics & Support Bundle
-
-当前版本可以一键生成采用允许列表的脱敏诊断 ZIP，并对 Provider、Tool、UNKNOWN 和 Runtime 失败生成确定性根因摘要：
-
-```powershell
-agent-runtime observe incident-bundle --output incident.zip
-Invoke-WebRequest http://127.0.0.1:8000/observability/incident-bundle -OutFile incident-api.zip
-```
-
-诊断包明确排除 Prompt、Tool 参数/结果、Memory、Checkpoint 消息、Artifact、SQLite 和原始错误文本。完整说明见 [故障诊断包与根因摘要指南](./docs/INCIDENTS.md)。
-## v0.7.11 Operational Observability & Diagnostics
-
-当前版本增加结构化 JSON 日志、Provider attempt/retry 持久化事件、Model/Tool p95、失败聚合和综合运行诊断：
-
-```powershell
+# 状态、诊断与备份
+agent-runtime status
+agent-runtime doctor --json
 agent-runtime observe diagnostics
-agent-runtime --json-logs demo "19 * 23" 2> runtime.jsonl
-Invoke-RestMethod http://127.0.0.1:8000/observability/diagnostics
+agent-runtime backup create
+
+# 本地稳定性自动验收
+python scriptserify_local_runtime.py --runs 100 --concurrency 8
 ```
 
-完整信号语义和排障顺序见 [可观测性与运行诊断指南](./docs/OBSERVABILITY.md)。
-## v0.7.10 Operational Backup & Recovery
+## 当前边界
 
-当前版本提供 SQLite Online Backup、Artifact 归档、Manifest/SHA-256 校验、离线恢复与自动回滚副本：
+- 支持目标：单机、单用户、本地 SQLite、可信 Tool 和脚本。
+- HTTP 服务只允许 loopback 地址。
+- `LocalProcessSandbox` 是受限本地进程执行器，不是容器或虚拟机。
+- 不承诺安全执行任意不可信代码。
+- DockerSandbox、SecretProvider、分布式 Worker、多租户和 RBAC 暂缓，等待真实本地使用反馈。
 
-```powershell
-agent-runtime backup create --output runtime.agent-backup
-agent-runtime backup verify runtime.agent-backup
-# 停止所有 Runtime 后：
-agent-runtime backup restore runtime.agent-backup --force
-python scripts/run_backup_recovery.py
-```
+## 文档入口
 
-完整操作步骤见 [运行与灾难恢复手册](./docs/OPERATIONS.md)。
-## v0.7.9 AgentDefinition Snapshot Recovery
+- [当前功能状态](./docs/CURRENT.md)
+- [当前系统架构](./docs/ARCHITECTURE.md)
+- [本地稳定 Runtime 运行指南](./docs/LOCAL_RUNTIME.md)
+- [演进历史](./docs/CHANGELOG.md)
+- [演进路线图](./docs/ROADMAP.md)
+- [ADR 决策记录](./docs/adr/README.md)
+- [文档中心](./docs/README.md)
 
-当前版本会持久化 System Prompt、ToolDefinition、ModelConfig 和执行上限的不可变快照。普通 Run 与串行/并行 Workflow 在进程重启后无需重新注册 AgentDefinition，并始终恢复创建时绑定的确切定义；Tool Handler 与 Provider 实现仍需由进程提供。
-
-## v0.7.8 Durable Submission & Admission Control
-
-当前版本支持 `Idempotency-Key` 持久化去重、同 Key 冲突检测、顶层 Run 429 背压和模型请求并发限制；这些状态可在 `/health` 与 Learning Console SQLite Inspector 中直接查看。
-
-## v0.7.7 Crash Recovery & Operational Closure
-
-当前版本继续暂停新增 Agent 智能能力，重点补齐真实进程崩溃恢复、UNKNOWN 人工确认审计、Workflow snapshot 自动恢复、Runtime Doctor，以及 Windows/Linux Crash Matrix。
+## 开发与发布检查
 
 ```powershell
 python scripts/check_docs.py
 python -m ruff check src tests scripts
-python -m mypy src\agent_runtime
-python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json
+python -m mypy srcgent_runtime
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
 python scripts/check_coverage.py coverage.json
-python scripts/run_reliability.py --stress-runs 20 --concurrency 20
-python scripts/run_crash_recovery.py
-agent-runtime doctor --json
-```
-## Learning Console
-
-如果你希望直观学习一次 Agent Run 的完整处理流程，启动本地可视化控制台：
-
-```powershell
-agent-runtime lab
+python scripts/verify_local_runtime.py --runs 100 --concurrency 8
+python -m build
+python scripts/verify_distribution.py dist
 ```
 
-浏览器会打开 `http://127.0.0.1:8000/lab`。v0.8.0 内置 10 个确定性场景，覆盖单 Run、v0.6 多 Agent、v0.7 Context/Memory 和 v0.8 Sandbox/Capability，并提供：
-
-- 多 Agent 场景按 Workflow Parent 与每个 Child Agent 动态拆分独立泳道；单 Run 场景按实际出现的 Context / Model / Tool / Approval / State 领域展示。
-- 连线区分 Run 内部执行、Parent 委派和 Child 汇聚，避免把并行分支误画成串行依赖。
-- 从头回放、逐事件前进和自动播放。
-- Event 状态 diff、原因、下一步和源码方法映射。
-- Parent/Child Trace Tree，以及 Context、Memory、Artifact、Messages、Execution、Metrics 和 SQLite 检查器。
-- 浏览器内审批与场景自动验收。
-
-详细学习路径见 [Learning Console 使用指南](./docs/LEARNING.md)。
-
-## Multi-Agent Workflow
-
-运行确定性的 Planner → Worker → Reviewer 教学 Workflow：
-
-```powershell
-agent-runtime workflow demo "为 Agent Runtime 设计一个可靠的恢复机制"
-```
-
-v0.6 为每个 Parent 和 Child 分配独立 Run ID、Trace ID、Event 与 Checkpoint，并通过 SQLite `RunRelation` 和稳定 `delegation_key` 支持关系查询、取消传播与幂等恢复。Python API 提供：
-
-- `AgentRegistry` 和 `Runtime.delegate()`。
-- `SequentialWorkflow` 和 `ParallelWorkflow`。
-- `all`、`best_effort`、`first_success` 汇聚策略。
-- `ObservabilityService.trace_tree()` 和多 Agent Metrics。
-- `WorkflowEvalRunner`。
-
-详细示例见 [Multi-Agent 使用指南](./docs/MULTI_AGENT.md)。
-
-## Context、Session 与 Memory
-
-运行确定性的 Memory Demo：
-
-```powershell
-agent-runtime memory demo "Which Python language do I prefer?" --remember "The user prefers Python for examples."
-```
-
-v0.7 在模型调用前通过 `ContextBuilder` 构造受 token budget 约束的输入，并支持：
-
-- System Prompt、未完成 Tool Call 组和最近消息优先保留。
-- 旧消息确定性 Summary 与 `context.built` / `context.compacted` 事件。
-- 多个 Run 归入持久化 Session，Child Run 继承 Session。
-- `session` / `agent` 两种 Memory Scope、SQLite FTS5、TTL 和软删除。
-- 大 Tool Result 自动写入 Artifact Store。
-- Session/Memory API、Metrics 和 `MemoryEvalRunner`。
-
-详细示例见 [Context、Session 与 Memory 指南](./docs/CONTEXT_MEMORY.md)。
-
-## FastAPI / SSE
-
-启动本地 Demo API：
-
-```powershell
-uvicorn agent_runtime.api.app:app --reload
-```
-
-然后可以：
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
-Invoke-RestMethod -Method Post http://127.0.0.1:8000/runs -ContentType 'application/json' -Body '{"input":"19 * 23"}'
-```
-
-SSE 事件接口为 `GET /runs/{run_id}/events/stream?after_sequence=0`。v0.4 起，模型 token 增量以 `model.delta` Runtime Event 进入同一条 SSE 流，客户端无需维护第二套 token 协议。
-
-
-## Observability / Evals
-
-查看从 SQLite 持久化历史派生的指标和单次 Run Trace：
-
-```powershell
-agent-runtime observe metrics
-agent-runtime observe trace <run-id>
-```
-
-运行内置确定性评估套件：
-
-```powershell
-agent-runtime eval demo
-```
-
-HTTP 入口：
-
-```text
-GET /observability/metrics
-GET /observability/metrics/prometheus
-GET /runs/{run_id}/trace
-```
-
-Eval Report 会写入 `.agent-runtime/artifacts/<eval-id>/eval-report.json`，每个用例保留对应 Run ID 和 Trace ID。
-
-## Development checks
-
-```powershell
-python scripts/check_docs.py
-pytest
-```
-
-If a change is based on an existing Git commit, also run the synchronization gate:
-
-```powershell
-python scripts/check_docs.py --base-ref <base-commit>
-```
-
-## Documentation and evolution tracking
-
-The project treats documentation as part of the implementation contract:
-
-- [Current system state](./docs/CURRENT.md): what is implemented, experimental, planned, or unsupported.
-- [Current architecture](./docs/ARCHITECTURE.md): how the runtime is structured today.
-- [Roadmap](./docs/ROADMAP.md): planned versions, scope boundaries, dependencies, and acceptance direction.
-- [Learning Console guide](./docs/LEARNING.md): visual scenarios, event replay, inspectors, and source-code mapping.
-- [Multi-Agent guide](./docs/MULTI_AGENT.md): delegation, workflows, trace trees, cancellation, recovery, and evals.
-- [Context and memory guide](./docs/CONTEXT_MEMORY.md): context budgets, sessions, scoped memory, FTS5, lifecycle, and APIs.
-- [Evolution log](./docs/CHANGELOG.md): feature and architecture changes in reverse completion-time order.
-- [Architecture Decision Records](./docs/adr/README.md): why important public, data, reliability, or security decisions were made.
-- [Operations and disaster recovery](./docs/OPERATIONS.md): backup, verification, offline restore, rollback, and recovery drills.
-- [Observability and diagnostics](./docs/OBSERVABILITY.md): structured logs, p95, failure aggregation, and troubleshooting.
-- [Documentation workflow](./docs/README.md): Change IDs, templates, update rules, and quality gates.
-
-Every independently verifiable feature, fix, or architecture change should have a
-Change ID in `docs/CHANGELOG.md`. Core runtime changes must update the evolution log;
-changes to public interfaces, state/event schemas, recovery semantics, or security
-boundaries must also add or update an ADR.
-
-## Design
-
-- **Runtime kernel**: bounded agent loop with cancellation, retry-safe checkpoints, approvals, and durable delegation.
-- **Providers**: normalized text/tool-call responses, optional token streaming, a deterministic Mock, and an OpenAI-compatible implementation.
-- **Tools**: JSON-schema-inspired argument validation, timeout handling, and workspace confinement.
-- **Storage**: SQLite schema v8 for runs, relations, sessions, memories, AgentDefinition snapshots, event log, checkpoints, FTS5, file-backed artifacts, and verified backup archives.
-- **Orchestration**: AgentRegistry, RunRelation, sequential/parallel workflows, aggregation, timeout, cancellation propagation, and idempotent recovery.
-- **Context and memory**: ContextBuilder, Session, scoped MemoryStore search, lifecycle, provenance, and large Tool Result artifactization.
-- **Observability**: per-Run trace, Parent/Child trace tree, p95/failure metrics, operational diagnostics, and bounded structured JSON logs.
-- **Evals**: deterministic suites that execute through the real Runtime path and persist reports.
-- **Interfaces**: Python SDK, CLI, FastAPI/SSE, and a local Learning Console; the core has no UI dependency.
+核心实现位于 `src/agent_runtime/`，测试位于 `tests/`。版本、架构、功能状态和构建记录必须随代码同步更新。

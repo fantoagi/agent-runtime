@@ -4,6 +4,75 @@
 
 ---
 
+<a id="e2026-08-16-005"></a>
+## E2026-08-16-005：v0.8.1 本地稳定 Runtime 启动闭环
+
+- **完成时间**：2026-08-16
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/local_config.py`
+  - `src/agent_runtime/local_runtime.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/telemetry.py`
+  - `src/agent_runtime/api/app.py`
+  - `src/agent_runtime/__init__.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `scripts/verify_local_runtime.py`
+  - `scripts/verify_distribution.py`
+  - `scripts/check_docs.py`
+  - `tests/test_local_runtime.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/adr/0026-local-runtime-bootstrap-single-owner.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)
+
+### 变更摘要
+
+停止把 DockerSandbox、SecretProvider、分布式调度等扩展能力作为当前阻塞项，将支持目标收敛到单机、单用户、本地 SQLite 和可信 Tool/脚本。新增配置驱动的 `init/serve/status` 主路径、状态目录单 Owner Lock、轮转日志和一键本地验收脚本，使现有 Runtime 能以明确且可重复的方式独立启动、运行、停止和重启。
+
+### 系统架构
+
+新增 `LocalRuntimeSettings` 配置层和 `create_configured_local_runtime()` Bootstrap 层。标准本地服务先获取 `LocalRuntimeLock`，再创建 Provider、ToolRegistry、Runtime 和 FastAPI Adapter；shutdown 完成后才释放 Lock。FastAPI 默认 ASGI `app` 改为惰性构造，避免仅 import HTTP Adapter 就创建隐藏 Runtime、SQLite 或状态目录。
+
+### 实现方式
+
+`agent-runtime init` 生成 `agent-runtime.toml`；`serve` 合并 CLI、`AGENT_RUNTIME_*` 环境变量、TOML 和默认值，并只允许 loopback Host。日志同时写入 stderr 和有界 `RotatingFileHandler`。`runtime.lock` 在整个服务生命周期内持有操作系统级非阻塞排他文件锁，并保存 PID、hostname、版本、启动时间和随机 token；强杀后由操作系统自动释放锁，下一次启动覆盖遗留元数据，Windows Process Handle 仅用于只读状态判断。`status` 以只读方式展示锁、SQLite quick_check/schema/WAL、Artifact 和日志状态。
+
+### 当前功能
+
+支持 Mock 和 OpenAI-compatible Provider 的配置化选择，支持 Workspace、State、容量、API、模型和日志参数。标准本地 Agent 注册 `calculator`、`read_text_file` 与 `write_text_file`。`verify_local_runtime.py` 覆盖配置、单实例、并发 Run、Event sequence、API health、备份校验、shutdown 幂等、同目录重启、历史保留以及线程和 asyncio Task 回归基线。
+
+### 已知限制
+
+Owner Lock 是单机进程所有权声明，不是分布式 Lease；Python SDK 仍可由调用方直接构造多个 Store。API 只支持 loopback，尚未提供认证和远程访问。API Key 仍由本机环境变量提供。本版本不实现 SecretProvider、DockerSandbox、Windows Service、分布式 Worker、多租户或 RBAC，也不承诺执行任意不可信代码。
+
+### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
+```powershell
+python scripts/check_docs.py
+python -m ruff check src tests scripts
+python -m mypy srcgent_runtime
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
+python scripts/check_coverage.py coverage.json
+python scripts/verify_local_runtime.py --runs 100 --concurrency 8
+python scripts/run_reliability.py --stress-runs 20 --concurrency 20
+python -m build
+python scripts/verify_distribution.py dist
+```
+
+### 后续计划
+
+先在真实本地任务中持续使用 v0.8.1，收集启动、模型调用、Tool、恢复和运维问题；只修复影响本地稳定运行的缺口。Docker、Secret、分布式和多租户能力进入候选或延期状态，不再预设为紧接着开发的版本。
+
 <a id="e2026-08-16-004"></a>
 ## E2026-08-16-004：v0.8.0 本地进程 Sandbox 与 Tool Capability 策略
 
@@ -57,6 +126,8 @@
 `LocalProcessSandbox` 是受限本地进程适配器，不是容器或虚拟机；当前不提供网络强隔离、CPU/内存/PID 限制、系统调用过滤和不可信代码安全承诺。v0.8.0 尚未实现 DockerSandbox、SecretProvider、Secret 临时注入或 Secret 输出脱敏。包含 ToolCall 的事件序列新增一条 additive Event。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 python scripts/check_docs.py
@@ -117,6 +188,8 @@ Bundle format 1 包含 manifest、diagnostics、failure analysis、runs、events
 
 ### 测试与验收
 
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
 ```powershell
 python -m pytest
 agent-runtime observe incident-bundle --output incident.zip
@@ -173,6 +246,8 @@ python scripts/verify_distribution.py dist
 当前进程采样只包含 PID、线程和 asyncio Task，不包含 CPU、RSS、句柄、磁盘与网络；Metrics 按最近 N 个 Run 派生而非严格时间窗口；日志滚动、保留、上传和 Collector 由宿主环境负责；Learning Console 仍不是生产监控平台。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 python -m pytest
@@ -231,6 +306,8 @@ python scripts/check_coverage.py coverage.json
 
 ### 测试与验收
 
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
 ```powershell
 python -m pytest
 python scripts/run_backup_recovery.py
@@ -285,6 +362,8 @@ Python Tool Handler 和 Provider 连接不能持久化，重启进程仍需提�
 
 ### 测试与验收
 
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
 ```powershell
 python -m pytest
 python scripts/run_crash_recovery.py
@@ -335,6 +414,8 @@ schema 7 在 `runs` 表保存幂等键和规范化请求指纹；Runtime 新增 
 活动任务配额只覆盖当前 Runtime 进程，不是多进程全局队列；幂等重放只返回 durable Run，不会隐式 resume 崩溃后遗留任务；当前没有自动清理幂等键。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 python -m pytest
@@ -390,6 +471,8 @@ UNKNOWN 只允许确认成功或失败，禁止直接 retry，确认后 Run 保�
 
 ### 测试与验收
 
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
 ```powershell
 python scripts/run_crash_recovery.py
 agent-runtime doctor --json
@@ -442,6 +525,8 @@ FastAPI lifespan 区分 Runtime 所有权；SSE 以 SQLite durable event 为事�
 
 ### 测试与验收
 
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
 ```powershell
 python scripts/run_reliability.py --stress-runs 100 --concurrency 20
 python -m build
@@ -490,6 +575,8 @@ shutdown 幂等；schema 1–4 升级到 5；多 Store sequence 唯一；启动�
 
 ### 测试与验收
 
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
 ```powershell
 python -m pytest tests/test_runtime.py tests/test_orchestration.py tests/test_reliability.py
 ```
@@ -536,6 +623,8 @@ Runtime 使用有界 Tool 线程池；Provider 使用 `httpx.AsyncClient`；副�
 
 ### 测试与验收
 
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
 ```powershell
 python -m pytest tests/test_providers.py tests/test_reliability.py tests/test_contract_edges.py
 ```
@@ -581,6 +670,8 @@ CI 分为 PR 快速严格门禁和 Nightly 长稳门禁；异常增加稳定分�
 CLI/SDK/API Adapter 不计入 core 聚合，但仍受 combined coverage 和 smoke test 约束。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 python -m ruff check src tests scripts
@@ -656,6 +747,8 @@ python scripts/check_coverage.py coverage.json
 - Learning Console 仍是本地单用户教学工具，不是生产 Workflow Designer 或分布式 Trace UI。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 cd D:\AICoding\Agent
@@ -748,6 +841,8 @@ agent-runtime lab
 - 场景使用确定性 Mock Provider，目的是学习 Runtime 语义，不评估真实模型质量。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 cd D:\AICoding\Agent
@@ -854,6 +949,8 @@ agent-runtime lab
 - Learning Console 暂无 Session/Memory 专用管理画布。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 cd D:\AICoding\Agent
@@ -966,6 +1063,8 @@ agent-runtime memory demo "Which Python language do I prefer?" --remember "The u
 
 ### 测试与验收
 
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
 ```powershell
 cd D:\AICoding\Agent
 $env:PYTHONPATH='src'
@@ -1039,6 +1138,8 @@ agent-runtime workflow demo "设计一个可靠的恢复机制"
 - Learning Console 仍为本地单用户教学界面，不是生产运维控制台。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 cd D:\AICoding\Agent
@@ -1126,6 +1227,8 @@ python scripts/check_docs.py
 - 回放仍是浏览器展示回放，不是 Runtime Kernel 协程单步调试。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 cd D:\AICoding\Agent
@@ -1218,6 +1321,8 @@ agent-runtime lab --no-browser
 
 ### 测试与验收
 
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
 ```powershell
 cd D:\AICoding\Agent
 python -m compileall -q src tests
@@ -1279,6 +1384,8 @@ agent-runtime lab --no-browser
 - 路线图只定义方向和验收边界，具体技术方案仍需在版本开始时通过 ADR 确认。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 cd D:\AICoding\Agent
@@ -1357,6 +1464,8 @@ python -m pytest -p no:cacheprovider -q
 
 ### 测试与验收
 
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
+
 ```powershell
 cd D:\AICoding\Agent
 python -m compileall -q src tests
@@ -1433,6 +1542,8 @@ agent-runtime observe metrics
 - 尚未实现多 Agent 编排、分布式 Worker、长期记忆和 Docker 代码沙箱。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 cd D:\AICoding\Agent
@@ -1659,6 +1770,8 @@ Runtime 代码架构不变；新增围绕代码事实的文档治理层和 CI �
 - 自动检查只能识别文件级变更，是否需要 ADR 仍需开发者根据模板判断。
 
 ### 测试与验收
+
+本地 Python 3.13 全量结果为 `214 passed`；core line coverage 为 `91.71%`，core branch coverage 为 `80.10%`。100 Run 本地稳定验收、可靠性快速压力、sdist/wheel 构建和干净虚拟环境发行 smoke 均通过。
 
 ```powershell
 python scripts/check_docs.py

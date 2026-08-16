@@ -33,6 +33,7 @@ try:
     from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
     from pydantic import BaseModel, Field
+    from starlette.types import ASGIApp, Receive, Scope, Send
 except ImportError as error:  # pragma: no cover - exercised when the optional extra is absent
     raise ImportError(
         "FastAPI API support is optional. Install it with `pip install -e .[api]`."
@@ -692,5 +693,17 @@ async def run_until_complete(runtime: Runtime, run_id: str) -> AgentRun:
     return await runtime.wait(run_id)
 
 
-# Uvicorn-friendly default app for local learning and smoke tests.
-app = create_demo_app()
+class _LazyDemoApplication:
+    """Delay demo Runtime construction until the ASGI server actually starts."""
+
+    def __init__(self) -> None:
+        self._app: FastAPI | None = None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if self._app is None:
+            self._app = create_demo_app()
+        await self._app(scope, receive, send)
+
+
+# Uvicorn-friendly default app without import-time SQLite or Runtime side effects.
+app: ASGIApp = _LazyDemoApplication()

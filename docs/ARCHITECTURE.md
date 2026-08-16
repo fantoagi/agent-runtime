@@ -1,14 +1,14 @@
 # Agent Runtime 当前架构
 
 > 最近更新：2026-08-16
-> 关联记录：[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
-> 关联决策：[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
+> 关联记录：[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
+> 关联决策：[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
 
 ## 1. 系统目标和边界
 
 当前系统是一个面向开发者的、可持久化 Agent Runtime。它既支持单 Agent 模型/工具循环，也支持由 Parent Run 委派独立 Child Run 的单机多 Agent Workflow，并通过 ContextBuilder、Session 和 Scoped Memory 管理模型输入与跨 Run 信息复用。
 
-当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
+当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。v0.8.1 的正式支持目标收敛为单机、单用户、本地 SQLite 和可信 Tool/脚本；标准服务只监听 loopback，并通过状态目录 Owner Lock 防止两个本地执行循环并行领取同一状态。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
 
 ## 2. 总体架构
 
@@ -73,6 +73,36 @@ flowchart TD
 ```
 
 核心依赖方向由入口指向 Runtime，再由 Runtime 依赖抽象化的 Provider、Tool 和 Store；模型厂商响应和具体工具实现不进入 Runtime Kernel 的领域模型。
+
+## 2.1 本地稳定启动层
+
+标准本地服务不再要求调用方自行拼装 Runtime：
+
+```mermaid
+flowchart LR
+    Init["agent-runtime init"]
+    Config["agent-runtime.toml"]
+    Serve["agent-runtime serve"]
+    Lock["runtime.lock / Local Owner"]
+    Bootstrap["create_configured_local_runtime"]
+    Runtime["Runtime Kernel"]
+    API["FastAPI / SSE"]
+    Logs["Rotating JSON Logs"]
+
+    Init --> Config
+    Config --> Serve
+    Serve --> Lock
+    Lock --> Bootstrap
+    Bootstrap --> Runtime
+    Runtime --> API
+    Runtime --> Logs
+```
+
+`LocalRuntimeSettings` 将 TOML、`AGENT_RUNTIME_*` 环境变量和 CLI override 规范化为不可变配置；优先级为 CLI、环境变量、TOML、默认值。配置只保存 API Key 的环境变量名称。
+
+`LocalRuntimeLock` 在 Runtime 构造前打开 `runtime.lock`，并在整个服务生命周期内持有操作系统级非阻塞排他文件锁；JSON 元数据记录 PID、主机、版本、启动时间和随机 token。第二个 `serve` 无法获得排他锁时立即拒绝。进程被强杀后，操作系统自动释放锁，下一次启动覆盖遗留元数据；Windows Process Handle 只用于只读状态判断。该锁只约束标准本地服务，不是跨主机 Lease。
+
+`configure_structured_logging()` 同时配置 stderr 和有界 `RotatingFileHandler`。FastAPI 模块的 Uvicorn 默认 `app` 使用惰性 ASGI 包装器，import Adapter 时不再创建隐藏 SQLite 或 Runtime。
 
 ## 3. Runtime Kernel
 
@@ -240,8 +270,8 @@ flowchart LR
 Capability 决策通过 `tool.policy.evaluated` 进入 durable Event Log；Sandbox active process 与容量通过 `Runtime.sandbox_snapshot()`、CLI `observe sandbox` 和 HTTP `/observability/sandbox` 暴露，但不占用 Run sequence。完整边界见 [SANDBOX.md](./SANDBOX.md)。
 
 > 最近更新：2026-08-16
-> 关联记录：[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)
-> 关联决策：[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)
+> 关联记录：[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)
+> 关联决策：[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)
 
 ## 7. SQLite、Step、ToolExecution、Checkpoint 和 Artifact Store
 
@@ -448,8 +478,8 @@ flowchart LR
 Provider attempt 失败和重试决定会改变一次 Run 的执行解释，因此 `model.attempt.failed` 与 `model.retry.scheduled` 进入 durable Event Log。Runtime 启停、PID、线程和 Task 数属于进程级信号，不占用 Run Event sequence。结构化日志默认关闭，不修改 root logger；CLI 通过 `--json-logs` 显式启用，Python 应用通过 `configure_structured_logging()` 配置。
 
 > 最近更新：2026-08-16
-> 关联记录：[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)
-> 关联决策：[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0008](./adr/0008-observability-evals.md)
+> 关联记录：[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)
+> 关联决策：[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0008](./adr/0008-observability-evals.md)
 ## 9.6 Incident Diagnostics 与 Support Bundle
 
 v0.7.12 在 `OperationalSnapshot` 之上增加独立的 `IncidentDiagnosticsService`。该层只读取 Runtime 与 SQLite durable facts，生成可分享的安全摘要和 ZIP，不进入执行主循环，也不写入 Runtime Event sequence。

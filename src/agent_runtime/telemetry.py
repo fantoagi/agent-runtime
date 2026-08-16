@@ -6,6 +6,8 @@ import re
 import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any, TextIO
 
 _SENSITIVE_KEY = re.compile(
@@ -72,13 +74,34 @@ def configure_structured_logging(
     level: int | str = logging.INFO,
     stream: TextIO | None = None,
     logger_name: str = "agent_runtime",
+    file_path: str | Path | None = None,
+    max_bytes: int = 20 * 1024 * 1024,
+    backup_count: int = 5,
+    include_stream: bool = True,
 ) -> logging.Logger:
-    """Configure an isolated JSON logger without changing the root logger."""
+    """Configure bounded JSON logging without changing the root logger."""
+    if max_bytes < 1 or backup_count < 1:
+        raise ValueError("max_bytes and backup_count must be positive.")
     logger = logging.getLogger(logger_name)
     logger.handlers.clear()
-    handler = logging.StreamHandler(stream or sys.stderr)
-    handler.setFormatter(StructuredLogFormatter())
-    logger.addHandler(handler)
+    formatter = StructuredLogFormatter()
+    if include_stream:
+        stream_handler = logging.StreamHandler(stream or sys.stderr)
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+    if file_path is not None:
+        resolved = Path(file_path).expanduser().resolve()
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            resolved,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    if not logger.handlers:
+        raise ValueError("At least one structured log destination is required.")
     logger.setLevel(level)
     logger.propagate = False
     return logger

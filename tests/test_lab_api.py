@@ -14,7 +14,7 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         page = await client.get("/lab")
         assert page.status_code == 200
         assert "Agent Runtime Learning Console" in page.text
-        assert "v0.8.0" in page.text
+        assert "v0.8.1" in page.text
         assert "诊断包" in page.text
         assert 'data-tab="context"' in page.text
         assert 'data-tab="memory"' in page.text
@@ -111,7 +111,7 @@ async def test_learning_scenarios_run_through_real_runtime(
         assert payload["reliability"]["backup"]["format_version"] == 1
         assert payload["reliability"]["backup"]["restore_requires_shutdown"] is True
         diagnostics = payload["reliability"]["diagnostics"]
-        assert diagnostics["version"] == "0.8.0"
+        assert diagnostics["version"] == "0.8.1"
         assert diagnostics["runtime"]["state"] == "accepting"
         assert diagnostics["process"]["thread_count"] >= 1
         assert payload["reliability"]["failure_analysis"] == []

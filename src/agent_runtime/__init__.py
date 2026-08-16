@@ -46,6 +46,20 @@ from .incident import (
     IncidentDiagnosticsService,
     IncidentReport,
 )
+from .local_config import (
+    LocalConfigError,
+    LocalRuntimeSettings,
+    load_local_settings,
+    resolve_local_config_path,
+    write_default_local_config,
+)
+from .local_runtime import (
+    LocalRuntimeLock,
+    LocalRuntimeLockError,
+    LocalRuntimeLockInfo,
+    create_configured_local_runtime,
+    local_runtime_status,
+)
 from .observability import (
     MetricsSnapshot,
     ObservabilityService,
@@ -121,7 +135,12 @@ __all__ = [
     "IncidentBundle",
     "IncidentDiagnosticsService",
     "IncidentReport",
+    "LocalConfigError",
     "LocalProcessSandbox",
+    "LocalRuntimeLock",
+    "LocalRuntimeLockError",
+    "LocalRuntimeLockInfo",
+    "LocalRuntimeSettings",
     "MemoryEvalRunner",
     "MemoryRecord",
     "MemoryScope",
@@ -172,9 +191,14 @@ __all__ = [
     "WorkflowStep",
     "__version__",
     "configure_structured_logging",
+    "create_configured_local_runtime",
     "create_memory_demo_runtime",
     "create_multi_agent_demo_runtime",
+    "load_local_settings",
+    "local_runtime_status",
     "memory_demo_agent",
     "multi_agent_demo_workflow",
     "register_process_tool",
+    "resolve_local_config_path",
+    "write_default_local_config",
 ]

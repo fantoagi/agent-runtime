@@ -29,6 +29,7 @@ REQUIRED_FILES = (
     "docs/OBSERVABILITY.md",
     "docs/INCIDENTS.md",
     "docs/SANDBOX.md",
+    "docs/LOCAL_RUNTIME.md",
     "docs/adr/README.md",
     "docs/templates/change-entry.md",
     "docs/templates/adr.md",
@@ -47,6 +48,8 @@ CORE_PATHS = {
     "src/agent_runtime/observability.py",
     "src/agent_runtime/incident.py",
     "src/agent_runtime/sandbox.py",
+    "src/agent_runtime/local_config.py",
+    "src/agent_runtime/local_runtime.py",
     "src/agent_runtime/telemetry.py",
     "src/agent_runtime/evals.py",
 }
@@ -85,6 +88,7 @@ ROADMAP_STATUSES = {
     "🚧 in-progress",
     "📋 planned",
     "💡 candidate",
+    "⏸ deferred",
     "⛔ out-of-scope",
 }
 ROADMAP_REQUIRED_SECTIONS = (

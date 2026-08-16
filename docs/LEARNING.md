@@ -1,8 +1,8 @@
 # Agent Runtime Learning Console 使用指南
 
-Learning Console v0.8.0 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context、Artifact 和 v0.8 Sandbox/Capability 的真实执行事实放到同一个浏览器页面中。
+Learning Console v0.8.1 是本地可视化学习入口。它把单 Run、v0.6 Parent/Child 多 Agent，以及 v0.7 Session、Memory、Context、Artifact 和 v0.8 Sandbox/Capability 的真实执行事实放到同一个浏览器页面中。
 
-> 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。v0.8.0 的 SQLite Inspector 还展示确定性失败根因，顶部“诊断包”入口可以下载脱敏支持 ZIP。
+> 关键原则：页面不是预制动画。每个场景都会通过真实 `Runtime` 执行，页面读取 SQLite 中的持久化事实，并使用已有 SSE Event Stream 感知新事件。v0.8.1 的 SQLite Inspector 还展示确定性失败根因，顶部“诊断包”入口可以下载脱敏支持 ZIP。
 
 ## 1. 一条命令启动
 
@@ -43,7 +43,7 @@ uvicorn agent_runtime.api.app:app --reload
 
 ### 左侧：Learning Path
 
-选择确定性学习场景。v0.8.0 提供以下 10 个真实 Runtime 场景：
+选择确定性学习场景。v0.8.1 提供以下 10 个真实 Runtime 场景：
 
 1. 纯文本响应。
 2. Tool Calling。
