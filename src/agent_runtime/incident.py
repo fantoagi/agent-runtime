@@ -172,9 +172,7 @@ class IncidentDiagnosticsService:
             version=__version__,
             scope_run_id=run_id,
             diagnostics=diagnostics,
-            failure_analysis=self._failure_analysis_for_runs(
-                runs, limit=recent_failure_limit
-            ),
+            failure_analysis=self._failure_analysis_for_runs(runs, limit=recent_failure_limit),
             runs=tuple(self._run_summary(run) for run in runs),
             events=tuple(self._event_summary(event) for event in events),
             collection={
@@ -221,10 +219,7 @@ class IncidentDiagnosticsService:
             "collection.json": report.collection,
             "privacy.json": report.privacy,
         }
-        encoded = {
-            name: _json_bytes(value)
-            for name, value in documents.items()
-        }
+        encoded = {name: _json_bytes(value) for name, value in documents.items()}
         manifest = {
             "format": "agent-runtime-incident-bundle",
             "format_version": _BUNDLE_FORMAT_VERSION,
@@ -303,11 +298,7 @@ class IncidentDiagnosticsService:
     def _collect_events(
         self, runs: list[AgentRun], *, limit: int
     ) -> tuple[list[RuntimeEvent], bool, int]:
-        events = [
-            event
-            for run in runs
-            for event in self.store.events_since(run.id)
-        ]
+        events = [event for run in runs for event in self.store.events_since(run.id)]
         events.sort(key=lambda item: (item.timestamp, item.run_id, item.sequence))
         observed = len(events)
         bounded_limit = max(0, limit)
@@ -348,9 +339,7 @@ class IncidentDiagnosticsService:
                                 else None
                             ),
                             attributes={
-                                key: value
-                                for key, value in event.payload.items()
-                                if key != "error"
+                                key: value for key, value in event.payload.items() if key != "error"
                             },
                         ),
                         run,
@@ -405,11 +394,7 @@ class IncidentDiagnosticsService:
     @staticmethod
     def _run_summary(run: AgentRun) -> dict[str, Any]:
         metadata = sanitize_log_value(
-            {
-                key: value
-                for key, value in run.metadata.items()
-                if key in _SAFE_METADATA_KEYS
-            }
+            {key: value for key, value in run.metadata.items() if key in _SAFE_METADATA_KEYS}
         )
         assert isinstance(metadata, dict)
         return {
@@ -427,11 +412,7 @@ class IncidentDiagnosticsService:
     @staticmethod
     def _event_summary(event: RuntimeEvent) -> dict[str, Any]:
         payload = sanitize_log_value(
-            {
-                key: value
-                for key, value in event.payload.items()
-                if key in _SAFE_EVENT_KEYS
-            }
+            {key: value for key, value in event.payload.items() if key in _SAFE_EVENT_KEYS}
         )
         assert isinstance(payload, dict)
         return {
@@ -472,7 +453,9 @@ class IncidentDiagnosticsService:
         elif status_code in {401, 403}:
             category = "provider.authentication"
             summary = "The model provider rejected authentication or authorization."
-            action = "Correct provider credentials or permissions; automatic retry is not appropriate."
+            action = (
+                "Correct provider credentials or permissions; automatic retry is not appropriate."
+            )
         elif status_code == 429:
             category = "provider.rate_limit"
             summary = "The model provider rate limit was reached."
@@ -480,7 +463,9 @@ class IncidentDiagnosticsService:
         elif status_code is not None and status_code >= 500:
             category = "provider.server"
             summary = "The model provider returned a transient server error."
-            action = "Review retry history and provider status; retry with bounded backoff when safe."
+            action = (
+                "Review retry history and provider status; retry with bounded backoff when safe."
+            )
         elif "timeout" in error_type or "timeout" in error_text:
             category = "provider.timeout"
             summary = "The model request exceeded its configured time limit."

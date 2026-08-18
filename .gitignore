@@ -16,3 +16,6 @@ htmlcov/
 dist/
 build/
 reliability-result.json
+
+# Local runtime configuration may reference secret-bearing environment names.
+agent-runtime.toml

@@ -4,6 +4,447 @@
 
 ---
 
+<a id="e2026-08-18-002"></a>
+## E2026-08-18-002：v0.8.8 Verified Task Completion
+
+- **完成时间**：2026-08-18
+- **状态**：✅ stable
+- **类型**：improvement
+- **影响范围**：
+  - `.gitignore`
+  - `agent-runtime.example.toml`
+  - `src/agent_runtime/completion.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/local_runtime.py`
+  - `src/agent_runtime/interactive/renderer.py`
+  - `src/agent_runtime/__init__.py`
+  - `tests/test_completion.py`
+  - `tests/test_interactive.py`
+  - `scripts/verify_distribution.py`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/adr/0033-verified-task-completion.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0033](./adr/0033-verified-task-completion.md)
+
+### 变更摘要
+
+标准本地 Coding Runtime 不再仅凭模型返回普通文本就判断修改任务已经完整验证。新增可选 Completion Policy，从持久化 ToolExecution 派生变更文件、diff 检查和验证命令证据；证据不足时只追加一次有界验证提醒，最终以 durable Event 标记 `read_only`、`verified` 或 `unverified`。同时将真实 `agent-runtime.toml` 排除出 Git，并提供无秘密的 example 配置。
+
+### 系统架构
+
+Runtime Kernel 保持原有状态机和公共 Provider/Tool 协议，新增构造期可选 `CompletionPolicy` 扩展点。标准本地 Runtime 注入 `CodingCompletionPolicy`，普通 Runtime 默认关闭。Policy 只读取当前 Run 已持久化的 ToolExecution，不执行额外文件或进程操作。第一次缺证据的最终文本被保存为已完成 Model Step，Runtime 追加 system reminder 并继续同一 Run；最终完成前写入 `completion.evidence`。
+
+### 实现方式
+
+成功的 `write_text_file`、`replace_text` 和 `apply_patch` 被识别为文件变更。最后一次写入之后的 `git_diff` 作为 diff 检查证据；Python pytest/ruff/mypy/unittest、以及常见语言 test/check/lint 命令通过 `run_process` argv 和真实 exit code 形成验证证据。每个 Run 通过 durable `completion.verification_requested` Event 保证最多提醒一次。CLI 显示验证继续提示和最终证据摘要。
+
+### 当前功能
+
+只读任务保持一步完成。修改任务缺少 diff 或代码验证时，Runtime 会继续一次，让模型补充最窄验证或明确说明无法验证。验证成功显示 `verified`；再次结束仍缺证据时允许完成但显示 `unverified`。最终证据可由 SSE、CLI、Learning Console 和 Eval 统一消费。真实本地配置不再出现在普通 Git 未跟踪列表中。
+
+### 已知限制
+
+验证命令识别为保守 allowlist，不理解任意项目脚本；`git_diff` 不包含未跟踪文件内容；Completion Policy 不会判断自然语言任务是否“业务上正确”，只约束修改后的执行证据。为保持有界执行，第二次普通最终回答不会再次被阻止。
+
+### 测试与验收
+
+新增只读不提醒、修改后自动请求 diff/validation、成功验证证据、仍无法验证但不循环、文档修改无需代码验证、验证命令 allowlist，以及 CLI 证据渲染测试。最终全量结果为 `279 passed`，总体 coverage 为 `84.22%`，core line coverage 为 `91.50%`，core branch coverage 为 `80.67%`；Ruff、Mypy strict 和文档检查通过。
+
+```powershell
+python scripts/check_docs.py
+python -m ruff check src tests scripts
+python -m mypy srcgent_runtime
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
+python scripts/check_coverage.py coverage.json
+python -m build
+python scripts/verify_distribution.py distgent_runtime-0.8.8-py3-none-any.whl
+```
+
+### 后续计划
+
+基于真实 Coding Eval 统计 false completion、额外 Model Step 和验证命令成功率；下一阶段再优化 Streaming Markdown、Tool 状态折叠和 Approval diff/command 预览，不引入分布式或新编排能力。
+
+---
+
+<a id="e2026-08-18-001"></a>
+## E2026-08-18-001：v0.8.7 Artifact-aware Reading & Workspace Discovery
+
+- **完成时间**：2026-08-18
+- **状态**：✅ stable
+- **类型**：improvement
+- **影响范围**：
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/tools.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/coding_tools.py`
+  - `src/agent_runtime/workspace_context.py`
+  - `src/agent_runtime/local_runtime.py`
+  - `src/agent_runtime/__init__.py`
+  - `tests/test_artifact_tools.py`
+  - `tests/test_coding_tools.py`
+  - `tests/test_workspace_context.py`
+  - `scripts/verify_distribution.py`
+  - `docs/CODING_TOOLS.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/adr/0032-artifact-paging-workspace-discovery.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)
+
+### 变更摘要
+
+针对真实 `agent-runtime chat` 体验中暴露的两条退化路径进行优化：大 Tool Result 不再需要通过 `read_text_file` 或 `run_process` 打印 Artifact；根目录文件发现被测试产物占满或截断时，Agent 会缩小范围继续搜索，而不是过早反问用户或结束 Run。
+
+### 系统架构
+
+ArtifactStore 增加仅限当前 Run 的 Tool Result Artifact 分页读取能力，标准本地 Runtime 注册只读 `read_artifact` Tool。Runtime 仍负责首次大结果 Artifact 化，但 `read_artifact` 页面具有明确的非递归语义。Workspace Context 的内建 Coding Protocol 与 Tool description 共同约束“可推断目标继续执行、发现截断后缩小范围、禁止用通用进程打印文件或 Artifact”。
+
+### 实现方式
+
+`read_artifact` 接受 `_artifact.path` 或 `_artifact.relative_path`，以字符 offset 和最多 4000 字符的页面返回 `next_offset`、`total_chars`、`has_more` 与 SHA-256；路径必须落在当前 `run_id/tool-results` 下。`read_text_file` 命中同 Run Tool Result Artifact 时返回明确引导。`read_file_lines` 默认 3000 字符、硬上限 3500 字符，并返回 `next_start_line/has_more`。`list_files/search_text` 默认过滤 `.runtime-test-data`、`.coverage` 和 `coverage.json`，描述中要求截断后继续缩小搜索。
+
+### 当前功能
+
+真实模型看到大 Tool Result Preview 后，可以无审批地调用 `read_artifact` 分页续读；读取页面不会再次触发 `tool.result.artifactized`。已知目标文件或符号时优先搜索；根目录结果截断时继续限定 `path` 或 `pattern`。标准本地 Agent、发行包 smoke 和 CLI Tool 列表均包含 `read_artifact`。
+
+### 已知限制
+
+Artifact 分页 offset 以 Unicode 字符计数，每次读取仍需顺序扫描 Artifact 以计算总字符数和 SHA-256；它不是随机访问索引。Tool 只允许读取当前 Run 的 `tool-results`，不能浏览其他 Run、Eval 或任意 Artifact。Prompt 只能提高模型继续执行的概率，Runtime 不会在模型返回普通最终文本后强制追加 Tool Call。
+
+### 测试与验收
+
+新增 Artifact UTF-8 分页、最后一页、路径逃逸、跨 Run 拒绝、参数边界、`read_text_file` 引导和“large result → page 1 → page 2 → final answer”非递归流程测试；扩展 Workspace 噪声过滤、行读取续页字段和 Coding Protocol 断言。最终全量结果为 `257 passed`，总体 coverage 为 `83.93%`，core line coverage 为 `91.28%`，core branch coverage 为 `80.19%`；Ruff、Mypy strict、文档检查和发行验证通过。
+
+```powershell
+python scripts/check_docs.py
+python -m ruff check src tests scripts
+python -m mypy src\agent_runtime
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
+python scripts/check_coverage.py coverage.json
+python -m build
+python scripts/verify_distribution.py dist\agent_runtime-0.8.7-py3-none-any.whl
+```
+
+### 后续计划
+
+继续用真实编码任务观察模型的分页次数、发现策略和上下文消耗；在该闭环稳定前，不增加 LSP、PTY、自动 commit、自动批准或无限自主循环。
+
+---
+
+<a id="e2026-08-17-004"></a>
+## E2026-08-17-004：v0.8.6 Project-aware Workspace Context
+
+- **完成时间**：2026-08-17
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `src/agent_runtime/workspace_context.py`
+  - `src/agent_runtime/local_config.py`
+  - `src/agent_runtime/local_runtime.py`
+  - `src/agent_runtime/interactive/shell.py`
+  - `tests/test_workspace_context.py`
+  - `tests/test_interactive.py`
+  - `scripts/verify_distribution.py`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/adr/0031-project-workspace-instructions.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0031](./adr/0031-project-workspace-instructions.md)
+
+### 变更摘要
+
+The local Runtime now loads bounded project instructions from root-relative `AGENTS.md` and `CLAUDE.md` files and composes them with the configured prompt and a built-in coding execution protocol.
+
+### 系统架构
+
+A dedicated `workspace_context` layer runs between local configuration bootstrap and AgentDefinition registration. The final prompt remains part of the immutable AgentDefinition snapshot. CLI and status projections expose only source metadata, never instruction content.
+
+### 实现方式
+
+The backward-compatible `[workspace_context]` section defaults to enabled, two instruction files, and a 50000-character shared budget. Paths must remain relative to the Workspace and cannot contain `..`. Only UTF-8 files are loaded. The built-in protocol requires inspection before edits, Git diff review, focused validation, and evidence-backed completion claims. Banner, `/workspace`, and `status` show loaded sources; `/workspace` also now lists all v0.8.4/v0.8.5 tools.
+
+### 当前功能
+
+Supports ordered project rules, disable/configure controls, bounded truncation, SHA-256 summaries, invalid-path rejection, invalid UTF-8 reporting, CLI visibility, prompt snapshots, and clean-wheel verification. Existing TOML files use defaults without being overwritten.
+
+### 已知限制
+
+Only explicitly configured root-relative files are loaded. Hierarchical directory overrides are not implemented. Changes require Runtime restart, and conflicting files are supplied in configured order without semantic merging.
+
+### 测试与验收
+
+Added tests for ordering, budgets, truncation, hashing, invalid paths, invalid UTF-8, prompt composition, Runtime registration, redacted status, configuration disablement, and Interactive CLI display. Full result: `253 passed`; Ruff, Mypy strict, documentation, coverage, and clean-wheel gates pass.
+
+```powershell
+python scripts/check_docs.py
+python -m ruff check src tests scripts
+python -m mypy src\agent_runtime
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
+python scripts/check_coverage.py coverage.json
+python -m build
+python scripts/verify_distribution.py dist\agent_runtime-0.8.6-py3-none-any.whl
+```
+
+### 后续计划
+
+Validate the prompt behavior with real coding tasks and improve the existing loop before adding hierarchical rules, LSP, PTY, automatic commits, or unbounded autonomy.
+
+---
+
+<a id="e2026-08-17-003"></a>
+## E2026-08-17-003：v0.8.5 有界文件读取与批量精确 Patch
+
+- **完成时间**：2026-08-17
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `src/agent_runtime/coding_tools.py`
+  - `src/agent_runtime/local_runtime.py`
+  - `src/agent_runtime/interactive/shell.py`
+  - `src/agent_runtime/version.py`
+  - `tests/test_coding_tools.py`
+  - `scripts/verify_distribution.py`
+  - `docs/CODING_TOOLS.md`
+  - `docs/adr/0030-bounded-read-batch-patch.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0030](./adr/0030-bounded-read-batch-patch.md)
+
+### 变更摘要
+
+增加 `read_file_lines` 和 `apply_patch`，让模型可以按行范围读取大型文件，并在一次 Approval 中完成多个已有 UTF-8 文件的结构化精确替换。
+
+### 系统架构
+
+两个 Tool 继续注册到同一个 ToolRegistry，不修改 Runtime Kernel。读取走 `file.read` capability；批量修改走 `file.write`、Durable Approval、ToolExecution、Checkpoint、Event Log 和 UNKNOWN 处理链路。
+
+### 实现方式
+
+`read_file_lines` 限制起始行、最大行数和最大字符数，返回稳定行号、截断状态和文件 SHA-256。`apply_patch` 最多接受 20 条 edit，先验证全部路径、字段和匹配数，再逐文件执行原子 replace；失败后尽力回滚，回滚不完整时报告 UNKNOWN。`/diff` 可以展开批量 Patch 中每个文件的前后 SHA-256。
+
+### 当前功能
+
+支持大型文件局部读取、多个文件一次精确修改、一次人工审批、修改结果审计以及后续 `run_process` 验证。
+
+### 已知限制
+
+`apply_patch` 不是 unified diff parser，不支持创建、删除、移动或二进制文件。多文件操作不承诺进程崩溃级事务原子性，也不自动执行 Git commit 或 push。
+
+### 测试与验收
+
+新增行范围、字符限制、SHA-256、多文件修改、全量预验证、Approval 持久化结果和 `/diff` 展开测试。本地 Python 3.13 全量结果为 `248 passed`，总体 coverage 为 `83.95%`，core line coverage 为 `91.42%`，core branch coverage 为 `80.27%`；Ruff、Mypy strict 和文档检查通过。
+
+```powershell
+python scripts/check_docs.py
+python -m ruff check src tests scripts
+python -m mypy src\agent_runtime
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
+python scripts/check_coverage.py coverage.json
+python -m build
+python scripts/verify_distribution.py dist
+```
+
+### 后续计划
+
+通过真实模型观察大文件读取范围和批量 Patch 参数质量，优先改进失败提示与上下文效率，不立即增加自动提交、自动批准或无限自治循环。
+
+---
+
+<a id="e2026-08-17-002"></a>
+## E2026-08-17-002：v0.8.4 Git-aware Workspace Review
+
+- **完成时间**：2026-08-17
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `src/agent_runtime/git_tools.py`
+  - `src/agent_runtime/local_runtime.py`
+  - `src/agent_runtime/__init__.py`
+  - `tests/test_git_tools.py`
+  - `tests/test_coding_tools.py`
+  - `scripts/check_docs.py`
+  - `scripts/verify_distribution.py`
+  - `docs/CODING_TOOLS.md`
+  - `docs/adr/0029-read-only-git-workspace-tools.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)
+
+### 变更摘要
+
+增加只读 `git_status` 和 `git_diff` Tool，使本地 Agent 可以在修改前后检查分支、工作区状态和 tracked diff，而不必通过通用进程 Tool 猜测 Git 参数。
+
+### 系统架构
+
+Git Tool 复用标准 LocalProcessSandbox，只在 Git 已进入允许可执行文件列表时注册。Tool 声明 `process.exec` 和 `file.read`，由 CapabilityPolicy 要求受管 Sandbox，但不声明副作用和 Approval。
+
+### 实现方式
+
+`git_status` 固定使用 short/branch 格式并可控制 untracked 展示；`git_diff` 禁用 external diff、textconv 和颜色，限制 context line、输出字符数和 Workspace 路径。非 Git 仓库、非法范围和非零退出码转换为明确 Tool 错误。
+
+### 当前功能
+
+模型可以调用 `git_status` 判断工作区是否已有改动，调用 `git_diff` 查看 staged 或 unstaged tracked diff，再决定是否继续编辑和验证。
+
+### 已知限制
+
+不展示 untracked 文件正文，不提供 commit、push、reset、checkout 或 branch 写操作。Git 不在 Sandbox allowlist 时两个 Tool 不注册。
+
+### 测试与验收
+
+新增注册条件、只读授权、命令参数、clean/changes 判断、路径限制、输出截断、非法参数和 Git 错误映射测试。本地 Python 3.13 全量结果为 `248 passed`，总体 coverage 为 `83.95%`，core line coverage 为 `91.42%`，core branch coverage 为 `80.27%`；Ruff、Mypy strict 和文档检查通过。
+
+```powershell
+python scripts/check_docs.py
+python -m ruff check src tests scripts
+python -m mypy src\agent_runtime
+python -m pytest tests\test_git_tools.py -p no:cacheprovider
+```
+
+### 后续计划
+
+保持 Git 写操作走需要人工批准的 `run_process`；不增加自动 commit、push 或破坏性工作区操作。
+
+---
+
+<a id="e2026-08-17-001"></a>
+## E2026-08-17-001：v0.8.3 Coding Workspace Tool Loop
+
+- **完成时间**：2026-08-17
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `src/agent_runtime/coding_tools.py`
+  - `src/agent_runtime/local_config.py`
+  - `src/agent_runtime/local_runtime.py`
+  - `src/agent_runtime/sandbox.py`
+  - `src/agent_runtime/interactive/commands.py`
+  - `src/agent_runtime/interactive/shell.py`
+  - `src/agent_runtime/__init__.py`
+  - `tests/test_coding_tools.py`
+  - `scripts/check_docs.py`
+  - `scripts/verify_distribution.py`
+  - `docs/CODING_TOOLS.md`
+  - `docs/adr/0028-coding-workspace-tools.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0028](./adr/0028-coding-workspace-tools.md)
+
+### 变更摘要
+
+完成标准本地编码 Tool Loop：Agent 可以在可信 Workspace 内列出文件、搜索文本、读取文件、通过精确匹配修改已有文件，并在人工批准后运行白名单进程完成测试或语法验证。Interactive CLI 新增 `/workspace` 和 `/diff`，帮助用户观察当前编码边界和最近 Tool 文件变更。
+
+### 系统架构
+
+新增独立 `coding_tools.py`，通过 `register_coding_tools()` 向既有 ToolRegistry 注册 `list_files`、`search_text` 和 `replace_text`；标准 `create_configured_local_runtime()` 将它们与已有 `read_text_file`、`write_text_file`、`LocalProcessSandbox` 和 `run_process` 一起装配进本地 AgentDefinition。所有调用继续经过 Model Tool Call、CapabilityPolicy、Approval、ToolExecution、Event Log 和 Checkpoint，不在 Interactive CLI 内建立第二套执行循环。
+
+### 实现方式
+
+`list_files` 使用有界目录遍历、默认忽略目录、相对路径和稳定排序；`search_text` 使用纯 Python 扫描 UTF-8 文本，限制文件数、文件大小、结果数和行长，并跳过二进制文件；`replace_text` 要求实际匹配数等于 `expected_replacements`，使用同目录临时文件、flush/fsync 和 `os.replace` 原子替换，成功后返回修改前后 SHA-256。`[tools]` 新增可选的进程开关、白名单、timeout、输出和并发配置；旧配置缺少字段时使用默认值。
+
+### 当前功能
+
+标准本地 Agent 现在提供 `list_files`、`search_text`、`read_text_file`、`replace_text`、`write_text_file` 和 `run_process`。文件写入和进程执行仍要求人工批准；`run_process` 只接受 argv，不经过 Shell。Interactive CLI Banner 和 `/tools` 展示新 Tool，`/workspace` 展示 Workspace 与进程状态，`/diff` 展示当前 Session 最近 20 条持久化 Tool 文件变更摘要。
+
+### 已知限制
+
+`replace_text` 不是完整 unified diff parser，不支持多文件事务、文件移动或自动 Git commit。纯 Python 搜索没有索引，性能低于 ripgrep。`LocalProcessSandbox` 不是容器或虚拟机，只适合可信本地 Workspace；允许的 Python 解释器仍可能访问本机资源。当前不提供自动批准、交互式 PTY、Shell 管道、LSP、多 Workspace 或无限自主循环。
+
+### 测试与验收
+
+新增文件列表、忽略目录、Workspace 逃逸、文本搜索、二进制/大文件跳过、精确替换、匹配冲突、SHA-256、本地 Runtime 注册、进程白名单、Interactive CLI 命令和完整“发现 → 读取 → 修改 → 进程验证 → 最终回答”测试。本地 Python 3.13 全量结果为 `231 passed`，总体 coverage 为 `84.12%`，core line coverage 为 `91.62%`，core branch coverage 为 `80.37%`；Ruff、Mypy strict、文档检查、sdist/wheel 构建和干净虚拟环境发行验证全部通过。
+
+```powershell
+python scripts/check_docs.py
+python -m ruff check src tests scripts
+python -m mypy src\agent_runtime
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
+python scripts/check_coverage.py coverage.json
+python -m build
+python scripts/verify_distribution.py dist
+```
+
+### 后续计划
+
+先使用真实模型完成多个小型本地编码任务，重点修正 Tool 选择、失败恢复、Approval 可读性和上下文消耗；不立即扩展 Git 自动提交、完整 Patch、LSP、Docker 或分布式执行。
+
+---
+
+<a id="e2026-08-16-006"></a>
+## E2026-08-16-006：v0.8.2 Interactive CLI 与持久化多轮 Session
+
+- **完成时间**：2026-08-16
+- **状态**：✅ stable
+- **类型**：feature
+- **影响范围**：
+  - `src/agent_runtime/interactive/__init__.py`
+  - `src/agent_runtime/interactive/commands.py`
+  - `src/agent_runtime/interactive/renderer.py`
+  - `src/agent_runtime/interactive/shell.py`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_interactive.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `scripts/check_docs.py`
+  - `scripts/check_coverage.py`
+  - `scripts/verify_distribution.py`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/adr/0027-interactive-cli-session-history.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0027](./adr/0027-interactive-cli-session-history.md)
+
+### 变更摘要
+
+新增 `agent-runtime chat` 终端 Agent Shell，使用户可以直接通过 Prompt Toolkit 输入、多轮 Session、实时模型输出、Tool 状态、终端审批和 Slash Command 使用真实 Runtime。新增 `--continue`、`--resume`、`--print` 和 `--no-color`，并通过显式 Session 历史装配为终端对话提供跨进程上下文。
+
+### 系统架构
+
+Interactive CLI 作为 Runtime 外部 Adapter，复用 v0.8.1 的本地配置 Bootstrap、Provider、ToolRegistry、SQLite 和单 Owner Lock。每条用户消息创建独立 Run，同一对话通过 Session 关联；Rich Renderer 消费 durable Runtime Event，Prompt Toolkit 输入历史与 Runtime Session 明确分离。Runtime Kernel 只新增受 metadata 控制的历史消息装配，不依赖终端库。
+
+### 实现方式
+
+`InteractiveShell` 使用 `PromptSession.prompt_async()`、`FileHistory`、Slash Command Registry 和 `Runtime.stream()`。`model.delta` 直接追加到终端，Tool 与 Approval 以紧凑状态展示，内部 Context/Checkpoint 噪音默认隐藏；Approval 通过 `resolve_approval()` 和原 Run `resume()` 完成，活动 Run 的 `Ctrl+C` 调用协作式 `cancel()`。CLI 显式提交 `include_session_history=true` 和 20 Run 上限；Runtime 只加载同 Session、同 Agent、已完成 Run 的 user input/final assistant result，并写入 `session.history.loaded` Event。发行验证新增干净 Wheel 环境的 `chat --print` smoke。
+
+### 当前功能
+
+支持新建、继续和指定恢复 Interactive Session，支持 `/help`、`/new`、`/continue`、`/sessions`、`/resume`、`/status`、`/model`、`/tools`、`/events`、`/cancel`、`/clear` 和退出命令。支持终端输入历史、模型 token 流、Tool 调用状态、`y/n` Tool Approval、Ctrl+C 取消、Ctrl+D 退出和单次脚本输出。`chat` 与 `serve` 对同一状态目录继续保持单执行 Owner。
+
+### 已知限制
+
+当前 CLI 是 embedded Runtime，不会 attach 到已经运行的 HTTP 服务；因此同一状态目录下不能同时运行 `chat` 和 `serve`。Session 历史只重建 user input 和 final assistant result，不回放旧 Tool Call/Result、Approval 或 Checkpoint。默认历史窗口按 20 个 Run 控制，不是单独的 token-aware 对话摘要。同步副作用 Tool 取消后仍遵循既有 `UNKNOWN` 语义。
+
+### 测试与验收
+
+新增 Interactive CLI 命令解析、真实 Runtime 单次执行、Session 管理、终端 Tool Approval、显式 Session 历史和 Event Renderer 测试。本地 Python 3.13 全量结果为 `220 passed`，总体 coverage 为 `84.06%`，core line coverage 为 `91.85%`，core branch coverage 为 `80.37%`。sdist/wheel 构建通过，干净虚拟环境已完成 `chat --print`、本地服务、SDK、FastAPI/SSE、诊断和备份恢复 smoke。
+
+```powershell
+python scripts/check_docs.py
+python -m ruff check src tests scripts
+python -m mypy src\agent_runtime
+python -m pytest -q -p no:cacheprovider
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
+python scripts/check_coverage.py coverage.json
+python -m build
+python scripts/verify_distribution.py dist
+agent-runtime chat -p "19 * 23" --no-color
+```
+
+### 后续计划
+
+先用 v0.8.2 执行真实本地任务，收集文件搜索、补丁、测试执行、上下文摘要和交互稳定性缺口。Coding Tool Loop 与 HTTP attach 仅保留为需求驱动候选，不立即进入分布式、多租户或更多模型厂商扩展。
+
+---
+
 <a id="e2026-08-16-005"></a>
 ## E2026-08-16-005：v0.8.1 本地稳定 Runtime 启动闭环
 
@@ -60,7 +501,7 @@ Owner Lock 是单机进程所有权声明，不是分布式 Lease；Python SDK �
 ```powershell
 python scripts/check_docs.py
 python -m ruff check src tests scripts
-python -m mypy srcgent_runtime
+python -m mypy src\agent_runtime
 python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
 python scripts/check_coverage.py coverage.json
 python scripts/verify_local_runtime.py --runs 100 --concurrency 8

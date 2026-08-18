@@ -26,6 +26,13 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
+| [ADR-0033](./0033-verified-task-completion.md) | Accepted | 2026-08-18 | 本地 Coding Run 一次性完成证据检查 | E2026-08-18-002 |
+| [ADR-0032](./0032-artifact-paging-workspace-discovery.md) | Accepted | 2026-08-18 | Artifact 分页读取与 Workspace 继续发现策略 | E2026-08-18-001 |
+| [ADR-0031](./0031-project-workspace-instructions.md) | Accepted | 2026-08-17 | 项目指令作为有界本地 Agent 上下文 | E2026-08-17-004 |
+| [ADR-0030](./0030-bounded-read-batch-patch.md) | Accepted | 2026-08-17 | 有界文件读取与批量精确 Patch | E2026-08-17-003 |
+| [ADR-0029](./0029-read-only-git-workspace-tools.md) | Accepted | 2026-08-17 | Git 只读工作区检查通过受管 Sandbox | E2026-08-17-002 |
+| [ADR-0028](./0028-coding-workspace-tools.md) | Accepted | 2026-08-17 | 结构化 Coding Workspace Tool 与 argv 进程执行 | E2026-08-17-001 |
+| [ADR-0027](./0027-interactive-cli-session-history.md) | Accepted | 2026-08-16 | Interactive CLI Adapter 与显式 Session 历史 | E2026-08-16-006 |
 | [ADR-0026](./0026-local-runtime-bootstrap-single-owner.md) | Accepted | 2026-08-16 | 本地 Runtime 配置驱动启动与单执行 Owner | E2026-08-16-005 |
 | [ADR-0025](./0025-local-process-sandbox-capability-policy.md) | Accepted | 2026-08-16 | LocalProcessSandbox 与 Tool Capability 显式允许边界 | E2026-08-16-004 |
 | [ADR-0024](./0024-incident-diagnostic-bundle.md) | Accepted | 2026-08-16 | 故障诊断包允许列表、内容排除与原子导出 | E2026-08-16-003 |

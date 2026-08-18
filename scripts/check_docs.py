@@ -30,6 +30,8 @@ REQUIRED_FILES = (
     "docs/INCIDENTS.md",
     "docs/SANDBOX.md",
     "docs/LOCAL_RUNTIME.md",
+    "docs/INTERACTIVE_CLI.md",
+    "docs/CODING_TOOLS.md",
     "docs/adr/README.md",
     "docs/templates/change-entry.md",
     "docs/templates/adr.md",
@@ -37,6 +39,9 @@ REQUIRED_FILES = (
 
 CORE_PATHS = {
     "src/agent_runtime/backup.py",
+    "src/agent_runtime/coding_tools.py",
+    "src/agent_runtime/git_tools.py",
+    "src/agent_runtime/workspace_context.py",
     "src/agent_runtime/domain.py",
     "src/agent_runtime/runtime.py",
     "src/agent_runtime/providers.py",
@@ -50,6 +55,10 @@ CORE_PATHS = {
     "src/agent_runtime/sandbox.py",
     "src/agent_runtime/local_config.py",
     "src/agent_runtime/local_runtime.py",
+    "src/agent_runtime/cli.py",
+    "src/agent_runtime/interactive/commands.py",
+    "src/agent_runtime/interactive/renderer.py",
+    "src/agent_runtime/interactive/shell.py",
     "src/agent_runtime/telemetry.py",
     "src/agent_runtime/evals.py",
 }
@@ -205,9 +214,13 @@ def parse_entries(validation: Validation) -> list[ChangeEntry]:
             if completed != id_date:
                 validation.error(f"{change_id} 的编号日期与完成时间不一致。")
             if completed > today:
-                validation.error(f"{change_id} 的完成时间 {completed} 晚于 Asia/Shanghai 当前日期 {today}。")
+                validation.error(
+                    f"{change_id} 的完成时间 {completed} 晚于 Asia/Shanghai 当前日期 {today}。"
+                )
 
-        entries.append(ChangeEntry(change_id, completed, sequence, match.group("title").strip(), body))
+        entries.append(
+            ChangeEntry(change_id, completed, sequence, match.group("title").strip(), body)
+        )
 
     expected = sorted(entries, key=lambda item: (item.completed, item.sequence), reverse=True)
     if [entry.change_id for entry in entries] != [entry.change_id for entry in expected]:
@@ -241,7 +254,9 @@ def validate_entry_details(
             if require_commit_hash:
                 validation.error(f"{entry.change_id} 的关联 commit 仍为 pending。")
         elif not COMMIT_HASH.fullmatch(commit_value):
-            validation.error(f"{entry.change_id} 的关联 commit 不是 7-40 位 Git hash：{commit_value!r}")
+            validation.error(
+                f"{entry.change_id} 的关联 commit 不是 7-40 位 Git hash：{commit_value!r}"
+            )
 
         for match in ADR_LINK.finditer(entry.body):
             target = (CHANGELOG.parent / match.group("target")).resolve()
@@ -249,7 +264,9 @@ def validate_entry_details(
                 validation.error(f"{entry.change_id} 引用了不存在的 ADR：{match.group('target')}")
 
 
-def validate_current(validation: Validation, known_ids: set[str], require_commit_hash: bool) -> None:
+def validate_current(
+    validation: Validation, known_ids: set[str], require_commit_hash: bool
+) -> None:
     if not CURRENT.exists():
         return
     text = read_text(CURRENT)
@@ -263,7 +280,11 @@ def validate_current(validation: Validation, known_ids: set[str], require_commit
         validation.error("docs/CURRENT.md 的当前代码基线 commit 不是合法 Git hash。")
 
     for line_number, line in enumerate(text.splitlines(), start=1):
-        if line.startswith("|") and line.count("|") >= 4 and any(marker in line for marker in STATUS_MARKERS):
+        if (
+            line.startswith("|")
+            and line.count("|") >= 4
+            and any(marker in line for marker in STATUS_MARKERS)
+        ):
             ids = CHANGE_ID.findall(line)
             if not ids:
                 validation.error(f"docs/CURRENT.md 第 {line_number} 行的状态项没有关联 Change ID。")
@@ -338,7 +359,11 @@ def validate_roadmap(validation: Validation, known_ids: set[str]) -> None:
     else:
         current_version = parse_version(current_match.group("value"))
 
-    if roadmap_current is not None and current_version is not None and roadmap_current != current_version:
+    if (
+        roadmap_current is not None
+        and current_version is not None
+        and roadmap_current != current_version
+    ):
         validation.error("docs/ROADMAP.md 的当前版本与 docs/CURRENT.md 不一致。")
 
     entries: list[RoadmapEntry] = []
@@ -361,7 +386,9 @@ def validate_roadmap(validation: Validation, known_ids: set[str]) -> None:
         change_ids = CHANGE_ID.findall(record)
         if status == "✅ completed":
             if len(change_ids) != 1:
-                validation.error(f"docs/ROADMAP.md 的 completed 版本 {version_text} 必须关联一个 Change ID。")
+                validation.error(
+                    f"docs/ROADMAP.md 的 completed 版本 {version_text} 必须关联一个 Change ID。"
+                )
             elif change_ids[0] not in known_ids:
                 validation.error(
                     f"docs/ROADMAP.md 的 {version_text} 引用未知 Change ID：{change_ids[0]}"
@@ -379,8 +406,7 @@ def validate_roadmap(validation: Validation, known_ids: set[str]) -> None:
     in_progress = [entry.version_text for entry in entries if entry.status == "🚧 in-progress"]
     if len(in_progress) > 1:
         validation.error(
-            "docs/ROADMAP.md 同一时间最多只能有一个 in-progress 主版本："
-            + ", ".join(in_progress)
+            "docs/ROADMAP.md 同一时间最多只能有一个 in-progress 主版本：" + ", ".join(in_progress)
         )
 
     completed = [entry for entry in entries if entry.status == "✅ completed"]
@@ -418,13 +444,13 @@ def validate_markdown_links(validation: Validation) -> None:
         text = read_text(path)
         for match in MARKDOWN_LINK.finditer(text):
             raw_target = match.group("target")
-            if "://" in raw_target or any(token in raw_target for token in ("NNNN", "YYYY", "eyyyy")):
+            if "://" in raw_target or any(
+                token in raw_target for token in ("NNNN", "YYYY", "eyyyy")
+            ):
                 continue
             target = (path.parent / raw_target).resolve()
             if not target.is_file():
-                validation.error(
-                    f"{path.relative_to(ROOT)} 包含失效 Markdown 链接：{raw_target}"
-                )
+                validation.error(f"{path.relative_to(ROOT)} 包含失效 Markdown 链接：{raw_target}")
 
 
 def git_output(*arguments: str) -> tuple[int, str]:
@@ -500,7 +526,10 @@ def main() -> int:
     if validation.errors:
         for error in validation.errors:
             print(f"ERROR: {error}", file=sys.stderr)
-        print(f"Documentation validation failed with {len(validation.errors)} error(s).", file=sys.stderr)
+        print(
+            f"Documentation validation failed with {len(validation.errors)} error(s).",
+            file=sys.stderr,
+        )
         return 1
 
     print(f"Documentation validation passed: {len(entries)} change entries checked.")

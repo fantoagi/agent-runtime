@@ -1,20 +1,22 @@
 # Agent Runtime 当前架构
 
-> 最近更新：2026-08-16
-> 关联记录：[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
-> 关联决策：[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
+> 最近更新：2026-08-18
+> 关联记录：[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)、[E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、[E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
+> 关联决策：[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0031](./adr/0031-project-workspace-instructions.md)、[ADR-0030](./adr/0030-bounded-read-batch-patch.md)、[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)、[ADR-0027](./adr/0027-interactive-cli-session-history.md)、[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
 
 ## 1. 系统目标和边界
 
 当前系统是一个面向开发者的、可持久化 Agent Runtime。它既支持单 Agent 模型/工具循环，也支持由 Parent Run 委派独立 Child Run 的单机多 Agent Workflow，并通过 ContextBuilder、Session 和 Scoped Memory 管理模型输入与跨 Run 信息复用。
 
-当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。v0.8.1 的正式支持目标收敛为单机、单用户、本地 SQLite 和可信 Tool/脚本；标准服务只监听 loopback，并通过状态目录 Owner Lock 防止两个本地执行循环并行领取同一状态。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
+当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。v0.8.8 的正式支持目标收敛为单机、单用户、本地 SQLite 和可信 Tool/脚本；标准服务只监听 loopback，并通过状态目录 Owner Lock 防止两个本地执行循环并行领取同一状态。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
 
 ## 2. 总体架构
 
 ```mermaid
 flowchart TD
-    CLI["CLI / Python SDK"]
+    CLI["Management CLI / Python SDK"]
+    Terminal["Prompt Toolkit Terminal"]
+    Chat["Interactive CLI / Agent Shell"]
     API["FastAPI / SSE Adapter"]
     Lab["Browser Learning Console"]
     LabAdapter["Learning Console Adapter"]
@@ -40,6 +42,8 @@ flowchart TD
 
     CLI --> Runtime
     CLI --> Workflows
+    Terminal --> Chat
+    Chat --> Runtime
     API --> Runtime
     Lab --> LabAdapter
     LabAdapter --> Runtime
@@ -60,6 +64,7 @@ flowchart TD
     Runtime --> Artifacts
     Relations --> Observe
     Events --> Observe
+    Events --> Chat
     State --> Observe
     Memory --> Observe
     Events --> LabAdapter
@@ -103,6 +108,95 @@ flowchart LR
 `LocalRuntimeLock` 在 Runtime 构造前打开 `runtime.lock`，并在整个服务生命周期内持有操作系统级非阻塞排他文件锁；JSON 元数据记录 PID、主机、版本、启动时间和随机 token。第二个 `serve` 无法获得排他锁时立即拒绝。进程被强杀后，操作系统自动释放锁，下一次启动覆盖遗留元数据；Windows Process Handle 只用于只读状态判断。该锁只约束标准本地服务，不是跨主机 Lease。
 
 `configure_structured_logging()` 同时配置 stderr 和有界 `RotatingFileHandler`。FastAPI 模块的 Uvicorn 默认 `app` 使用惰性 ASGI 包装器，import Adapter 时不再创建隐藏 SQLite 或 Runtime。
+
+## 2.2 Interactive CLI Adapter
+
+v0.8.2 在本地启动层之上增加 embedded Interactive CLI。它是 Runtime 外部 Adapter，不把提示符、颜色、Slash Command 或终端状态写进 Runtime Kernel：
+
+```mermaid
+flowchart LR
+    User["Terminal User"] --> Prompt["Prompt Toolkit / History"]
+    Prompt --> Shell["InteractiveShell"]
+    Shell --> Runtime["Runtime Kernel"]
+    Runtime --> Events["SQLite Durable Events"]
+    Events --> Renderer["Rich EventRenderer"]
+    Renderer --> User
+    Shell --> Approval["Terminal Approval y/n"]
+    Approval --> Runtime
+```
+
+`agent-runtime chat` 与 `serve` 使用同一 `LocalRuntimeLock`，因此一个状态目录仍只有一个执行 Owner。每次用户输入创建独立 Run，并关联到一个持久化 Session；CLI 通过 metadata 显式设置 `include_session_history=true`，Runtime 才会把同 Session、同 Agent、已完成 Run 的 user input 与 final assistant result 重建为模型消息。默认最多加载 20 个历史 Run，上限 100；旧 Tool Call、Tool Result 和内部 Event 不作为下一轮模型上下文回放。
+
+Runtime 为这次上下文装配写入 durable `session.history.loaded` Event。Prompt Toolkit 的 `<state_dir>/cli-history` 只用于方向键和自动建议，不属于 Runtime Session、Checkpoint 或恢复事实。Rich Renderer 消费 `Runtime.stream()`，默认显示 `model.delta`、Tool、Approval 和终态，隐藏 Context/Checkpoint 等内部噪音；`--print` 则只输出最终可消费文本。
+
+> 最近更新：2026-08-16
+> 关联记录：[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)
+> 关联决策：[ADR-0027](./adr/0027-interactive-cli-session-history.md)
+
+## 2.3 Project-aware Workspace Context
+
+> Updated: 2026-08-17
+> Change: [E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)
+> Decision: [ADR-0031](./adr/0031-project-workspace-instructions.md)
+
+Before AgentDefinition registration, local bootstrap loads configured root-relative UTF-8 instruction files, defaulting to `AGENTS.md` and `CLAUDE.md`. Files share a bounded character budget. Status projections contain path, SHA-256, character count, truncation, and skip reasons, but never content.
+
+```mermaid
+flowchart LR
+    Config["Configured base prompt"] --> Compose["Workspace Context Composer"]
+    Protocol["Built-in coding protocol"] --> Compose
+    Files["AGENTS.md / CLAUDE.md"] --> Bound["Path + UTF-8 + char budget"]
+    Bound --> Compose
+    Compose --> Agent["AgentDefinition.system_prompt"]
+    Agent --> Snapshot["Immutable AgentDefinition snapshot"]
+```
+
+Project rules therefore become part of the exact startup Agent snapshot. Later file changes do not alter historical Run recovery; restarting the Runtime creates a new prompt snapshot.
+
+## 2.4 Artifact-aware Reading 与 Workspace Discovery
+
+> 最近更新：2026-08-18
+> 关联记录：[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)
+> 关联决策：[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)
+
+```mermaid
+flowchart LR
+    Tool["Large Tool Result"] --> Runtime["Runtime artifactization"]
+    Runtime --> Preview["Bounded preview + artifact reference"]
+    Preview --> Reader["read_artifact(offset, max_chars)"]
+    Reader --> Page["content + next_offset + has_more"]
+    Page --> Model["Model continues reasoning"]
+    Reader -. "never artifactize again" .-> Runtime
+```
+
+ArtifactStore 将大 Tool Result 保存在 `<artifact_root>/<run_id>/tool-results/`。`read_artifact` 只接受当前 Run 下的 Tool Result Artifact，支持绝对路径、Artifact root 相对路径或 `tool-results/...` 引用；路径 resolve 后必须仍位于当前 Run 边界。读取器以增量 UTF-8 decoder 顺序扫描文件，在不把完整正文注入模型上下文的前提下计算字符总数和 SHA-256，并返回最多 4000 字符的页面。
+
+Runtime 的首次大结果仍写入 Artifact 和 `tool.result.artifactized` Event，但返回给模型的 Tool Message 同时包含 `read_artifact` 调用方法。来自 `read_artifact` 的结果具有显式非递归标记，因此即使接近 inline threshold 也不会再次 Artifact 化。标准 `read_text_file` 知道本地 Artifact root，若指向当前 Run Tool Result Artifact，会拒绝并提示使用专用 Tool。
+
+Workspace discovery 同时收紧默认噪声：目录过滤 `.runtime-test-data`，文件过滤 `.coverage` 与 `coverage.json`。`list_files`、`search_text` 和内建 Coding Protocol 约定，广泛发现被截断时应缩小 path/pattern 或按符号搜索，而不是结束任务；目标能从当前请求或 Session 历史推断时，不要求用户重复说明。
+
+## 2.5 Verified Task Completion
+
+> 最近更新：2026-08-18<br>
+> 关联记录：[E2026-08-18-002](./CHANGELOG.md#e2026-08-18-002)<br>
+> 关联决策：[ADR-0033](./adr/0033-verified-task-completion.md)
+
+标准本地 Runtime 在 Runtime Kernel 外挂载可选 `CodingCompletionPolicy`。普通 Runtime 不启用时仍保持“模型无 Tool Call 即完成”的兼容语义。本地 Coding Run 发生文件写入后，Policy 从持久化 ToolExecution 派生完成证据：
+
+```mermaid
+flowchart TD
+    Final["模型返回普通最终文本"] --> Writes{"当前 Run 是否成功写入文件"}
+    Writes -- "否" --> ReadOnly["completion.evidence: read_only"]
+    Writes -- "是" --> Evidence["检查最后写入后的 git_diff 与验证命令"]
+    Evidence --> Complete{"证据是否满足"}
+    Complete -- "是" --> Verified["completion.evidence: verified"]
+    Complete -- "否，且未提醒" --> Reminder["持久化草稿 Step + completion.verification_requested"]
+    Reminder --> Continue["追加 Runtime system reminder 并继续同一 Run"]
+    Continue --> Final
+    Complete -- "否，已提醒一次" --> Unverified["completion.evidence: unverified"]
+```
+
+该机制不自动执行 diff 或测试，只允许模型继续调用已有 Tool；成功事实来自 ToolExecution 状态和 `run_process` exit code。提醒次数通过 durable Event 判断，因此恢复后不会重复进入无限循环。最终证据在 `run.completed` 前写入 Event Log，CLI、SSE、Eval 和观测 Adapter 可以统一消费。
 
 ## 3. Runtime Kernel
 
@@ -273,6 +367,32 @@ Capability 决策通过 `tool.policy.evaluated` 进入 durable Event Log；Sandb
 > 关联记录：[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)
 > 关联决策：[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)
 
+## 6.2 Coding Workspace Tool Loop
+
+v0.8.5 在 Tool Registry 之上提供标准本地 Coding Tool 组合，但不修改 Runtime Kernel 的执行循环：
+
+```mermaid
+flowchart LR
+    Model["Model ToolCall"] --> Inspect["list_files / search_text / read_text_file"]
+    Inspect --> Model
+    Model --> Edit["replace_text / apply_patch / write_text_file"]
+    Edit --> Approval["Durable Approval"]
+    Approval --> Atomic["Atomic workspace write"]
+    Atomic --> Model
+    Model --> Verify["run_process argv"]
+    Verify --> Approval2["Durable Approval"]
+    Approval2 --> Sandbox["LocalProcessSandbox"]
+    Sandbox --> Model
+```
+
+`list_files` 返回排序、相对、有限的 Workspace 路径并跳过常见生成目录；`search_text` 对 UTF-8 文本执行有界扫描；`read_file_lines` 按行和字符预算读取；`replace_text` 处理单文件精确替换；`apply_patch` 在全部 edit 预验证后批量修改已有文件，并返回每个文件的前后 SHA-256。只读 `git_status`、`git_diff` 复用 LocalProcessSandbox，禁用 external diff/textconv 并限制输出。文件读操作声明 `file.read`；文件修改声明 `file.write`、`requires_approval` 与 `side_effecting`。
+
+标准 `create_configured_local_runtime()` 将 Coding Tool 与已有 `run_process` 一起加入本地 AgentDefinition。`run_process` 继续只接收 argv，由 TOML 配置白名单、timeout、输出和并发；Interactive CLI 的 `/workspace` 与 `/diff` 只读取 AgentDefinition 和 ToolExecution，不复制执行状态机。
+
+> 最近更新：2026-08-17
+> 关联记录：[E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、[E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)
+> 关联决策：[ADR-0030](./adr/0030-bounded-read-batch-patch.md)、[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)
+
 ## 7. SQLite、Step、ToolExecution、Checkpoint 和 Artifact Store
 
 `SQLiteStore` 当前保存：
@@ -350,11 +470,18 @@ tool.result.artifactized
 
 ## 9. API、SDK 与 CLI
 
-Python SDK 暴露 Runtime 和领域对象，并提供本地 Demo runtime 构造函数。
+Python SDK 暴露 Runtime 和领域对象，并提供本地 Demo runtime 构造函数。Interactive CLI 通过同一个 Runtime API 提供持久化多轮终端对话。
 
 CLI 当前支持：
 
 ```text
+agent-runtime init
+agent-runtime chat
+agent-runtime chat -c
+agent-runtime chat -r <session-id>
+agent-runtime chat -p "19 * 23"
+agent-runtime serve
+agent-runtime status
 agent-runtime lab
 agent-runtime demo
 agent-runtime runs list
@@ -371,9 +498,15 @@ agent-runtime eval demo
 agent-runtime memory demo
 ```
 
-核心 Runtime 不依赖 CLI 或 HTTP 框架。
+核心 Runtime 不依赖 CLI、Prompt Toolkit、Rich 或 HTTP 框架。
 
-## 9.1 FastAPI Run API 与 SSE
+## 9.1 Interactive CLI
+
+`InteractiveShell` 将终端输入映射为持久化 Session 和独立 Run，通过 `Runtime.stream()` 渲染 `model.delta`、Tool 与 Approval 事件。Slash Command 只读取或调用公开 Runtime/Store 接口；终端审批调用 `resolve_approval()` 后再恢复同一 Run。活动 Run 期间的 `Ctrl+C` 触发协作式 `cancel()`，输入阶段的 `Ctrl+C` 只清空当前提示，`Ctrl+D` 保存持久化状态后退出。
+
+`chat -c` 选择最近的 Interactive CLI Session，`chat -r` 使用指定 Session，`chat -p` 运行一次后退出。Embedded 模式优先复用现有本地 Bootstrap、Provider、ToolRegistry、SQLite 和 Owner Lock；当前不实现连接到正在运行的 HTTP daemon。
+
+## 9.2 FastAPI Run API 与 SSE
 
 FastAPI 位于 Application / Adapter Layer，只调用 Runtime、SQLiteStore 和 Runtime.stream()，不直接实现模型循环、工具执行或 SQLite 连接操作。
 
@@ -392,7 +525,7 @@ FastAPI 位于 Application / Adapter Layer，只调用 Runtime、SQLiteStore 和
 
 v0.4 起，SSE 仍然只有一个事件流协议；客户端根据 `type` 区分 `model.delta`、`tool.completed` 等事件。`model.delta` 是持久化 Runtime Event，因此支持 `after_sequence` 断点续传；Provider 不支持 streaming 时，Runtime 会回退为一次性的完整响应事件。
 
-## 9.2 Observability、Trace 与 Metrics
+## 9.3 Observability、Trace 与 Metrics
 
 `ObservabilityService` 不侵入 Runtime 状态机，而是从 `SQLiteStore` 中已经持久化的 Run 和 Runtime Event 派生观测结果：
 
@@ -410,7 +543,7 @@ FastAPI 暴露：
 - `GET /runs/{run_id}/trace`。
 - `GET /runs/{run_id}/trace/tree`。
 
-## 9.3 Eval Runner
+## 9.4 Eval Runner
 
 `EvalRunner` 使用与生产执行相同的 Runtime 路径逐个运行 `EvalCase`，不会绕过 Provider、Tool、Checkpoint 或 Event Log。每个 Eval Run 的 metadata 保存 `eval_report_id`、`eval_suite` 和 `eval_case`，因此评估结果可以反查完整 Trace 和事件。
 
@@ -424,7 +557,7 @@ FastAPI 暴露：
 
 `EvalReport` 汇总用例级断言、通过率、Run ID、Trace ID 和耗时，并写入 Artifact Store。`WorkflowEvalRunner` 通过真实 Workflow 路径运行用例，并可断言 Parent 状态、输出和 Child Run 数量。当前顺序执行以保证确定性，尚未实现并发评估、统计显著性或 LLM-as-a-Judge。
 
-## 9.4 Learning Console
+## 9.5 Learning Console
 
 Learning Console 是 `agent_runtime.lab` 中的教学 Adapter，通过 `create_app(..., enable_learning_console=True)` 挂载到 `/lab`。默认 `create_demo_app()` 和 `agent-runtime lab` 会启用该 Adapter。
 
@@ -453,7 +586,7 @@ Root 事件实时通知复用 `/runs/{run_id}/events/stream`。因为 Child Run 
 > 最近更新：2026-08-16
 > 关联记录：[E2026-08-15-003](./CHANGELOG.md#e2026-08-15-003)
 > 关联决策：[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)、[ADR-0009](./adr/0009-learning-console.md)
-## 9.5 Operational Observability 与结构化日志
+## 9.6 Operational Observability 与结构化日志
 
 v0.7.11 将已有 Trace、Metrics、Runtime Doctor 和当前进程采样组合为 `OperationalSnapshot`，同时保持 durable facts 与 transient signals 分层：
 
@@ -480,7 +613,7 @@ Provider attempt 失败和重试决定会改变一次 Run 的执行解释，因�
 > 最近更新：2026-08-16
 > 关联记录：[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)
 > 关联决策：[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0008](./adr/0008-observability-evals.md)
-## 9.6 Incident Diagnostics 与 Support Bundle
+## 9.7 Incident Diagnostics 与 Support Bundle
 
 v0.7.12 在 `OperationalSnapshot` 之上增加独立的 `IncidentDiagnosticsService`。该层只读取 Runtime 与 SQLite durable facts，生成可分享的安全摘要和 ZIP，不进入执行主循环，也不写入 Runtime Event sequence。
 
@@ -508,7 +641,7 @@ CLI 文件导出先在内存构建 ZIP，再写入同目录临时文件并执行
 > 关联记录：[E2026-08-16-003](./CHANGELOG.md#e2026-08-16-003)
 > 关联决策：[ADR-0024](./adr/0024-incident-diagnostic-bundle.md)、[ADR-0023](./adr/0023-operational-observability.md)
 
-## 9.7 Reliability、生命周期与发布门禁
+## 9.8 Reliability、生命周期与发布门禁
 
 - `shutdown(timeout_seconds=30, cancel_running=False)` 先停止接收新工作，再排空任务；超时后协作取消，不能确认的副作用 Tool 保持 `UNKNOWN`。
 - `async with Runtime(...)` 自动执行相同关闭流程，重复关闭幂等。
@@ -528,7 +661,7 @@ flowchart TD
 ```
 
 PR 执行静态检查、189 项测试、覆盖率、20 并发和 Wheel smoke；Nightly 执行 100 并发、故障测试重复、30 分钟 soak 和性能检查。
-## 9.7 Runtime Doctor 与 Crash Recovery Matrix
+## 9.9 Runtime Doctor 与 Crash Recovery Matrix
 
 `RuntimeDoctor` 是只读诊断层，不修改 SQLite。它检查 quick_check、schema、foreign_keys、非终态 Run、UNKNOWN/Running ToolExecution、Pending Approval、Event sequence、孤儿记录和 Workflow snapshot。CLI 使用 `agent-runtime doctor`，HTTP 使用 `GET /doctor`。
 
@@ -545,7 +678,7 @@ flowchart LR
     Resume --> Verify["Verify terminal state and no duplicate side effect"]
 ```
 
-## 9.8 Backup CLI 与恢复门禁
+## 9.10 Backup CLI 与恢复门禁
 
 CLI 提供：
 
@@ -561,7 +694,7 @@ CLI 提供：
 - 工具必须显式注册，模型不能构造任意可执行函数。
 - 文件路径先 `resolve()`，然后验证仍位于配置的 workspace 内。
 - 写文件工具默认要求人工审批。
-- 不提供任意 Shell、进程管理或自动依赖安装。
+- 不提供任意 Shell 字符串或自动依赖安装；仅允许 Approval 后通过白名单 argv 启动受限本地进程。
 - 工具参数必须通过 schema 校验。
 - 模型 API Key 从构造参数或环境变量读取，不写入事件和数据库。
 
@@ -583,7 +716,7 @@ CLI 提供：
 ## 12. 当前扩展点
 
 - 新增 `ModelProvider` 实现。
-- 注册新的受控工具。
+- 注册新的受控工具；标准本地 Coding Tool 组合位于 `coding_tools.py`。
 - 将 SQLite repository 替换为其他持久化实现。
 - 增加新的 `MemoryStore` 实现，例如 Embedding 或向量数据库检索，同时保留 Scope 和生命周期契约。
 - 在事件消费边界上增加 WebSocket、消息队列或 OpenTelemetry Exporter。

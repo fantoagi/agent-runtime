@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -40,6 +41,14 @@ class LocalRuntimeSettings:
     log_file: Path
     log_max_bytes: int
     log_backup_count: int
+    enable_process_tool: bool = True
+    allowed_executables: tuple[str, ...] = ("python", "git")
+    process_timeout_seconds: float = 120.0
+    process_max_output_bytes: int = 1_000_000
+    process_max_concurrent: int = 2
+    workspace_instructions_enabled: bool = True
+    workspace_instruction_files: tuple[str, ...] = ("AGENTS.md", "CLAUDE.md")
+    workspace_instruction_max_chars: int = 50_000
 
     @property
     def database_path(self) -> Path:
@@ -78,6 +87,16 @@ class LocalRuntimeSettings:
             "tools": {
                 "sync_workers": self.max_sync_tool_workers,
                 "pending_queue_size": self.max_pending_sync_tools,
+                "enable_process": self.enable_process_tool,
+                "allowed_executables": list(self.allowed_executables),
+                "process_timeout_seconds": self.process_timeout_seconds,
+                "process_max_output_bytes": self.process_max_output_bytes,
+                "process_max_concurrent": self.process_max_concurrent,
+            },
+            "workspace_context": {
+                "instructions_enabled": self.workspace_instructions_enabled,
+                "instruction_files": list(self.workspace_instruction_files),
+                "max_instruction_chars": self.workspace_instruction_max_chars,
             },
             "api": {"host": self.host, "port": self.port},
             "logging": {
@@ -116,7 +135,8 @@ def write_default_local_config(
     else:
         state_value = state.as_posix()
     workspace_value = "." if root == path.parent else root.as_posix()
-    content = f'''# Agent Runtime local single-user configuration.\n\n[runtime]\nworkspace = "{workspace_value}"\nstate_dir = "{state_value}"\nagent_name = "local"\nsystem_prompt = "You are a concise local assistant. Use tools only when necessary."\nrun_timeout_seconds = 300\nshutdown_timeout_seconds = 30\nmax_inflight_runs = 8\nmax_concurrent_model_requests = 4\n\n[model]\n# Use "mock" for offline verification or "openai-compatible" for a real model.\nprovider = "mock"\nmodel = "arithmetic-demo"\nbase_url = "https://api.openai.com/v1"\napi_key_env = "OPENAI_API_KEY"\ntimeout_seconds = 60\n\n[tools]\nsync_workers = 8\npending_queue_size = 32\n\n[api]\n# Local Stable Runtime intentionally listens on loopback only.\nhost = "127.0.0.1"\nport = 8000\n\n[logging]\nlevel = "INFO"\nfile = "logs/runtime.log"\nmax_file_size_mb = 20\nbackup_count = 5\n'''
+    python_executable = Path(sys.executable).resolve().as_posix()
+    content = f'''# Agent Runtime local single-user configuration.\n\n[runtime]\nworkspace = "{workspace_value}"\nstate_dir = "{state_value}"\nagent_name = "local"\nsystem_prompt = "You are a concise local assistant. Use tools only when necessary."\nrun_timeout_seconds = 300\nshutdown_timeout_seconds = 30\nmax_inflight_runs = 8\nmax_concurrent_model_requests = 4\n\n[model]\n# Use "mock" for offline verification or "openai-compatible" for a real model.\nprovider = "mock"\nmodel = "arithmetic-demo"\nbase_url = "https://api.openai.com/v1"\napi_key_env = "OPENAI_API_KEY"\ntimeout_seconds = 60\n\n[tools]\nsync_workers = 8\npending_queue_size = 32\nenable_process = true\nallowed_executables = ["{python_executable}", "git"]\nprocess_timeout_seconds = 120\nprocess_max_output_bytes = 1000000\nprocess_max_concurrent = 2\n\n[workspace_context]\n# Root-relative UTF-8 project instructions are appended to the local coding prompt.\ninstructions_enabled = true\ninstruction_files = ["AGENTS.md", "CLAUDE.md"]\nmax_instruction_chars = 50000\n\n[api]\n# Local Stable Runtime intentionally listens on loopback only.\nhost = "127.0.0.1"\nport = 8000\n\n[logging]\nlevel = "INFO"\nfile = "logs/runtime.log"\nmax_file_size_mb = 20\nbackup_count = 5\n'''
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
@@ -134,19 +154,21 @@ def load_local_settings(
     path = Path(config_path).expanduser().resolve()
     if not path.is_file():
         raise LocalConfigError(
-            f"Local runtime configuration does not exist: {path}. "
-            "Run `agent-runtime init` first."
+            f"Local runtime configuration does not exist: {path}. Run `agent-runtime init` first."
         )
     try:
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as error:
-        raise LocalConfigError(f"Cannot read local runtime configuration {path}: {error}") from error
+        raise LocalConfigError(
+            f"Cannot read local runtime configuration {path}: {error}"
+        ) from error
     env = environment if environment is not None else os.environ
     runtime = _section(raw, "runtime")
     model = _section(raw, "model")
     tools = _section(raw, "tools")
     api = _section(raw, "api")
     logging_section = _section(raw, "logging")
+    workspace_context = _section(raw, "workspace_context")
 
     workspace_raw = _first(
         workspace_override,
@@ -161,9 +183,11 @@ def load_local_settings(
     )
     state_dir = _resolve_path(str(state_raw), workspace)
 
-    provider = str(
-        _first(env.get("AGENT_RUNTIME_MODEL_PROVIDER"), _string(model, "provider", "mock"))
-    ).strip().lower()
+    provider = (
+        str(_first(env.get("AGENT_RUNTIME_MODEL_PROVIDER"), _string(model, "provider", "mock")))
+        .strip()
+        .lower()
+    )
     if provider not in {"mock", "openai-compatible"}:
         raise LocalConfigError("model.provider must be 'mock' or 'openai-compatible'.")
     default_model = "arithmetic-demo" if provider == "mock" else "gpt-4.1-mini"
@@ -225,15 +249,27 @@ def load_local_settings(
         api_key_env=api_key_env,
         model_timeout_seconds=_positive_float(model, "timeout_seconds", 60.0),
         run_timeout_seconds=_positive_float(runtime, "run_timeout_seconds", 300.0),
-        shutdown_timeout_seconds=_positive_float(
-            runtime, "shutdown_timeout_seconds", 30.0
-        ),
+        shutdown_timeout_seconds=_positive_float(runtime, "shutdown_timeout_seconds", 30.0),
         max_inflight_runs=_positive_int(runtime, "max_inflight_runs", 8),
-        max_concurrent_model_requests=_positive_int(
-            runtime, "max_concurrent_model_requests", 4
-        ),
+        max_concurrent_model_requests=_positive_int(runtime, "max_concurrent_model_requests", 4),
         max_sync_tool_workers=_positive_int(tools, "sync_workers", 8),
         max_pending_sync_tools=_positive_int(tools, "pending_queue_size", 32),
+        enable_process_tool=_boolean(tools, "enable_process", True),
+        allowed_executables=_string_tuple(tools, "allowed_executables", ("python", "git")),
+        process_timeout_seconds=_positive_float(tools, "process_timeout_seconds", 120.0),
+        process_max_output_bytes=_positive_int(tools, "process_max_output_bytes", 1_000_000),
+        process_max_concurrent=_positive_int(tools, "process_max_concurrent", 2),
+        workspace_instructions_enabled=_boolean(
+            workspace_context, "instructions_enabled", True
+        ),
+        workspace_instruction_files=_instruction_file_tuple(
+            workspace_context,
+            "instruction_files",
+            ("AGENTS.md", "CLAUDE.md"),
+        ),
+        workspace_instruction_max_chars=_positive_int(
+            workspace_context, "max_instruction_chars", 50_000
+        ),
         host=host,
         port=port,
         log_level=log_level,
@@ -242,9 +278,13 @@ def load_local_settings(
         log_backup_count=backup_count,
     )
     if settings.max_pending_sync_tools < settings.max_sync_tool_workers:
+        raise LocalConfigError("tools.pending_queue_size must be at least tools.sync_workers.")
+    if settings.enable_process_tool and not settings.allowed_executables:
         raise LocalConfigError(
-            "tools.pending_queue_size must be at least tools.sync_workers."
+            "tools.allowed_executables must not be empty when enable_process is true."
         )
+    if settings.process_max_output_bytes < 1024:
+        raise LocalConfigError("tools.process_max_output_bytes must be at least 1024.")
     if settings.provider == "openai-compatible" and not settings.base_url:
         raise LocalConfigError("model.base_url must not be empty for openai-compatible.")
     return settings
@@ -262,6 +302,40 @@ def _string(section: Mapping[str, Any], key: str, default: str) -> str:
     if not isinstance(value, str):
         raise LocalConfigError(f"{key} must be a string.")
     return value
+
+
+def _boolean(section: Mapping[str, Any], key: str, default: bool) -> bool:
+    value = section.get(key, default)
+    if not isinstance(value, bool):
+        raise LocalConfigError(f"{key} must be a boolean.")
+    return value
+
+
+def _string_tuple(
+    section: Mapping[str, Any], key: str, default: tuple[str, ...]
+) -> tuple[str, ...]:
+    value = section.get(key, list(default))
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise LocalConfigError(f"{key} must be an array of strings.")
+    normalized = tuple(item.strip() for item in value if item.strip())
+    if len(normalized) != len(value):
+        raise LocalConfigError(f"{key} must not contain empty strings.")
+    return normalized
+
+
+def _instruction_file_tuple(
+    section: Mapping[str, Any], key: str, default: tuple[str, ...]
+) -> tuple[str, ...]:
+    values = _string_tuple(section, key, default)
+    if not values:
+        raise LocalConfigError(f"{key} must not be empty.")
+    for value in values:
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts or path == Path("."):
+            raise LocalConfigError(
+                f"{key} entries must be relative file paths without '..': {value}"
+            )
+    return values
 
 
 def _integer(section: Mapping[str, Any], key: str, default: int) -> int:

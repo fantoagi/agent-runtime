@@ -1,10 +1,10 @@
 # Agent Runtime
 
-一个以 Python + SQLite 实现的可持久化 Agent Runtime。当前版本是 **v0.8.1 Local Stable Runtime**，优先解决单机、单用户、本地可信环境下的稳定启动、持续运行、恢复、诊断和学习问题。
+一个以 Python + SQLite 实现的可持久化 Agent Runtime。当前版本是 **v0.8.8 Verified Task Completion**，优先解决单机、单用户、本地可信环境下的稳定启动、持续运行、恢复、诊断、学习和直接终端交互问题。
 
-当前支持单 Agent、多 Agent Workflow、Tool Calling、Model Streaming、Approval、Checkpoint、Session/Memory、FastAPI/SSE、备份恢复、诊断、Learning Console，以及受限本地进程 Sandbox。当前不把公网部署、分布式 Worker、多租户、Docker 强隔离和 Secret 生命周期作为本地稳定版的前置条件。
+当前支持 Interactive CLI、单 Agent、多 Agent Workflow、Tool Calling、Model Streaming、Approval、Checkpoint、Session/Memory、FastAPI/SSE、备份恢复、诊断、Learning Console，以及受限本地进程 Sandbox。当前不把公网部署、分布式 Worker、多租户、Docker 强隔离和 Secret 生命周期作为本地稳定版的前置条件。
 
-## 最短路径：启动本地 Runtime
+## 最短路径：直接在终端对话
 
 ```powershell
 cd D:\AICoding\Agent
@@ -12,6 +12,35 @@ cd D:\AICoding\Agent
 python -m pip install -e ".[api]"
 
 agent-runtime init
+# 也可以复制 agent-runtime.example.toml 为 agent-runtime.toml 后修改
+agent-runtime chat
+```
+
+`chat` 会启动本地 Interactive CLI，实时显示模型输出、Tool 调用和审批请求，并将每轮对话保存为可恢复的 Session。常用方式：
+
+```powershell
+agent-runtime chat -c                         # 继续最近一次终端会话
+agent-runtime chat -r <session_id>            # 恢复指定会话
+agent-runtime chat -p "19 * 23" --no-color   # 单次执行，输出后退出
+```
+
+完整命令、Session 语义和交互流程见 [Interactive CLI 使用指南](./docs/INTERACTIVE_CLI.md)。
+
+## 本地编码闭环
+
+v0.8.8 的标准本地 Agent 已注册 `list_files`、`search_text`、`read_file_lines`、`read_text_file`、`read_artifact`、`replace_text`、`apply_patch`、`write_text_file`、只读 `git_status/git_diff` 和受限 `run_process`。可以直接在 `chat` 中要求模型检查、修改并验证 Workspace： 修改发生后，Runtime 会根据持久化 diff/validation 证据标记 `verified` 或 `unverified`，缺证据时最多追加一次验证提醒。
+
+```text
+请找到 examples 里的最小 Python 示例，补充一条清晰注释，并运行 Python 做语法检查。修改文件和执行进程前先让我确认。
+```
+
+大 Tool Result 会给出 `read_artifact` 分页入口，避免再次读取 Artifact 时递归生成新 Artifact，也不再需要通过 Python/`run_process` 打印文件。根目录发现默认过滤 `.runtime-test-data`、`.coverage` 和 `coverage.json`；列表被截断时，内建协议要求继续缩小路径或使用 `search_text`。
+
+文件写入和进程执行仍需终端 Approval。使用 `/workspace` 查看编码工具和进程开关，使用 `/diff` 查看当前 Session 最近的 Tool 文件变更摘要。完整协议、配置和边界见 [Coding Workspace Tools 使用指南](./docs/CODING_TOOLS.md)。
+
+## 启动本地 HTTP Runtime
+
+```powershell
 agent-runtime status
 agent-runtime serve
 ```
@@ -23,7 +52,7 @@ Invoke-RestMethod http://127.0.0.1:8000/health
 agent-runtime status
 ```
 
-停止服务时在运行窗口按 `Ctrl+C`。完整配置、单实例锁、日志和恢复说明见 [本地稳定 Runtime 运行指南](./docs/LOCAL_RUNTIME.md)。
+`chat` 与 `serve` 对同一个状态目录共享单 Owner Lock，因此不能同时运行。停止服务时在运行窗口按 `Ctrl+C`。完整配置、单实例锁、日志和恢复说明见 [本地稳定 Runtime 运行指南](./docs/LOCAL_RUNTIME.md)。
 
 ## 接入真实模型
 
@@ -41,7 +70,7 @@ api_key_env = "OPENAI_API_KEY"
 
 ```powershell
 $env:OPENAI_API_KEY = "..."
-agent-runtime serve
+agent-runtime chat
 ```
 
 配置文件只保存环境变量名称，不保存 API Key 明文。
@@ -59,6 +88,10 @@ agent-runtime lab
 ## 常用命令
 
 ```powershell
+# 直接终端对话
+agent-runtime chat
+agent-runtime chat -c
+
 # 离线算术 Demo
 agent-runtime demo "19 * 23"
 
@@ -72,7 +105,7 @@ agent-runtime observe diagnostics
 agent-runtime backup create
 
 # 本地稳定性自动验收
-python scriptserify_local_runtime.py --runs 100 --concurrency 8
+python scripts\verify_local_runtime.py --runs 100 --concurrency 8
 ```
 
 ## 当前边界
@@ -87,6 +120,8 @@ python scriptserify_local_runtime.py --runs 100 --concurrency 8
 
 - [当前功能状态](./docs/CURRENT.md)
 - [当前系统架构](./docs/ARCHITECTURE.md)
+- [Interactive CLI 使用指南](./docs/INTERACTIVE_CLI.md)
+- [Coding Workspace Tools 使用指南](./docs/CODING_TOOLS.md)
 - [本地稳定 Runtime 运行指南](./docs/LOCAL_RUNTIME.md)
 - [演进历史](./docs/CHANGELOG.md)
 - [演进路线图](./docs/ROADMAP.md)
@@ -98,7 +133,7 @@ python scriptserify_local_runtime.py --runs 100 --concurrency 8
 ```powershell
 python scripts/check_docs.py
 python -m ruff check src tests scripts
-python -m mypy srcgent_runtime
+python -m mypy src\agent_runtime
 python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
 python scripts/check_coverage.py coverage.json
 python scripts/verify_local_runtime.py --runs 100 --concurrency 8

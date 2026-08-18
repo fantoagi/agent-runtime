@@ -164,13 +164,10 @@ class LocalProcessSandbox:
         unexpected = sorted(set(overrides) - self._allowed_environment)
         if unexpected:
             raise SandboxViolationError(
-                "Environment variable is not allowed by sandbox policy: "
-                + ", ".join(unexpected)
+                "Environment variable is not allowed by sandbox policy: " + ", ".join(unexpected)
             )
         environment = {
-            name: value
-            for name, value in os.environ.items()
-            if name in self._allowed_environment
+            name: value for name, value in os.environ.items() if name in self._allowed_environment
         }
         environment.update({str(name): str(value) for name, value in overrides.items()})
         return environment
@@ -210,7 +207,9 @@ class LocalProcessSandbox:
     ) -> SandboxResult:
         if not self._accepting:
             raise SandboxExecutionError("Sandbox is closed and no longer accepts processes.")
-        if not request.argv or any(not isinstance(value, str) or not value for value in request.argv):
+        if not request.argv or any(
+            not isinstance(value, str) or not value for value in request.argv
+        ):
             raise ToolValidationError("Sandbox argv must contain non-empty strings.")
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
@@ -373,12 +372,19 @@ def register_process_tool(
     sandbox: SandboxExecutor,
     *,
     name: str = "run_process",
+    handler_timeout_seconds: float = 30.0,
 ) -> ToolDefinition:
+    if handler_timeout_seconds <= 0:
+        raise ValueError("handler_timeout_seconds must be greater than zero.")
+    sandbox_snapshot = sandbox.snapshot()
+    allowed = sandbox_snapshot.get("allowed_executables", [])
+    allowed_text = ", ".join(str(item) for item in allowed) or "configured executables"
     definition = ToolDefinition(
         name=name,
         description=(
             "Run an explicitly allowed executable inside the configured local process sandbox. "
-            "The command is passed as argv and never through a shell."
+            "The command is passed as argv and never through a shell. "
+            f"Allowed executable paths: {allowed_text}."
         ),
         input_schema={
             "type": "object",
@@ -430,5 +436,10 @@ def register_process_tool(
         return ToolResult(content=content, data=result.to_dict())
 
     registry.manage(sandbox)
-    registry.register(definition, run_process, sandboxed=True)
+    registry.register(
+        definition,
+        run_process,
+        timeout_seconds=handler_timeout_seconds,
+        sandboxed=True,
+    )
     return definition

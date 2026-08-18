@@ -58,7 +58,7 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         assert health.status_code == 200
-        assert health.json()["version"] == "0.8.1"
+        assert health.json()["version"] == "0.8.8"
         assert health.json()["store"]["schema_version"] == 8
 
         invalid = await client.post("/runs", json={"input": ""})
@@ -84,7 +84,9 @@ async def test_health_create_get_and_events(workspace: Path) -> None:
         events = await client.get(f"/runs/{run_id}/events")
         assert events.status_code == 200
         payload = events.json()
-        assert [item["sequence"] for item in payload] == sorted(item["sequence"] for item in payload)
+        assert [item["sequence"] for item in payload] == sorted(
+            item["sequence"] for item in payload
+        )
         assert payload[0]["type"] == "run.created"
 
         after_first = await client.get(f"/runs/{run_id}/events?after_sequence=1")
@@ -138,7 +140,11 @@ async def test_lifecycle_endpoints_and_unknown_run(workspace: Path) -> None:
         created = await client.post("/runs", json={"input": "control"})
         run_id = created.json()["id"]
         paused = await client.post(f"/runs/{run_id}/pause")
-        assert paused.status_code == 409 or paused.json()["status"] in {"paused", "cancelled", "completed"}
+        assert paused.status_code == 409 or paused.json()["status"] in {
+            "paused",
+            "cancelled",
+            "completed",
+        }
 
         cancelled = await client.post(f"/runs/{run_id}/cancel")
         assert cancelled.status_code == 200
@@ -216,7 +222,7 @@ async def test_observability_api_exposes_trace_and_metrics(workspace: Path) -> N
     assert metrics.json()["total_runs"] == 1
     assert metrics.json()["model_requests"] == 1
     assert diagnostics.status_code == 200
-    assert diagnostics.json()["version"] == "0.8.1"
+    assert diagnostics.json()["version"] == "0.8.8"
     assert diagnostics.json()["runtime"]["state"] == "accepting"
     assert diagnostics.json()["store"]["status"] == "ok"
     assert diagnostics.json()["process"]["thread_count"] >= 1
@@ -224,6 +230,7 @@ async def test_observability_api_exposes_trace_and_metrics(workspace: Path) -> N
     assert sandbox.json()["policy"]["network.access"] == "deny"
     assert prometheus.status_code == 200
     assert "agent_runtime_runs_total" in prometheus.text
+
 
 @pytest.mark.asyncio
 async def test_multi_agent_registry_relations_and_trace_tree_api(workspace: Path) -> None:
@@ -242,12 +249,8 @@ async def test_multi_agent_registry_relations_and_trace_tree_api(workspace: Path
     )
     runtime.register_agent(planner)
     runtime.register_agent(worker)
-    execution = await SequentialWorkflow("api-flow", ["planner", "worker"]).run(
-        runtime, "task"
-    )
-    manual_parent = runtime.begin_workflow(
-        "api-manual", "manual task", workflow_type="manual"
-    )
+    execution = await SequentialWorkflow("api-flow", ["planner", "worker"]).run(runtime, "task")
+    manual_parent = runtime.begin_workflow("api-manual", "manual task", workflow_type="manual")
 
     app = create_app(runtime)
     transport = httpx.ASGITransport(app=app)
@@ -290,9 +293,7 @@ async def test_session_and_memory_api(workspace: Path) -> None:
     app = create_app(runtime)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        created_session = await client.post(
-            "/sessions", json={"metadata": {"user": "beginner"}}
-        )
+        created_session = await client.post("/sessions", json={"metadata": {"user": "beginner"}})
         session_id = created_session.json()["id"]
         created_memory = await client.post(
             "/memories",
@@ -387,6 +388,7 @@ async def test_resolve_unknown_endpoint_records_audit_and_keeps_run_paused(
     assert response.json()["tool_execution"]["resolution"] == "confirmed_succeeded"
     assert response.json()["tool_execution"]["resolved_by"] == "api-test"
     assert retry.status_code == 409
+
 
 @pytest.mark.asyncio
 async def test_run_submission_idempotency_replays_without_duplicate_execution(
@@ -487,6 +489,7 @@ async def test_api_returns_retryable_429_when_inflight_capacity_is_exhausted(
     await runtime.wait(first.json()["id"])
     await runtime.shutdown()
 
+
 @pytest.mark.asyncio
 async def test_incident_bundle_endpoint_returns_redacted_zip(workspace: Path) -> None:
     runtime = make_api_runtime(workspace)
@@ -508,7 +511,7 @@ async def test_incident_bundle_endpoint_returns_redacted_zip(workspace: Path) ->
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         manifest = json.loads(archive.read("manifest.json"))
         assert manifest["scope_run_id"] == completed.id
-        assert manifest["runtime_version"] == "0.8.1"
+        assert manifest["runtime_version"] == "0.8.8"
 
 
 @pytest.mark.asyncio

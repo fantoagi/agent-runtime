@@ -21,6 +21,7 @@ from .domain import (
     ToolPolicyDeniedError,
     ToolValidationError,
 )
+from .storage import ArtifactStore
 
 ToolHandler = Callable[[dict[str, Any], "ToolContext"], Any | Awaitable[Any]]
 
@@ -414,7 +415,9 @@ def confined_path(workspace: Path, requested_path: str) -> Path:
     return candidate
 
 
-def register_builtin_tools(registry: ToolRegistry) -> None:
+def register_builtin_tools(
+    registry: ToolRegistry, *, artifact_path: str | Path | None = None
+) -> None:
     registry.register(
         ToolDefinition(
             name="calculator",
@@ -434,7 +437,10 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="read_text_file",
-            description="Read a UTF-8 text file inside the configured workspace.",
+            description=(
+                "Read a UTF-8 source or documentation file inside the configured workspace. "
+                "Do not use this for Runtime Tool Result Artifacts; use read_artifact instead."
+            ),
             input_schema={
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
@@ -443,8 +449,37 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             capabilities=(ToolCapability.FILE_READ,),
         ),
-        _read_text_file,
+        lambda arguments, context: _read_text_file(
+            arguments, context, artifact_root=artifact_path
+        ),
     )
+    if artifact_path is not None:
+        artifact_store = ArtifactStore(artifact_path)
+        registry.register(
+            ToolDefinition(
+                name="read_artifact",
+                description=(
+                    "Read one bounded page from a Runtime Tool Result Artifact returned in "
+                    "_artifact.path or _artifact.relative_path. Continue with next_offset while "
+                    "has_more is true. Never use Python, cat, type, or run_process merely to print "
+                    "an artifact."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "offset": {"type": "integer"},
+                        "max_chars": {"type": "integer"},
+                    },
+                    "required": ["path"],
+                    "additionalProperties": False,
+                },
+                capabilities=(ToolCapability.FILE_READ,),
+            ),
+            lambda arguments, context: _read_artifact(
+                arguments, context, artifact_store=artifact_store
+            ),
+        )
     registry.register(
         ToolDefinition(
             name="write_text_file",
@@ -484,12 +519,86 @@ def _calculator(arguments: dict[str, Any], context: ToolContext) -> str:
         ) from error
 
 
-def _read_text_file(arguments: dict[str, Any], context: ToolContext) -> str:
+def _read_text_file(
+    arguments: dict[str, Any],
+    context: ToolContext,
+    *,
+    artifact_root: str | Path | None = None,
+) -> str:
     context.raise_if_cancelled()
-    path = confined_path(context.workspace_path, arguments["path"])
+    requested = str(arguments["path"])
+    supplied = Path(requested)
+    candidate = (
+        supplied.resolve()
+        if supplied.is_absolute()
+        else (context.workspace_path / supplied).resolve()
+    )
+    if artifact_root is not None:
+        root = Path(artifact_root).resolve()
+        tool_results = (root / context.run_id / "tool-results").resolve()
+        if candidate == tool_results or tool_results in candidate.parents:
+            raise ToolExecutionError(
+                "This path is a Runtime Tool Result Artifact. Use read_artifact with the "
+                "artifact path and an offset/max_chars page instead of read_text_file."
+            )
+    path = confined_path(context.workspace_path, requested)
     if not path.is_file():
         raise ToolExecutionError(f"File does not exist: {arguments['path']}")
-    return path.read_text(encoding="utf-8")
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise ToolExecutionError(
+            f"File is not valid UTF-8: {arguments['path']}"
+        ) from error
+
+
+def _read_artifact(
+    arguments: dict[str, Any],
+    context: ToolContext,
+    *,
+    artifact_store: ArtifactStore,
+) -> ToolResult:
+    context.raise_if_cancelled()
+    offset = arguments.get("offset", 0)
+    max_chars = arguments.get("max_chars", 3000)
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise ToolValidationError("read_artifact offset must be a non-negative integer.")
+    if (
+        isinstance(max_chars, bool)
+        or not isinstance(max_chars, int)
+        or max_chars < 256
+        or max_chars > 4000
+    ):
+        raise ToolValidationError("read_artifact max_chars must be between 256 and 4000.")
+    try:
+        page = artifact_store.read_tool_result_page(
+            context.run_id,
+            str(arguments["path"]),
+            offset=offset,
+            max_chars=max_chars,
+        )
+    except (FileNotFoundError, ValueError, OSError) as error:
+        raise ToolExecutionError(str(error)) from error
+    header = (
+        f"Artifact {page.path} characters {page.offset}-{page.next_offset} "
+        f"of {page.total_chars}"
+    )
+    if page.has_more:
+        header += f" (more available; next_offset={page.next_offset})"
+    content = header + ("\n" + page.content if page.content else "")
+    return ToolResult(
+        content=content,
+        data={
+            "path": page.path,
+            "content": page.content,
+            "offset": page.offset,
+            "next_offset": page.next_offset,
+            "total_chars": page.total_chars,
+            "has_more": page.has_more,
+            "sha256": page.sha256,
+            "_runtime_artifact_page": True,
+        },
+    )
 
 
 def _write_text_file(

@@ -1,8 +1,8 @@
 # Sandbox、Tool Capability 与本地进程执行
 
 - **适用版本**：v0.8.0+
-- **最近更新**：2026-08-16
-- **关联变更**：[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)
+- **最近更新**：2026-08-17
+- **关联变更**：[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)
 - **关联决策**：[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)
 
 ## 1. v0.8.0 解决什么问题
@@ -140,3 +140,13 @@ v0.8.0 明确没有实现：
 - 自动安装依赖、系统调用过滤、Windows Job Object 或 Linux seccomp。
 
 这些能力将在后续 v0.8.x 独立设计和验收，不能把 `LocalProcessSandbox` 的“受限”描述成“不可信代码强隔离”。
+
+## 8. v0.8.3 标准本地接入
+
+`create_configured_local_runtime()` 现在根据 `[tools]` 配置创建 `LocalProcessSandbox` 并注册 `run_process`。默认白名单是 `python` 和 `git`，每次调用仍要求 Approval。Tool definition 会把解析后的允许路径提供给模型，避免模型猜测解释器位置。
+
+文件发现、搜索和精确替换的协议见 [CODING_TOOLS.md](./CODING_TOOLS.md)。这些 Tool 与 `run_process` 共享 capability、Approval、ToolExecution 和 UNKNOWN 边界。
+
+## 9. v0.8.4 Git 只读 Tool
+
+`git_status` 和 `git_diff` 复用 LocalProcessSandbox；只有 Git 已在 allowlist 时注册。它们不需要 Approval，但固定为只读参数，`git_diff` 禁用 external diff/textconv 并限制输出。Git commit、push、reset 和 checkout 不在该协议中。

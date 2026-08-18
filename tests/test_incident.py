@@ -85,8 +85,8 @@ async def test_incident_report_classifies_provider_auth_and_excludes_payloads(
         manifest = json.loads(archive.read("manifest.json"))
         diagnostics = json.loads(archive.read("diagnostics.json"))
         assert manifest["format_version"] == 1
-        assert manifest["runtime_version"] == "0.8.1"
-        assert diagnostics["version"] == "0.8.1"
+        assert manifest["runtime_version"] == "0.8.8"
+        assert diagnostics["version"] == "0.8.8"
         assert manifest["run_count"] == 1
 
 
@@ -140,9 +140,7 @@ async def test_failure_analysis_covers_stable_operational_categories(workspace: 
 
     categories = {
         item.category
-        for item in IncidentDiagnosticsService(runtime).failure_analysis(
-            run_id=run.id, limit=20
-        )
+        for item in IncidentDiagnosticsService(runtime).failure_analysis(run_id=run.id, limit=20)
     }
 
     assert {

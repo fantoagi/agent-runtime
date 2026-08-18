@@ -14,7 +14,7 @@ EXCLUDED_ADAPTERS = {
     "src/agent_runtime/cli.py",
     "src/agent_runtime/sdk.py",
 }
-EXCLUDED_PREFIXES = ("src/agent_runtime/api/",)
+EXCLUDED_PREFIXES = ("src/agent_runtime/api/", "src/agent_runtime/interactive/")
 
 
 def normalized(path: str) -> str:

@@ -233,9 +233,7 @@ class MetricsSnapshot:
             ]
         )
         for failure_type, value in sorted(self.failures_by_type.items()):
-            lines.append(
-                f'agent_runtime_failures_total{{type="{failure_type}"}} {value}'
-            )
+            lines.append(f'agent_runtime_failures_total{{type="{failure_type}"}} {value}')
         return "\n".join(lines) + "\n"
 
 
@@ -333,9 +331,7 @@ class ObservabilityService:
         return TraceTree(
             root_run_id=root_run_id,
             root_trace_id=str(
-                root.metadata.get("root_trace_id")
-                or root.metadata.get("trace_id")
-                or root.id
+                root.metadata.get("root_trace_id") or root.metadata.get("trace_id") or root.id
             ),
             node_count=1 + len(relations),
             root=build(root_run_id),
@@ -374,9 +370,7 @@ class ObservabilityService:
                 if event.type == "model.completed":
                     usage = event.payload.get("usage") or {}
                     prompt_tokens += _usage_value(usage, "prompt_tokens", "input_tokens")
-                    completion_tokens += _usage_value(
-                        usage, "completion_tokens", "output_tokens"
-                    )
+                    completion_tokens += _usage_value(usage, "completion_tokens", "output_tokens")
                     total_tokens += int(usage.get("total_tokens") or 0)
 
         if total_tokens == 0:
@@ -443,9 +437,7 @@ class ObservabilityService:
                             else None
                         ),
                         attributes={
-                            key: value
-                            for key, value in event.payload.items()
-                            if key != "error"
+                            key: value for key, value in event.payload.items() if key != "error"
                         },
                     )
                 )
@@ -519,6 +511,7 @@ class ObservabilityService:
         if kind == "model":
             start_type = "model.requested"
             terminal_types = {"model.completed"}
+
             def key(event: RuntimeEvent) -> str:
                 return str(event.payload.get("step", event.sequence))
         elif kind == "tool":
@@ -530,6 +523,7 @@ class ObservabilityService:
                 "tool.cancelled",
                 "tool.outcome_unknown",
             }
+
             def key(event: RuntimeEvent) -> str:
                 return str(
                     event.payload.get("tool_execution_id")
@@ -539,6 +533,7 @@ class ObservabilityService:
         else:
             start_type = "approval.requested"
             terminal_types = {"approval.resolved"}
+
             def key(event: RuntimeEvent) -> str:
                 return str(
                     event.payload.get("approval_id")

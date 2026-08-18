@@ -14,7 +14,7 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         page = await client.get("/lab")
         assert page.status_code == 200
         assert "Agent Runtime Learning Console" in page.text
-        assert "v0.8.1" in page.text
+        assert "v0.8.8" in page.text
         assert "诊断包" in page.text
         assert 'data-tab="context"' in page.text
         assert 'data-tab="memory"' in page.text
@@ -39,7 +39,7 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         assert "function buildSwimlanes" in script.text
         assert "function buildTimelineLinks" in script.text
         assert "function swimlanePoint" in script.text
-        assert 'return `agent:${event.run_id}`' in script.text
+        assert "return `agent:${event.run_id}`" in script.text
         assert 'kind: "delegation-flow"' in script.text
         assert 'kind: "aggregation-flow"' in script.text
         assert "swimlane-event" in script.text
@@ -111,7 +111,7 @@ async def test_learning_scenarios_run_through_real_runtime(
         assert payload["reliability"]["backup"]["format_version"] == 1
         assert payload["reliability"]["backup"]["restore_requires_shutdown"] is True
         diagnostics = payload["reliability"]["diagnostics"]
-        assert diagnostics["version"] == "0.8.1"
+        assert diagnostics["version"] == "0.8.8"
         assert diagnostics["runtime"]["state"] == "accepting"
         assert diagnostics["process"]["thread_count"] >= 1
         assert payload["reliability"]["failure_analysis"] == []
@@ -266,14 +266,18 @@ async def test_context_compaction_learning_scenario_keeps_full_checkpoint(worksp
     app = create_demo_app(workspace, enable_learning_console=True)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        created = await client.post("/lab/api/scenarios/context-compaction/runs", json={"input": None})
+        created = await client.post(
+            "/lab/api/scenarios/context-compaction/runs", json={"input": None}
+        )
         run_id = created.json()["id"]
         runtime = app.state.learning_console.runtime_for_run(run_id)
         completed = await runtime.wait(run_id)
         assert completed.status.value == "completed"
 
         payload = (await client.get(f"/lab/api/runs/{run_id}/snapshot")).json()
-        compacted = [item for item in payload["context_builds"] if item["event_type"] == "context.compacted"]
+        compacted = [
+            item for item in payload["context_builds"] if item["event_type"] == "context.compacted"
+        ]
         assert compacted
         assert any(item["omitted_messages"] > 0 for item in compacted)
         assert len(payload["checkpoint"]["messages"]) > compacted[-1]["selected_messages"]
@@ -286,7 +290,9 @@ async def test_large_tool_result_learning_scenario_writes_real_artifact(workspac
     app = create_demo_app(workspace, enable_learning_console=True)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        created = await client.post("/lab/api/scenarios/large-tool-artifact/runs", json={"input": None})
+        created = await client.post(
+            "/lab/api/scenarios/large-tool-artifact/runs", json={"input": None}
+        )
         run_id = created.json()["id"]
         runtime = app.state.learning_console.runtime_for_run(run_id)
         completed = await runtime.wait(run_id)

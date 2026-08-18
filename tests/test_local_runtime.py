@@ -41,14 +41,16 @@ def test_local_config_round_trip_and_environment_override(workspace: Path) -> No
     assert settings.port == 8123
     assert settings.log_level == "WARNING"
     assert settings.provider == "mock"
+    assert settings.enable_process_tool is True
+    assert Path(settings.allowed_executables[0]).resolve() == Path(sys.executable).resolve()
+    assert settings.allowed_executables[1] == "git"
+    assert settings.process_timeout_seconds == 120.0
     assert settings.public_dict()["model"]["api_key_env"] == "OPENAI_API_KEY"
 
 
 def test_local_config_rejects_remote_bind_and_invalid_tool_capacity(workspace: Path) -> None:
     path = write_default_local_config(workspace / "agent-runtime.toml", workspace=workspace)
-    text = path.read_text(encoding="utf-8").replace(
-        'host = "127.0.0.1"', 'host = "0.0.0.0"'
-    )
+    text = path.read_text(encoding="utf-8").replace('host = "127.0.0.1"', 'host = "0.0.0.0"')
     path.write_text(text, encoding="utf-8")
     with pytest.raises(LocalConfigError, match="loopback"):
         load_local_settings(path)
@@ -183,9 +185,7 @@ def test_local_runtime_lock_detects_a_different_live_process(workspace: Path) ->
 
 @pytest.mark.asyncio
 async def test_configured_local_runtime_and_status(workspace: Path) -> None:
-    config_path = write_default_local_config(
-        workspace / "agent-runtime.toml", workspace=workspace
-    )
+    config_path = write_default_local_config(workspace / "agent-runtime.toml", workspace=workspace)
     settings = load_local_settings(config_path)
     runtime = create_configured_local_runtime(settings)
     run = await runtime.run(settings.agent_name, "6 * 7")
@@ -240,4 +240,3 @@ def test_api_module_import_has_no_runtime_state_side_effect(
     module = importlib.import_module("agent_runtime.api.app")
     importlib.reload(module)
     assert not (workspace / ".agent-runtime").exists()
-

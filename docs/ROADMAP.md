@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
-- **最近更新**：2026-08-16
-- **当前版本**：v0.8.1
-- **当前阶段**：v0.8.1 Local Stable Runtime 已完成；进入真实本地使用、问题收集和稳定性修复
+- **最近更新**：2026-08-17
+- **当前版本**：v0.8.8
+- **当前阶段**：v0.8.8 Verified Task Completion 已完成；继续通过真实本地编码任务评估 false completion 与验证成本
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -46,6 +46,13 @@
 | v0.7.12 | ✅ completed | 脱敏故障诊断包、确定性根因摘要与支持协作入口 | [E2026-08-16-003](./CHANGELOG.md#e2026-08-16-003) |
 | v0.8.0 | ✅ completed | LocalProcessSandbox、Tool Capability、审批与安全观测 | [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004) |
 | v0.8.1 | ✅ completed | 配置驱动本地服务、单 Owner Lock、轮转日志与独立运行验收 | [E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005) |
+| v0.8.2 | ✅ completed | Interactive CLI、流式终端、Session 多轮对话与终端审批 | [E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006) |
+| v0.8.3 | ✅ completed | Workspace 文件发现、搜索、精确替换与受限进程验证闭环 | [E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001) |
+| v0.8.4 | ✅ completed | Git-aware Workspace Review | [E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002) |
+| v0.8.5 | ✅ completed | 有界文件读取与批量精确 Patch | [E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003) |
+| v0.8.6 | ✅ completed | Project-aware Workspace Context | [E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004) |
+| v0.8.7 | ✅ completed | Artifact 分页读取与 Workspace 发现优化 | [E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001) |
+| v0.8.8 | ✅ completed | 修改任务完成证据、一次性验证提醒与配置误提交保护 | [E2026-08-18-002](./CHANGELOG.md#e2026-08-18-002) |
 | v0.9 | ⏸ deferred | 分布式 Worker、Queue 与 Lease | — |
 | v0.10 | ⏸ deferred | 多租户、权限、预算和生产治理 | — |
 | v1.0 | ⏸ deferred | 稳定 Runtime Contract 与生产发布 | — |
@@ -236,13 +243,20 @@
 
 - **状态**：✅ completed
 - **前置版本**：v0.7.12
-- **完成阶段**：v0.8.0 [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、v0.8.1 [E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)
+- **完成阶段**：v0.8.0 [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、v0.8.1 [E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、v0.8.2 [E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、v0.8.3 [E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、v0.8.4 [E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、v0.8.5 [E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、v0.8.6 [E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)、v0.8.7 [E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、v0.8.8 [E2026-08-18-002](./CHANGELOG.md#e2026-08-18-002)
 - **目标**：在单机、单用户、本地可信环境中，既能受限执行本地进程，又能通过统一配置和 CLI 长期、稳定、可恢复地运行 Runtime。
 
 ### 已完成范围
 
 - v0.8.0：`SandboxExecutor`、`LocalProcessSandbox`、Tool Capability、Approval、argv、白名单、timeout、输出限制、并发限制和进程树取消。
 - v0.8.1：`agent-runtime.toml`、`init/serve/status`、loopback 绑定、状态目录单 Owner Lock、强杀遗留锁回收、轮转结构化日志和本地验收脚本。
+- v0.8.2：`agent-runtime chat`、Prompt Toolkit 输入、Rich Event 渲染、Session 多轮上下文、Slash Command、终端 Approval、Ctrl+C 取消和单次 `--print` 模式。
+- v0.8.3：`list_files`、`search_text`、`replace_text`、标准本地 `run_process`、进程配置以及 `/workspace`、`/diff`。
+- v0.8.4：只读 `git_status`、`git_diff`，复用 LocalProcessSandbox 并限制路径和输出。
+- v0.8.5：`read_file_lines` 有界读取、`apply_patch` 批量精确替换、预写入验证和 `/diff` 多文件展开。
+- v0.8.6：有界加载 `AGENTS.md/CLAUDE.md`、内建 Coding Protocol 和 AgentDefinition Prompt 快照。
+- v0.8.7：`read_artifact` 同 Run 分页读取、防递归 Artifact 化、发现噪声过滤和截断后继续策略。
+- v0.8.8：可选 Completion Policy、修改任务一次性验证提醒、durable completion evidence、CLI 证据摘要和本地配置误提交保护。
 - FastAPI 默认 `app` 惰性构造，import Adapter 不再产生隐藏 Runtime 或 SQLite 副作用。
 - Wheel 验证覆盖本地初始化、状态、服务健康、重复 Owner 拒绝和重启。
 
@@ -257,12 +271,15 @@
 
 - 💡 DockerSandbox：只有在真实本地任务需要运行不可信代码时再评估。
 - 💡 SecretProvider：只有在环境变量无法满足本地凭据管理时再评估。
+- 💡 HTTP attach 模式：只有 embedded `chat` 与 `serve` 互斥成为明确痛点时，再设计远程/daemon Client。
 - 💡 Artifact 生命周期增强：由真实文件规模和清理需求触发。
 
 ### 关联 ADR
 
 - [ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)：LocalProcessSandbox 与 Tool Capability 显式允许边界。
 - [ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)：配置驱动本地启动与单执行 Owner。
+- [ADR-0027](./adr/0027-interactive-cli-session-history.md)：Interactive CLI Adapter 与显式 Session 历史。
+- [ADR-0028](./adr/0028-coding-workspace-tools.md)：结构化 Coding Tool、精确替换和 argv 进程执行。
 
 ## v0.9：分布式 Worker、Queue 与 Lease
 

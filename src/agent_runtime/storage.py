@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
 import random
 import sqlite3
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from threading import RLock
@@ -1479,6 +1481,7 @@ class SQLiteStore:
         model_payload: dict[str, Any],
         *,
         delta_payload: dict[str, Any] | None = None,
+        completion_payload: dict[str, Any] | None = None,
         before_commit: Callable[[], None] | None = None,
     ) -> None:
         with self._lock, self._connection:
@@ -1496,9 +1499,39 @@ class SQLiteStore:
                 "checkpoint.created",
                 {"checkpoint_id": checkpoint.id, "step": checkpoint.step},
             )
+            if completion_payload is not None:
+                self._append_event_locked(
+                    run.id, "completion.evidence", completion_payload
+                )
             self._append_event_locked(run.id, "run.completed", {"result": run.result})
             if before_commit is not None:
                 before_commit()
+
+    def save_model_followup(
+        self,
+        step: Step,
+        checkpoint: Checkpoint,
+        model_payload: dict[str, Any],
+        event_type: str,
+        event_payload: dict[str, Any],
+        *,
+        delta_payload: dict[str, Any] | None = None,
+    ) -> None:
+        with self._lock, self._connection:
+            self._update_step_locked(step)
+            self._insert_checkpoint_locked(checkpoint)
+            self._append_event_locked(step.run_id, "model.completed", model_payload)
+            if delta_payload is not None:
+                self._append_event_locked(step.run_id, "model.delta", delta_payload)
+            self._append_event_locked(
+                step.run_id, "step.completed", {"step": step.step_index}
+            )
+            self._append_event_locked(
+                step.run_id,
+                "checkpoint.created",
+                {"checkpoint_id": checkpoint.id, "step": checkpoint.step},
+            )
+            self._append_event_locked(step.run_id, event_type, event_payload)
 
     def complete_step_with_checkpoint(
         self,
@@ -2034,6 +2067,17 @@ def _migration_checksum(version: int, name: str, sql: str) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+@dataclass(frozen=True, slots=True)
+class ArtifactPage:
+    path: str
+    content: str
+    offset: int
+    next_offset: int
+    total_chars: int
+    has_more: bool
+    sha256: str
+
+
 class ArtifactStore:
     """Workspace-confined store for output too large for SQLite event payloads."""
 
@@ -2048,3 +2092,107 @@ class ArtifactStore:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return target
+
+    def relative_path(self, path: str | Path) -> str:
+        resolved = Path(path).resolve()
+        if resolved != self.root and self.root not in resolved.parents:
+            raise ValueError("Artifact path escapes configured root.")
+        return resolved.relative_to(self.root).as_posix()
+
+    def read_tool_result_page(
+        self,
+        run_id: str,
+        reference: str,
+        *,
+        offset: int = 0,
+        max_chars: int = 3000,
+    ) -> ArtifactPage:
+        if offset < 0:
+            raise ValueError("Artifact offset must not be negative.")
+        if max_chars < 1:
+            raise ValueError("Artifact max_chars must be positive.")
+        target = self._resolve_tool_result_path(run_id, reference)
+        digest = hashlib.sha256()
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        total_chars = 0
+        collected = 0
+        content_parts: list[str] = []
+        try:
+            with target.open("rb") as handle:
+                while chunk := handle.read(64 * 1024):
+                    digest.update(chunk)
+                    decoded = decoder.decode(chunk)
+                    collected += self._collect_page_text(
+                        decoded,
+                        position=total_chars,
+                        offset=offset,
+                        max_chars=max_chars,
+                        content_parts=content_parts,
+                        collected=collected,
+                    )
+                    total_chars += len(decoded)
+                decoded = decoder.decode(b"", final=True)
+        except UnicodeDecodeError as error:
+            raise ValueError("Artifact is not valid UTF-8.") from error
+        collected += self._collect_page_text(
+            decoded,
+            position=total_chars,
+            offset=offset,
+            max_chars=max_chars,
+            content_parts=content_parts,
+            collected=collected,
+        )
+        total_chars += len(decoded)
+        if offset > total_chars:
+            raise ValueError(
+                f"Artifact offset {offset} exceeds total character count {total_chars}."
+            )
+        content = "".join(content_parts)
+        next_offset = offset + len(content)
+        return ArtifactPage(
+            path=self.relative_path(target),
+            content=content,
+            offset=offset,
+            next_offset=next_offset,
+            total_chars=total_chars,
+            has_more=next_offset < total_chars,
+            sha256=digest.hexdigest(),
+        )
+
+    def _resolve_tool_result_path(self, run_id: str, reference: str) -> Path:
+        if not isinstance(reference, str) or not reference.strip():
+            raise ValueError("Artifact path must be a non-empty string.")
+        run_root = (self.root / run_id / "tool-results").resolve()
+        supplied = Path(reference.strip())
+        if supplied.is_absolute():
+            target = supplied.resolve()
+        elif supplied.parts and supplied.parts[0] == run_id:
+            target = (self.root / supplied).resolve()
+        elif supplied.parts and supplied.parts[0] == "tool-results":
+            target = (self.root / run_id / supplied).resolve()
+        elif len(supplied.parts) >= 2 and supplied.parts[1] == "tool-results":
+            raise ValueError("Artifact path is not a Tool Result Artifact for the current run.")
+        else:
+            target = (run_root / supplied).resolve()
+        if target != run_root and run_root not in target.parents:
+            raise ValueError("Artifact path is not a Tool Result Artifact for the current run.")
+        if not target.is_file():
+            raise FileNotFoundError(f"Tool Result Artifact does not exist: {reference}")
+        return target
+
+    @staticmethod
+    def _collect_page_text(
+        value: str,
+        *,
+        position: int,
+        offset: int,
+        max_chars: int,
+        content_parts: list[str],
+        collected: int,
+    ) -> int:
+        if not value or collected >= max_chars or position + len(value) <= offset:
+            return 0
+        start = max(0, offset - position)
+        selected = value[start : start + (max_chars - collected)]
+        content_parts.append(selected)
+        return len(selected)

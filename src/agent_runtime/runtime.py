@@ -12,6 +12,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from .completion import CompletionPolicy
 from .context import ContextBuilder, ContextBuildResult
 from .domain import (
     TERMINAL_STATUSES,
@@ -107,9 +108,7 @@ class RuntimeConfig:
         if self.max_sync_tool_workers < 1:
             raise ValueError("max_sync_tool_workers must be at least 1.")
         if self.max_pending_sync_tools < self.max_sync_tool_workers:
-            raise ValueError(
-                "max_pending_sync_tools must be at least max_sync_tool_workers."
-            )
+            raise ValueError("max_pending_sync_tools must be at least max_sync_tool_workers.")
         if self.max_inflight_runs < 1:
             raise ValueError("max_inflight_runs must be at least 1.")
         if self.max_concurrent_model_requests < 1:
@@ -130,10 +129,12 @@ class Runtime:
         tools: ToolRegistry,
         store: SQLiteStore | None = None,
         memory_store: MemoryStore | None = None,
+        completion_policy: CompletionPolicy | None = None,
     ) -> None:
         self.config = config
         self.provider = provider
         self.tools = tools
+        self.completion_policy = completion_policy
         self.tools.configure_execution(
             max_sync_workers=config.max_sync_tool_workers,
             max_pending_sync_tools=config.max_pending_sync_tools,
@@ -198,9 +199,7 @@ class Runtime:
             "state": state,
             "accepting": self.is_accepting,
             "started_at": self._started_at.isoformat(),
-            "uptime_seconds": round(
-                max(0.0, time.monotonic() - self._started_monotonic), 3
-            ),
+            "uptime_seconds": round(max(0.0, time.monotonic() - self._started_monotonic), 3),
             "capacity": self.capacity_snapshot(),
             "tools": self.tools.capacity_snapshot(),
         }
@@ -255,7 +254,9 @@ class Runtime:
             active_tasks=self.active_task_count,
             cancel_running=cancel_running,
         )
-        timeout = self.config.shutdown_timeout_seconds if timeout_seconds is None else timeout_seconds
+        timeout = (
+            self.config.shutdown_timeout_seconds if timeout_seconds is None else timeout_seconds
+        )
         deadline = time.monotonic() + max(0.0, timeout)
         tasks = {run_id: task for run_id, task in self._tasks.items() if not task.done()}
         if cancel_running:
@@ -322,14 +323,8 @@ class Runtime:
         source_trace_id = None
         if source_run_id is not None:
             source_run = self.store.get_run(source_run_id)
-            source_trace_id = str(
-                source_run.metadata.get("trace_id") or source_run.id
-            )
-        expires_at = (
-            utc_now() + timedelta(seconds=ttl_seconds)
-            if ttl_seconds is not None
-            else None
-        )
+            source_trace_id = str(source_run.metadata.get("trace_id") or source_run.id)
+        expires_at = utc_now() + timedelta(seconds=ttl_seconds) if ttl_seconds is not None else None
         if ttl_seconds is not None and ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive.")
         record = MemoryRecord.create(
@@ -350,9 +345,7 @@ class Runtime:
                     "memory_id": record.id,
                     "scope": record.scope.value,
                     "scope_id": record.scope_id,
-                    "expires_at": record.expires_at.isoformat()
-                    if record.expires_at
-                    else None,
+                    "expires_at": record.expires_at.isoformat() if record.expires_at else None,
                 },
             )
         return record
@@ -384,8 +377,7 @@ class Runtime:
                 {
                     "query": query,
                     "scopes": [
-                        {"scope": scope.value, "scope_id": scope_id}
-                        for scope, scope_id in scopes
+                        {"scope": scope.value, "scope_id": scope_id} for scope, scope_id in scopes
                     ],
                     "limit": search_limit,
                 },
@@ -830,9 +822,7 @@ class Runtime:
             idempotency_key=idempotency_key,
         ).run
 
-    async def wait(
-        self, run_id: str, timeout_seconds: float | None = None
-    ) -> AgentRun:
+    async def wait(self, run_id: str, timeout_seconds: float | None = None) -> AgentRun:
         async def wait_persisted() -> AgentRun:
             task = self._tasks.get(run_id)
             if task is not None:
@@ -862,10 +852,9 @@ class Runtime:
             RunStatus.PAUSED,
             RunStatus.WAITING_FOR_APPROVAL,
         }:
-            raise ValueError(
-                f"Run {run_id} cannot be resumed from status {run.status}."
-            )
+            raise ValueError(f"Run {run_id} cannot be resumed from status {run.status}.")
         if run.metadata.get("run_kind") == "workflow":
+
             async def execute_workflow() -> AgentRun:
                 return (await self.resume_workflow(run_id)).parent
 
@@ -946,9 +935,7 @@ class Runtime:
                 "the original Workflow definition after a process restart."
             )
         if run.status != RunStatus.RUNNING:
-            raise ValueError(
-                f"Only running runs can be paused; run {run_id} is {run.status}."
-            )
+            raise ValueError(f"Only running runs can be paused; run {run_id} is {run.status}.")
         run.transition_to(RunStatus.PAUSED)
         self.store.save_run_with_event(run, "run.paused", {"reason": "user_requested"})
         self._pause_run_ids.add(run_id)
@@ -1008,9 +995,7 @@ class Runtime:
     ) -> ToolExecution:
         execution = self.store.get_tool_execution(execution_id)
         if execution.status != ToolExecutionStatus.UNKNOWN:
-            raise ValueError(
-                f"Tool execution {execution_id} is {execution.status}, not unknown."
-            )
+            raise ValueError(f"Tool execution {execution_id} is {execution.status}, not unknown.")
         aliases = {
             "completed": UnknownToolResolution.CONFIRMED_SUCCEEDED,
             "failed": UnknownToolResolution.CONFIRMED_FAILED,
@@ -1090,10 +1075,7 @@ class Runtime:
             if run.status == RunStatus.CREATED:
                 run.transition_to(RunStatus.RUNNING)
                 self.store.save_run_with_event(run, "run.started")
-                messages = [
-                    Message(role="system", content=agent.system_prompt),
-                    Message(role="user", content=run.input),
-                ]
+                messages = self._initial_messages(run, agent)
                 self._checkpoint(run, messages)
             else:
                 messages = self._load_messages(run)
@@ -1142,9 +1124,7 @@ class Runtime:
                 incomplete = self.store.latest_incomplete_step(run.id)
                 if incomplete is not None:
                     self._ensure_assistant_message(messages, incomplete)
-                    if not await self._process_step(
-                        run, incomplete, messages, agent, token
-                    ):
+                    if not await self._process_step(run, incomplete, messages, agent, token):
                         return self.store.get_run(run.id)
 
                 while True:
@@ -1189,6 +1169,35 @@ class Runtime:
                     )
 
                     if not response.tool_calls:
+                        completion_payload: dict[str, Any] | None = None
+                        if self.completion_policy is not None:
+                            verification_requested = any(
+                                event.type == "completion.verification_requested"
+                                for event in self.store.events_since(run.id)
+                            )
+                            decision = self.completion_policy.assess(
+                                self.store.tool_executions_for_run(run.id),
+                                verification_requested=verification_requested,
+                            )
+                            completion_payload = decision.evidence.to_dict()
+                            if decision.followup_message is not None:
+                                step.status = StepStatus.COMPLETED
+                                messages.append(
+                                    Message(role="system", content=decision.followup_message)
+                                )
+                                checkpoint = Checkpoint.create(
+                                    run.id, run.step_count, messages, run.tool_call_count
+                                )
+                                self.store.save_model_followup(
+                                    step,
+                                    checkpoint,
+                                    {**model_payload, "completion_deferred": True},
+                                    "completion.verification_requested",
+                                    completion_payload,
+                                    delta_payload=delta_payload,
+                                )
+                                continue
+
                         step.status = StepStatus.COMPLETED
                         run.result = response.content or ""
                         run.transition_to(RunStatus.COMPLETED)
@@ -1201,6 +1210,7 @@ class Runtime:
                             checkpoint,
                             model_payload,
                             delta_payload=delta_payload,
+                            completion_payload=completion_payload,
                         )
                         return run
 
@@ -1243,9 +1253,7 @@ class Runtime:
                                 **authorizations[execution.tool_call.id],
                             },
                         )
-                    if not await self._process_step(
-                        run, step, messages, agent, token
-                    ):
+                    if not await self._process_step(run, step, messages, agent, token):
                         return self.store.get_run(run.id)
         except asyncio.CancelledError:
             run = self.store.get_run(run_id)
@@ -1367,8 +1375,7 @@ class Runtime:
                 if approval.status == "rejected":
                     execution.status = ToolExecutionStatus.REJECTED
                     execution.error = (
-                        "Tool call rejected by a human: "
-                        f"{approval.reason or 'no reason provided'}"
+                        f"Tool call rejected by a human: {approval.reason or 'no reason provided'}"
                     )
                     execution.completed_at = utc_now()
                     run.tool_call_count += 1
@@ -1495,9 +1502,7 @@ class Runtime:
             execution.completed_at = utc_now()
             self.store.save_tool_execution_with_event(
                 execution,
-                "tool.outcome_unknown"
-                if execution.side_effecting
-                else "tool.cancelled",
+                "tool.outcome_unknown" if execution.side_effecting else "tool.cancelled",
                 {
                     "tool_execution_id": execution.id,
                     "tool_call_id": call.id,
@@ -1536,9 +1541,7 @@ class Runtime:
             execution.completed_at = utc_now()
             run.tool_call_count += 1
             self._append_execution_message(messages, execution)
-            checkpoint = Checkpoint.create(
-                run.id, run.step_count, messages, run.tool_call_count
-            )
+            checkpoint = Checkpoint.create(run.id, run.step_count, messages, run.tool_call_count)
             self.store.save_tool_execution_with_event(
                 execution,
                 "tool.failed",
@@ -1563,9 +1566,7 @@ class Runtime:
         execution.completed_at = utc_now()
         run.tool_call_count += 1
         self._append_execution_message(messages, execution)
-        checkpoint = Checkpoint.create(
-            run.id, run.step_count, messages, run.tool_call_count
-        )
+        checkpoint = Checkpoint.create(run.id, run.step_count, messages, run.tool_call_count)
         self.store.save_tool_execution_with_event(
             execution,
             "tool.completed",
@@ -1587,7 +1588,11 @@ class Runtime:
         content: str,
         data: dict[str, Any] | None,
     ) -> tuple[str, dict[str, Any] | None]:
-        if len(content) <= self.config.large_tool_result_chars:
+        if (
+            execution.tool_call.name == "read_artifact"
+            or (data or {}).get("_runtime_artifact_page") is True
+            or len(content) <= self.config.large_tool_result_chars
+        ):
             return content, data
         path = self.artifacts.write_text(
             run.id,
@@ -1598,12 +1603,16 @@ class Runtime:
         preview = content[:preview_chars]
         artifact = {
             "path": str(path),
+            "relative_path": self.artifacts.relative_path(path),
             "characters": len(content),
             "preview_characters": len(preview),
         }
         result_data = {**(data or {}), "_artifact": artifact}
         replacement = (
             f"[Tool result stored as artifact: {path}; characters={len(content)}]"
+            f"\nRead it with read_artifact(path={str(path)!r}, offset=0, max_chars=3000). "
+            "Continue from next_offset while has_more is true; do not use read_text_file "
+            "or run_process to print the artifact."
             f"\nPreview:\n{preview}"
         )
         self._event(
@@ -1715,9 +1724,7 @@ class Runtime:
                 if attempt >= self.config.max_model_retries or not retryable:
                     break
                 retry_after = (
-                    error.retry_after_seconds
-                    if isinstance(error, ProviderHTTPError)
-                    else None
+                    error.retry_after_seconds if isinstance(error, ProviderHTTPError) else None
                 )
                 delay = retry_after if retry_after is not None else 0.25 * (2**attempt)
                 sleep_seconds = delay + random.uniform(0.0, min(0.25, delay * 0.2))
@@ -1826,6 +1833,38 @@ class Runtime:
             )
         return result
 
+    def _initial_messages(self, run: AgentRun, agent: AgentDefinition) -> list[Message]:
+        messages = [Message(role="system", content=agent.system_prompt)]
+        session_id = run.metadata.get("session_id")
+        include_history = run.metadata.get("include_session_history") is True
+        if include_history and session_id is not None:
+            raw_limit = run.metadata.get("session_history_limit", 20)
+            limit = raw_limit if isinstance(raw_limit, int) else 20
+            limit = min(100, max(1, limit))
+            previous_runs = [
+                item
+                for item in self.store.session_runs(str(session_id))
+                if item.id != run.id
+                and item.agent_name == run.agent_name
+                and item.status is RunStatus.COMPLETED
+                and item.result is not None
+            ][-limit:]
+            for previous in previous_runs:
+                messages.append(Message(role="user", content=previous.input))
+                messages.append(Message(role="assistant", content=previous.result or ""))
+            self._event(
+                run.id,
+                "session.history.loaded",
+                {
+                    "session_id": str(session_id),
+                    "run_count": len(previous_runs),
+                    "message_count": len(previous_runs) * 2,
+                    "limit": limit,
+                },
+            )
+        messages.append(Message(role="user", content=run.input))
+        return messages
+
     def _load_messages(self, run: AgentRun) -> list[Message]:
         checkpoint = self.store.latest_checkpoint(run.id)
         if checkpoint is None:
@@ -1839,9 +1878,7 @@ class Runtime:
         return checkpoint.messages
 
     def _checkpoint(self, run: AgentRun, messages: list[Message]) -> None:
-        checkpoint = Checkpoint.create(
-            run.id, run.step_count, messages, run.tool_call_count
-        )
+        checkpoint = Checkpoint.create(run.id, run.step_count, messages, run.tool_call_count)
         self.store.save_checkpoint_with_event(checkpoint)
 
     def _mark_cancelled(self, run: AgentRun) -> AgentRun:
@@ -1854,12 +1891,9 @@ class Runtime:
             self.store.save_run_with_event(run, "run.cancelled")
         return self.store.get_run(run.id)
 
-    def _append_execution_message(
-        self, messages: list[Message], execution: ToolExecution
-    ) -> None:
+    def _append_execution_message(self, messages: list[Message], execution: ToolExecution) -> None:
         if any(
-            message.role == "tool"
-            and message.tool_call_id == execution.tool_call.id
+            message.role == "tool" and message.tool_call_id == execution.tool_call.id
             for message in messages
         ):
             return
@@ -1884,9 +1918,7 @@ class Runtime:
             return
         call_ids = {call.id for call in step.assistant_message.tool_calls}
         for message in messages:
-            if message.role == "assistant" and {
-                call.id for call in message.tool_calls
-            } == call_ids:
+            if message.role == "assistant" and {call.id for call in message.tool_calls} == call_ids:
                 return
         messages.append(step.assistant_message)
 
@@ -1909,12 +1941,8 @@ class Runtime:
             return self._agent_from_checksum(checksum)
         return self._resolve_agent(run.agent_name)
 
-    def _freeze_workflow_definition(
-        self, definition: dict[str, Any]
-    ) -> dict[str, Any]:
-        frozen = cast(
-            dict[str, Any], json.loads(json.dumps(definition, ensure_ascii=False))
-        )
+    def _freeze_workflow_definition(self, definition: dict[str, Any]) -> dict[str, Any]:
+        frozen = cast(dict[str, Any], json.loads(json.dumps(definition, ensure_ascii=False)))
         raw_steps = frozen.get("steps")
         if not isinstance(raw_steps, list):
             return frozen
@@ -1974,9 +2002,7 @@ class Runtime:
             extra={"runtime_event": event, "runtime_context": context},
         )
 
-    def _resolve_agent(
-        self, agent: AgentDefinition | str
-    ) -> AgentDefinition:
+    def _resolve_agent(self, agent: AgentDefinition | str) -> AgentDefinition:
         if isinstance(agent, AgentDefinition):
             self.register_agent(agent)
             return self.agent_registry.get(agent.name)

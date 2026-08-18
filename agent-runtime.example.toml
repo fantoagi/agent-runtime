@@ -1,0 +1,46 @@
+# Agent Runtime local single-user example configuration.
+# Copy this file to agent-runtime.toml and keep the real local file out of Git.
+
+[runtime]
+workspace = "."
+state_dir = ".agent-runtime"
+agent_name = "local"
+system_prompt = "You are a concise local assistant. Use tools only when necessary."
+run_timeout_seconds = 300
+shutdown_timeout_seconds = 30
+max_inflight_runs = 8
+max_concurrent_model_requests = 4
+
+[model]
+# Use "mock" for offline verification or "openai-compatible" for a real model.
+provider = "mock"
+model = "arithmetic-demo"
+base_url = "https://api.openai.com/v1"
+# Store only the environment variable name here, never the API Key value.
+api_key_env = "OPENAI_API_KEY"
+timeout_seconds = 60
+
+[tools]
+sync_workers = 8
+pending_queue_size = 32
+enable_process = true
+# Executable names are resolved through PATH. Use absolute paths when needed.
+allowed_executables = ["python", "git"]
+process_timeout_seconds = 120
+process_max_output_bytes = 1000000
+process_max_concurrent = 2
+
+[workspace_context]
+instructions_enabled = true
+instruction_files = ["AGENTS.md", "CLAUDE.md"]
+max_instruction_chars = 50000
+
+[api]
+host = "127.0.0.1"
+port = 8000
+
+[logging]
+level = "INFO"
+file = "logs/runtime.log"
+max_file_size_mb = 20
+backup_count = 5

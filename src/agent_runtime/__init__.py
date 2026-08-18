@@ -1,6 +1,18 @@
 """Durable single-agent and multi-agent runtime primitives."""
 
 from .backup import BackupCreation, BackupVerification, RestoreResult, RuntimeBackupManager
+from .coding_tools import (
+    DEFAULT_IGNORED_DIRECTORIES,
+    DEFAULT_IGNORED_FILES,
+    register_coding_tools,
+)
+from .completion import (
+    CodingCompletionPolicy,
+    CompletionDecision,
+    CompletionEvidence,
+    CompletionPolicy,
+    ValidationEvidence,
+)
 from .context import ContextBuilder, ContextBuildResult
 from .doctor import DoctorCheck, DoctorReport, RuntimeDoctor
 from .domain import (
@@ -40,6 +52,7 @@ from .evals import (
     MemoryEvalRunner,
     WorkflowEvalRunner,
 )
+from .git_tools import register_git_tools
 from .incident import (
     FailureDiagnosis,
     IncidentBundle,
@@ -106,6 +119,8 @@ from .tools import CapabilityPolicy, ToolAuthorization, ToolRegistry
 from .version import __version__
 
 __all__ = [
+    "DEFAULT_IGNORED_DIRECTORIES",
+    "DEFAULT_IGNORED_FILES",
     "AgentDefinition",
     "AgentDefinitionUnavailable",
     "AgentRegistry",
@@ -118,6 +133,10 @@ __all__ = [
     "BackupVerification",
     "CapabilityPolicy",
     "CapabilityPolicyAction",
+    "CodingCompletionPolicy",
+    "CompletionDecision",
+    "CompletionEvidence",
+    "CompletionPolicy",
     "ContainsEvaluator",
     "ContextBuildResult",
     "ContextBuilder",
@@ -186,6 +205,7 @@ __all__ = [
     "TraceTree",
     "TraceTreeNode",
     "UnknownToolResolution",
+    "ValidationEvidence",
     "WorkflowEvalRunner",
     "WorkflowExecution",
     "WorkflowStep",
@@ -198,6 +218,8 @@ __all__ = [
     "local_runtime_status",
     "memory_demo_agent",
     "multi_agent_demo_workflow",
+    "register_coding_tools",
+    "register_git_tools",
     "register_process_tool",
     "resolve_local_config_path",
     "write_default_local_config",

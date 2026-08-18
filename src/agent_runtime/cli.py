@@ -70,12 +70,39 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default=None, help="Loopback host override")
     serve.add_argument("--port", type=int, default=None, help="HTTP port override")
 
+    chat = subcommands.add_parser("chat", help="Open the interactive terminal Agent shell")
+    chat.add_argument("prompt", nargs="?", help="Optional initial prompt")
+    chat.add_argument(
+        "-p",
+        "--print",
+        dest="print_only",
+        action="store_true",
+        help="Print one response and exit",
+    )
+    chat_sessions = chat.add_mutually_exclusive_group()
+    chat_sessions.add_argument(
+        "-c",
+        "--continue",
+        dest="continue_session",
+        action="store_true",
+        help="Continue the most recently used interactive session",
+    )
+    chat_sessions.add_argument(
+        "-r",
+        "--resume",
+        dest="resume_session_id",
+        help="Resume a persisted session by id",
+    )
+    chat.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
+
     subcommands.add_parser("status", help="Show local Runtime ownership and state health")
 
     lab = subcommands.add_parser("lab", help="Launch the visual Agent Runtime Learning Console")
     lab.add_argument("--host", default="127.0.0.1")
     lab.add_argument("--port", type=int, default=8000)
-    lab.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically")
+    lab.add_argument(
+        "--no-browser", action="store_true", help="Do not open the browser automatically"
+    )
 
     demo = subcommands.add_parser("demo", help="Run the deterministic arithmetic demo")
     demo.add_argument("input", help="Arithmetic expression, e.g. '19 * 23'")
@@ -262,6 +289,45 @@ async def _serve_local(arguments: argparse.Namespace) -> int:
         lock.release()
 
 
+async def _chat_local(arguments: argparse.Namespace) -> int:
+    from rich.console import Console
+
+    from .interactive import ChatOptions, InteractiveShell
+
+    settings = _local_settings(arguments)
+    configure_structured_logging(
+        level=settings.log_level,
+        file_path=settings.log_file,
+        max_bytes=settings.log_max_bytes,
+        backup_count=settings.log_backup_count,
+        include_stream=False,
+    )
+    lock = LocalRuntimeLock(settings.lock_path)
+    lock.acquire()
+    runtime = None
+    try:
+        runtime = create_configured_local_runtime(settings)
+        shell = InteractiveShell(
+            runtime,
+            settings,
+            options=ChatOptions(
+                initial_prompt=arguments.prompt,
+                print_only=arguments.print_only,
+                continue_session=arguments.continue_session,
+                resume_session_id=arguments.resume_session_id,
+            ),
+            console=Console(
+                no_color=arguments.no_color,
+                force_terminal=False if arguments.no_color else None,
+            ),
+        )
+        return await shell.run()
+    finally:
+        if runtime is not None:
+            await runtime.shutdown(timeout_seconds=settings.shutdown_timeout_seconds)
+        lock.release()
+
+
 async def async_main(arguments: argparse.Namespace) -> int:
     if arguments.json_logs:
         configure_structured_logging()
@@ -303,6 +369,13 @@ async def async_main(arguments: argparse.Namespace) -> int:
         try:
             return await _serve_local(arguments)
         except (LocalConfigError, LocalRuntimeLockError) as error:
+            _print({"status": "error", "code": type(error).__name__, "detail": str(error)})
+            return 2
+
+    if arguments.command == "chat":
+        try:
+            return await _chat_local(arguments)
+        except (LocalConfigError, LocalRuntimeLockError, KeyError) as error:
             _print({"status": "error", "code": type(error).__name__, "detail": str(error)})
             return 2
 
@@ -359,6 +432,7 @@ async def async_main(arguments: argparse.Namespace) -> int:
         )
         url = f"http://{arguments.host}:{arguments.port}/lab"
         if not arguments.no_browser:
+
             async def open_browser() -> None:
                 import webbrowser
 
@@ -375,9 +449,7 @@ async def async_main(arguments: argparse.Namespace) -> int:
         return 0
 
     if arguments.command == "memory":
-        runtime = create_memory_demo_runtime(
-            Path(arguments.workspace or "."), arguments.state_dir
-        )
+        runtime = create_memory_demo_runtime(Path(arguments.workspace or "."), arguments.state_dir)
         session = runtime.create_session({"demo": "memory"})
         memory = runtime.remember(
             arguments.remember,
@@ -484,7 +556,9 @@ async def async_main(arguments: argparse.Namespace) -> int:
         return 0 if report.failed_cases == 0 else 1
 
     if arguments.command == "approve":
-        approval = runtime.resolve_approval(arguments.approval_id, not arguments.reject, arguments.reason)
+        approval = runtime.resolve_approval(
+            arguments.approval_id, not arguments.reject, arguments.reason
+        )
         _print({"id": approval.id, "run_id": approval.run_id, "status": approval.status})
         return 0
 
@@ -496,7 +570,9 @@ async def async_main(arguments: argparse.Namespace) -> int:
             print(f"Runtime Doctor: {doctor_report.status}")
             print(f"Database: {doctor_report.database_path}")
             for check in doctor_report.checks:
-                marker = {"ok": "[OK]", "attention": "[ATTENTION]", "unhealthy": "[UNHEALTHY]"}[check.level]
+                marker = {"ok": "[OK]", "attention": "[ATTENTION]", "unhealthy": "[UNHEALTHY]"}[
+                    check.level
+                ]
                 print(f"{marker} {check.name}: {check.summary}")
         return doctor_report.exit_code
 

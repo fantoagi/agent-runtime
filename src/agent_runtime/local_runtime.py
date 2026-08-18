@@ -11,7 +11,10 @@ from pathlib import Path
 from typing import Any, BinaryIO
 from uuid import uuid4
 
-from .domain import AgentDefinition, ModelConfig
+from .coding_tools import register_coding_tools
+from .completion import CodingCompletionPolicy
+from .domain import AgentDefinition, ModelConfig, ToolDefinition
+from .git_tools import register_git_tools
 from .local_config import LocalConfigError, LocalRuntimeSettings
 from .providers import (
     MockProvider,
@@ -21,8 +24,10 @@ from .providers import (
     arithmetic_demo_responder,
 )
 from .runtime import Runtime, RuntimeConfig
+from .sandbox import LocalProcessSandbox, SandboxLimits, register_process_tool
 from .tools import ToolRegistry, register_builtin_tools
 from .version import __version__
+from .workspace_context import build_local_agent_prompt, load_workspace_instructions
 
 _WINDOWS_LOCK_OFFSET = 1 << 20
 
@@ -207,7 +212,29 @@ def create_configured_local_runtime(settings: LocalRuntimeSettings) -> Runtime:
         raise LocalConfigError(f"Runtime workspace does not exist: {settings.workspace}")
     settings.state_dir.mkdir(parents=True, exist_ok=True)
     tools = ToolRegistry()
-    register_builtin_tools(tools)
+    register_builtin_tools(tools, artifact_path=settings.artifact_path)
+    register_coding_tools(tools)
+    process_definition = None
+    git_definitions: tuple[ToolDefinition, ...] = ()
+    if settings.enable_process_tool:
+        try:
+            process_sandbox = LocalProcessSandbox(
+                settings.workspace,
+                allowed_executables=settings.allowed_executables,
+                limits=SandboxLimits(
+                    timeout_seconds=settings.process_timeout_seconds,
+                    max_output_bytes=settings.process_max_output_bytes,
+                    max_concurrent_processes=settings.process_max_concurrent,
+                ),
+            )
+        except ValueError as error:
+            raise LocalConfigError(f"Invalid local process tool configuration: {error}") from error
+        process_definition = register_process_tool(
+            tools,
+            process_sandbox,
+            handler_timeout_seconds=settings.process_timeout_seconds + 5.0,
+        )
+        git_definitions = register_git_tools(tools, process_sandbox)
     provider: ModelProvider | StreamingModelProvider
     if settings.provider == "mock":
         provider = MockProvider(arithmetic_demo_responder)
@@ -238,15 +265,41 @@ def create_configured_local_runtime(settings: LocalRuntimeSettings) -> Runtime:
         ),
         provider=provider,
         tools=tools,
+        completion_policy=CodingCompletionPolicy(
+            {
+                "write_text_file",
+                "replace_text",
+                "apply_patch",
+                *(definition.name for definition in git_definitions),
+                *([process_definition.name] if process_definition is not None else []),
+            }
+        ),
+    )
+    instruction_bundle = load_workspace_instructions(
+        settings.workspace,
+        enabled=settings.workspace_instructions_enabled,
+        configured_files=settings.workspace_instruction_files,
+        max_chars=settings.workspace_instruction_max_chars,
     )
     runtime.register_agent(
         AgentDefinition(
             name=settings.agent_name,
-            system_prompt=settings.system_prompt,
+            system_prompt=build_local_agent_prompt(
+                settings.system_prompt,
+                instruction_bundle,
+            ),
             tools=[
                 tools.get("calculator").definition,
+                tools.get("list_files").definition,
+                tools.get("search_text").definition,
+                tools.get("read_file_lines").definition,
                 tools.get("read_text_file").definition,
+                tools.get("read_artifact").definition,
+                tools.get("replace_text").definition,
+                tools.get("apply_patch").definition,
                 tools.get("write_text_file").definition,
+                *git_definitions,
+                *([process_definition] if process_definition is not None else []),
             ],
             model=ModelConfig(provider=settings.provider, model=settings.model),
         )
@@ -257,11 +310,18 @@ def create_configured_local_runtime(settings: LocalRuntimeSettings) -> Runtime:
 def local_runtime_status(settings: LocalRuntimeSettings) -> dict[str, Any]:
     lock = LocalRuntimeLock(settings.lock_path).inspect()
     database = _database_status(settings.database_path)
+    instruction_bundle = load_workspace_instructions(
+        settings.workspace,
+        enabled=settings.workspace_instructions_enabled,
+        configured_files=settings.workspace_instruction_files,
+        max_chars=settings.workspace_instruction_max_chars,
+    )
     return {
         "status": "running" if lock.status == "active" else "stopped",
         "version": __version__,
         "lock": lock.to_dict(),
         "configuration": settings.public_dict(),
+        "workspace_context": instruction_bundle.public_dict(),
         "state": {
             "directory_exists": settings.state_dir.is_dir(),
             "database": database,
