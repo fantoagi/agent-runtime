@@ -4,6 +4,8 @@ import httpx
 import pytest
 
 from agent_runtime.api.app import create_demo_app
+from agent_runtime.domain import RuntimeEvent, utc_now
+from agent_runtime.lab.explanations import explain_event, project_event_states
 
 
 @pytest.mark.asyncio
@@ -14,7 +16,7 @@ async def test_learning_console_page_and_scenario_catalog(workspace) -> None:
         page = await client.get("/lab")
         assert page.status_code == 200
         assert "Agent Runtime Learning Console" in page.text
-        assert "v0.8.8" in page.text
+        assert "v0.8.18" in page.text
         assert "诊断包" in page.text
         assert 'data-tab="context"' in page.text
         assert 'data-tab="memory"' in page.text
@@ -111,7 +113,7 @@ async def test_learning_scenarios_run_through_real_runtime(
         assert payload["reliability"]["backup"]["format_version"] == 1
         assert payload["reliability"]["backup"]["restore_requires_shutdown"] is True
         diagnostics = payload["reliability"]["diagnostics"]
-        assert diagnostics["version"] == "0.8.8"
+        assert diagnostics["version"] == "0.8.18"
         assert diagnostics["runtime"]["state"] == "accepting"
         assert diagnostics["process"]["thread_count"] >= 1
         assert payload["reliability"]["failure_analysis"] == []
@@ -307,3 +309,79 @@ async def test_large_tool_result_learning_scenario_writes_real_artifact(workspac
         assert artifact["preview"]
         assert payload["tool_executions"][0]["result_data"]["_artifact"]["path"] == artifact["path"]
         assert payload["acceptance"]["passed"] is True
+
+
+
+def test_learning_console_explains_and_projects_convergence_events() -> None:
+    events = [
+        RuntimeEvent(
+            "warning",
+            "run",
+            1,
+            "convergence.warning",
+            utc_now(),
+            {
+                "inspection_calls": 10,
+                "consecutive_no_progress": 2,
+                "reason": "no_progress",
+            },
+        ),
+        RuntimeEvent(
+            "finalization",
+            "run",
+            2,
+            "convergence.finalization_requested",
+            utc_now(),
+            {
+                "inspection_calls": 14,
+                "consecutive_no_progress": 3,
+                "reason": "inspection_budget",
+            },
+        ),
+        RuntimeEvent(
+            "context",
+            "run",
+            3,
+            "convergence.finalization_context_built",
+            utc_now(),
+            {
+                "fresh_context": True,
+                "source_tool_executions": 14,
+                "included_evidence": 8,
+            },
+        ),
+        RuntimeEvent(
+            "detected",
+            "run",
+            4,
+            "convergence.textual_tool_call_detected",
+            utc_now(),
+            {"step": 4, "format": "dsml", "repair_attempt": 1},
+        ),
+        RuntimeEvent(
+            "repair",
+            "run",
+            5,
+            "convergence.finalization_repair_requested",
+            utc_now(),
+            {"step": 4, "format": "dsml", "repair_attempt": 1},
+        ),
+    ]
+
+    warning = explain_event(events[0])
+    finalization = explain_event(events[1])
+    context = explain_event(events[2])
+    detected = explain_event(events[3])
+    repair = explain_event(events[4])
+    projections = project_event_states(events)
+
+    assert warning["title"] == "检查过程开始收敛"
+    assert finalization["title"] == "进入无工具最终综合"
+    assert context["title"] == "构建隔离的最终综合上下文"
+    assert detected["title"] == "检测到文本化 Tool Call"
+    assert repair["title"] == "重新请求纯文本最终答案"
+    assert projections[0][1]["convergence"] == "warning"
+    assert projections[1][1]["convergence"] == "finalizing"
+    assert projections[2][1]["convergence"] == "synthesizing"
+    assert projections[3][1]["convergence"] == "protocol_mismatch"
+    assert projections[4][1]["convergence"] == "repairing"

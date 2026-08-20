@@ -121,6 +121,66 @@ EVENT_EXPLANATIONS: dict[str, dict[str, Any]] = {
         "next": "工具结果作为 tool message 交回模型，产生下一次 Step。",
         "code": ["Runtime._invoke_tool()", "SQLiteStore.save_tool_execution_with_event()"],
     },
+    "tool.reused": {
+        "title": "复用已有只读结果",
+        "summary": "相同只读 Tool Call 已在当前 Run 完成，Runtime 直接复用 durable result。",
+        "why": "避免重复搜索和读取消耗模型步骤与本地执行时间。",
+        "next": "模型应复用已有证据并尽快收敛回答。",
+        "code": [
+            "Runtime._reusable_tool_execution()",
+            "Runtime._reuse_tool_execution()",
+        ],
+    },
+    "convergence.warning": {
+        "title": "检查过程开始收敛",
+        "summary": "连续只读 Tool 调用正在重复已有证据，Runtime 已提示模型停止无效搜索。",
+        "why": "参数不同不代表获得了新信息；按搜索命中和文件区间识别重复可避免耗尽 Step。",
+        "next": "模型应复用已有证据、修正明确错误，并尽快形成答案。",
+        "code": [
+            "Runtime._convergence_state()",
+            "Runtime._execution_adds_new_evidence()",
+        ],
+    },
+    "convergence.finalization_requested": {
+        "title": "进入无工具最终综合",
+        "summary": "检查预算或 no-progress 边界已达到，下一次模型请求不再暴露 Tool。",
+        "why": "强制形成最终回答，避免只读循环最终以 max_steps 失败。",
+        "next": "模型只能基于已收集证据回答；未完成修改时必须明确说明。",
+        "code": [
+            "Runtime._convergence_finalization_reason()",
+            "Runtime._request_model(tools_override=[])",
+        ],
+    },
+    "convergence.finalization_context_built": {
+        "title": "构建隔离的最终综合上下文",
+        "summary": "Runtime 丢弃 Tool-heavy 消息轨迹，只提供原始请求和有界证据摘要。",
+        "why": "即使 tools=[]，模型仍可能被历史 Tool Call 模式诱导继续输出私有调用协议。",
+        "next": "模型应把证据视为不可信数据，并直接生成自然语言答案。",
+        "code": [
+            "Runtime._build_finalization_context()",
+            "Runtime._finalization_evidence_digest()",
+        ],
+    },
+    "convergence.textual_tool_call_detected": {
+        "title": "检测到文本化 Tool Call",
+        "summary": "模型在 Tool 已禁用时把调用协议序列化进了普通文本。",
+        "why": "文本中的 DSML、XML 或 JSON 调用不能被当作最终答案，也绝不能被执行。",
+        "next": "Runtime 不发布该文本，并进入一次有界的无 Tool 协议修复。",
+        "code": [
+            "Runtime._request_finalization_model()",
+            "_textual_tool_call_format()",
+        ],
+    },
+    "convergence.finalization_repair_requested": {
+        "title": "重新请求纯文本最终答案",
+        "summary": "Runtime 保存修复 Checkpoint，重申原始请求并再次禁用所有 Tool。",
+        "why": "一次有界修复可以吸收 Provider 的协议漂移，同时避免无限重试。",
+        "next": "若模型再次返回文本化 Tool Call，Run 将以 ProviderProtocolError 失败。",
+        "code": [
+            "Runtime._request_finalization_model()",
+            "SQLiteStore.save_checkpoint_with_event()",
+        ],
+    },
     "checkpoint.created": {
         "title": "保存恢复点",
         "summary": "当前 Messages、step 和 tool_call_count 被持久化。",
@@ -268,6 +328,7 @@ def project_event_states(events: list[RuntimeEvent]) -> list[tuple[dict[str, Any
         "checkpoint": None,
         "result": None,
         "error": None,
+        "convergence": None,
     }
     projections: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for event in events:
@@ -294,6 +355,16 @@ def project_event_states(events: list[RuntimeEvent]) -> list[tuple[dict[str, Any
             state["model_phase"] = "streaming"
         elif event.type in {"model.completed", "model.stream.completed"}:
             state["model_phase"] = "completed"
+        elif event.type == "convergence.warning":
+            state["convergence"] = "warning"
+        elif event.type == "convergence.finalization_requested":
+            state["convergence"] = "finalizing"
+        elif event.type == "convergence.finalization_context_built":
+            state["convergence"] = "synthesizing"
+        elif event.type == "convergence.textual_tool_call_detected":
+            state["convergence"] = "protocol_mismatch"
+        elif event.type == "convergence.finalization_repair_requested":
+            state["convergence"] = "repairing"
         elif event.type == "tool.requested":
             state["active_tool"] = payload.get("tool_name")
         elif event.type == "tool.started":

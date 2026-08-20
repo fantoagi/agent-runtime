@@ -1537,6 +1537,9 @@ class SQLiteStore:
         self,
         step: Step,
         checkpoint: Checkpoint,
+        *,
+        event_type: str | None = None,
+        event_payload: dict[str, Any] | None = None,
     ) -> None:
         with self._lock, self._connection:
             self._update_step_locked(step)
@@ -1549,6 +1552,8 @@ class SQLiteStore:
                 "checkpoint.created",
                 {"checkpoint_id": checkpoint.id, "step": checkpoint.step},
             )
+            if event_type is not None:
+                self._append_event_locked(step.run_id, event_type, event_payload)
 
     def save_step(self, step: Step) -> None:
         with self._lock, self._connection:

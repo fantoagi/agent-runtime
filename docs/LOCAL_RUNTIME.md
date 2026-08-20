@@ -1,15 +1,15 @@
 # 本地稳定 Runtime 运行指南
 
-- **适用版本**：v0.8.8+
-- **最近更新**：2026-08-18
-- **关联变更**：[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)
-- **关联决策**：[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)、[ADR-0027](./adr/0027-interactive-cli-session-history.md)、[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)
+- **适用版本**：v0.8.18+
+- **最近更新**：2026-08-19
+- **关联变更**：[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)
+- **关联决策**：[ADR-0041](./adr/0041-fresh-finalization-context.md)、[ADR-0039](./adr/0039-textual-tool-call-guard.md)、[ADR-0037](./adr/0037-evidence-aware-convergence.md)、[ADR-0036](./adr/0036-read-only-tool-convergence.md)、[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)、[ADR-0027](./adr/0027-interactive-cli-session-history.md)、[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)
 
 ## 1. 目标和信任边界
 
 v0.8.3 延续 v0.8.2 的本地稳定边界，并将 Interactive CLI 作为默认人工使用入口。当前支持目标收敛为单机、单用户、本地 SQLite 和可信 Tool/脚本。Runtime 默认只允许监听 `127.0.0.1`、`localhost` 或 `::1`，不提供公网服务、多租户、分布式调度或任意不可信代码强隔离。
 
-v0.8.0 的 Workspace 边界、Tool Capability、审批、argv、白名单、timeout、输出限制和进程树取消继续保留，但 SecretProvider 和 DockerSandbox 不再是本地稳定版的阻塞项。
+v0.8.0 的 Workspace 边界、Tool Capability、审批、argv、白名单、timeout、输出限制和进程树取消继续保留，但 SecretProvider 和 DockerSandbox 不再是本地稳定版的阻塞项。 v0.8.17 同时把 finalization 的协议漂移视为本地可靠性问题，并覆盖全角/重复竖线 DSML 变体：文本化 Tool Call 不会执行，流式内容先缓冲校验，最多自动修复一次。 v0.8.18 进一步隔离最终综合上下文，避免真实模型因历史 Tool Call/Result 模式在 `tools=[]` 时仍连续输出 DSML。
 
 ## 2. 初始化
 

@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_runtime.context import ContextBuilder
+from agent_runtime.context import (
+    RUNTIME_CURRENT_REQUEST_MESSAGE_NAME,
+    ContextBuilder,
+)
 from agent_runtime.domain import (
     AgentDefinition,
     MemoryRecord,
@@ -77,6 +80,34 @@ def test_context_builder_compacts_without_splitting_unfinished_tool_calls() -> N
     )
     assert result.messages[-1].content == "recent answer"
     assert any(message.name == "context-summary" for message in result.messages)
+
+
+def test_context_builder_preserves_current_request_exactly_under_compaction() -> None:
+    builder = ContextBuilder(token_budget=90, recent_groups=1, summary_max_chars=128)
+    request = "Explain the complete model request message without modifying files."
+    messages = [
+        Message(role="system", content="system prompt"),
+        Message(
+            role="user",
+            content=request,
+            name=RUNTIME_CURRENT_REQUEST_MESSAGE_NAME,
+        ),
+        Message(role="assistant", content="old answer " * 80),
+        Message(role="user", content="later history " * 80),
+        Message(role="assistant", content="latest evidence " * 80),
+    ]
+
+    result = builder.build(messages)
+
+    current = [
+        message
+        for message in result.messages
+        if message.name == RUNTIME_CURRENT_REQUEST_MESSAGE_NAME
+    ]
+    assert result.compacted
+    assert len(current) == 1
+    assert current[0].role == "user"
+    assert current[0].content == request
 
 
 @pytest.mark.asyncio

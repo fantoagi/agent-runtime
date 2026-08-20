@@ -24,7 +24,7 @@ from ..runtime import Runtime
 from ..version import __version__
 from ..workspace_context import WorkspaceInstructionBundle, load_workspace_instructions
 from .commands import HELP_TEXT, SlashCommand, command_names, parse_slash_command
-from .renderer import EventRenderer
+from .renderer import DisplayMode, EventRenderer
 
 
 class PromptReader(Protocol):
@@ -53,6 +53,7 @@ class ChatOptions:
     print_only: bool = False
     continue_session: bool = False
     resume_session_id: str | None = None
+    display_mode: DisplayMode = DisplayMode.COMPACT
 
 
 class InteractiveShell:
@@ -72,7 +73,11 @@ class InteractiveShell:
         self.options = options or ChatOptions()
         self.console = console or Console()
         self.prompt_reader = prompt_reader
-        self.renderer = EventRenderer(self.console, quiet=self.options.print_only)
+        self.renderer = EventRenderer(
+            self.console,
+            quiet=self.options.print_only,
+            mode=self.options.display_mode,
+        )
         self.session: Session | None = None
         self.current_run_id: str | None = None
         self.last_run_id: str | None = None
@@ -177,6 +182,9 @@ class InteractiveShell:
                         break
                     approval = self.runtime.store.pending_approval(run_id)
                     if approval is None:
+                        if resume_task is not None and not resume_task.done():
+                            await self._wait_for_resume_activation(run_id, resume_task)
+                            continue
                         break
                     approved = await self._prompt_for_approval()
                     self.runtime.resolve_approval(
@@ -187,6 +195,7 @@ class InteractiveShell:
                         else "rejected from interactive CLI",
                     )
                     resume_task = asyncio.create_task(self.runtime.resume(run_id))
+                    await self._wait_for_resume_activation(run_id, resume_task)
                 if resume_task is not None:
                     await resume_task
             run = self.runtime.store.get_run(run_id)
@@ -195,12 +204,24 @@ class InteractiveShell:
         finally:
             self.current_run_id = None
 
+    async def _wait_for_resume_activation(
+        self, run_id: str, resume_task: asyncio.Task[AgentRun]
+    ) -> None:
+        """Wait until approval resume leaves the transient waiting state."""
+        while (
+            self.runtime.store.get_run(run_id).status is RunStatus.WAITING_FOR_APPROVAL
+            and not resume_task.done()
+        ):
+            await asyncio.sleep(self.runtime.config.event_poll_interval_seconds)
+        if resume_task.done():
+            await resume_task
+
     async def _prompt_for_approval(self) -> bool:
         if self.prompt_reader is None and self.options.print_only and not sys.stdin.isatty():
             return False
         while True:
             try:
-                answer = (await self._reader().prompt("Allow this tool? [y/N] ")).strip().lower()
+                answer = (await self._reader().prompt("Approve this action? [y/N] ")).strip().lower()
             except (EOFError, KeyboardInterrupt):
                 return False
             if answer in {"y", "yes"}:
@@ -286,6 +307,21 @@ class InteractiveShell:
                 f"Model: [bold]{self.settings.model}[/bold]"
             )
             return True
+        if name == "/display":
+            if len(command.arguments) > 1:
+                self.console.print("Usage: /display [compact|verbose]")
+                return True
+            if command.arguments:
+                try:
+                    mode = DisplayMode(command.arguments[0].lower())
+                except ValueError:
+                    self.console.print("Usage: /display [compact|verbose]")
+                    return True
+                self.renderer.set_mode(mode)
+            self.console.print(
+                f"Display mode: [bold]{self.renderer.mode.value}[/bold]"
+            )
+            return True
         if name == "/tools":
             agent = self._current_agent()
             table = Table(title=f"Tools for {agent.name}")
@@ -330,7 +366,7 @@ class InteractiveShell:
         self.console.print(f"Workspace: {self.settings.workspace}")
         self.console.print(
             f"Agent: {self.settings.agent_name} · Provider: {self.settings.provider} · "
-            f"Model: {self.settings.model}"
+            f"Model: {self.settings.model} · Display: {self.renderer.mode.value}"
         )
         if self.session is not None:
             self.console.print(f"Session: {self.session.id}")
@@ -501,6 +537,7 @@ class InteractiveShell:
         table.add_row("Agent", self.settings.agent_name)
         table.add_row("Provider", self.settings.provider)
         table.add_row("Model", self.settings.model)
+        table.add_row("Display", self.renderer.mode.value)
         table.add_row("Session", self.session.id if self.session else "none")
         table.add_row("Current Run", self.current_run_id or "none")
         table.add_row("Last Run", self.last_run_id or "none")

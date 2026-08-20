@@ -57,9 +57,13 @@ def test_local_agent_prompt_contains_protocol_and_project_rules(workspace: Path)
     assert "Local coding runtime protocol" in prompt
     assert "Never claim a file changed" in prompt
     assert "continue without asking the user to repeat it" in prompt
+    assert "never invent arguments" in prompt
+    assert "Do not repeat an identical search or read" in prompt
     assert "narrow the path/pattern" in prompt
     assert "Read Runtime Tool Result Artifacts only with read_artifact" in prompt
     assert "Never use run_process" in prompt
+    assert "Runtime approval is the single confirmation step" in prompt
+    assert "do not first ask for a separate verbal confirmation" in prompt
     assert "### AGENTS.md" in prompt
     assert "Always run focused tests." in prompt
 

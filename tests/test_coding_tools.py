@@ -16,6 +16,7 @@ from agent_runtime.domain import (
     RunStatus,
     ToolCall,
     ToolExecutionError,
+    ToolValidationError,
 )
 from agent_runtime.interactive import ChatOptions, InteractiveShell
 from agent_runtime.local_config import LocalRuntimeSettings
@@ -131,6 +132,29 @@ async def test_search_text_returns_lines_and_honors_case_and_glob(workspace: Pat
     assert sensitive.data is not None
     assert [item["line"] for item in sensitive.data["matches"]] == [1]
     assert "ignored.txt" not in insensitive.content
+
+
+@pytest.mark.asyncio
+async def test_search_text_missing_path_suggests_workspace_relative_matches(
+    workspace: Path,
+) -> None:
+    target = workspace / "src" / "agent_runtime" / "runtime.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("class Runtime: pass\n", encoding="utf-8")
+    tools = ToolRegistry()
+    register_coding_tools(tools)
+    try:
+        with pytest.raises(
+            ToolExecutionError,
+            match=r"Possible matches: src/agent_runtime/runtime\.py",
+        ):
+            await tools.invoke(
+                "search_text",
+                {"query": "Runtime", "path": "runtime.py"},
+                context(workspace),
+            )
+    finally:
+        await tools.aclose()
 
 
 @pytest.mark.asyncio
@@ -582,3 +606,48 @@ async def test_apply_patch_supports_sequential_edits_to_same_file(workspace: Pat
         await tools.aclose()
     assert target.read_text(encoding="utf-8") == "value = 3\n"
     assert result.data is not None and result.data["file_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_extension_path_suggests_matching_python_file(
+    workspace: Path,
+) -> None:
+    target = workspace / "src" / "agent_runtime" / "providers.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("class Provider:\n    pass\n", encoding="utf-8")
+    tools = ToolRegistry()
+    register_coding_tools(tools)
+    try:
+        with pytest.raises(
+            ToolExecutionError,
+            match=r"Possible matches: src/agent_runtime/providers\.py",
+        ):
+            await tools.invoke(
+                "search_text",
+                {"query": "Provider", "path": "src/agent_runtime/providers"},
+                context(workspace),
+            )
+    finally:
+        await tools.aclose()
+
+
+@pytest.mark.asyncio
+async def test_search_text_unknown_max_lines_explains_correct_bounded_flow(
+    workspace: Path,
+) -> None:
+    tools = ToolRegistry()
+    register_coding_tools(tools)
+    try:
+        with pytest.raises(ToolValidationError) as captured:
+            await tools.invoke(
+                "search_text",
+                {"query": "Runtime", "max_lines": 20},
+                context(workspace),
+            )
+    finally:
+        await tools.aclose()
+
+    message = str(captured.value)
+    assert "Allowed arguments:" in message
+    assert "Use max_results to bound search matches" in message
+    assert "read_file_lines for bounded line ranges" in message

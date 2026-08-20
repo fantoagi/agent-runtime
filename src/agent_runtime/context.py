@@ -7,6 +7,15 @@ from dataclasses import dataclass, field
 
 from .domain import MemorySearchResult, Message
 
+RUNTIME_CURRENT_REQUEST_MESSAGE_NAME = "runtime-current-request"
+RUNTIME_FINALIZATION_REQUEST_MESSAGE_NAME = "runtime-finalization-request"
+_PINNED_MESSAGE_NAMES = frozenset(
+    {
+        RUNTIME_CURRENT_REQUEST_MESSAGE_NAME,
+        RUNTIME_FINALIZATION_REQUEST_MESSAGE_NAME,
+    }
+)
+
 
 def estimate_text_tokens(value: str | None) -> int:
     """Provider-neutral, deterministic approximation used for budget decisions."""
@@ -99,6 +108,9 @@ class ContextBuilder:
         required = set(range(max(0, len(groups) - self.recent_groups), len(groups)))
         required.update(
             index for index, group in enumerate(groups) if self._has_unfinished_tool_call(group)
+        )
+        required.update(
+            index for index, group in enumerate(groups) if self._has_pinned_message(group)
         )
         current_tokens = sum(estimate_message_tokens(message) for message in prefix)
 
@@ -212,6 +224,10 @@ class ContextBuilder:
         return not expected.issubset(completed)
 
     @staticmethod
+    def _has_pinned_message(group: Sequence[Message]) -> bool:
+        return any(message.name in _PINNED_MESSAGE_NAMES for message in group)
+
+    @staticmethod
     def _group_tokens(group: Sequence[Message]) -> int:
         return sum(estimate_message_tokens(message) for message in group)
 
@@ -248,7 +264,12 @@ class ContextBuilder:
         for message in result:
             if sum(estimate_message_tokens(item) for item in result) <= budget:
                 break
-            if message.role == "system" or message.tool_calls or not message.content:
+            if (
+                message.role == "system"
+                or message.name in _PINNED_MESSAGE_NAMES
+                or message.tool_calls
+                or not message.content
+            ):
                 continue
             if len(message.content) > 96:
                 head = message.content[:48]

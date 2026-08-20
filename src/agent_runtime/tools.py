@@ -321,7 +321,9 @@ class ToolRegistry:
             raise RuntimeClosedError("Tool registry is closed.")
         tool = self.get(name)
         self.require_authorized(name)
-        validate_input(arguments, tool.definition.input_schema)
+        validate_input(
+            arguments, tool.definition.input_schema, tool_name=tool.definition.name
+        )
         context.raise_if_cancelled()
         started = False
         try:
@@ -368,21 +370,36 @@ class ToolRegistry:
             raise ToolExecutionError(f"Tool {name!r} failed: {error}") from error
 
 
-def validate_input(value: dict[str, Any], schema: dict[str, Any]) -> None:
+def validate_input(
+    value: dict[str, Any],
+    schema: dict[str, Any],
+    *,
+    tool_name: str | None = None,
+) -> None:
     if schema.get("type", "object") != "object":
         raise ToolValidationError("Tool input schema root must be an object.")
     properties = schema.get("properties", {})
     required = schema.get("required", [])
     if not isinstance(value, dict):
         raise ToolValidationError("Tool arguments must be an object.")
+    allowed = ", ".join(sorted(properties)) or "(none)"
     for key in required:
         if key not in value:
-            raise ToolValidationError(f"Missing required tool argument: {key}.")
+            raise ToolValidationError(
+                f"Missing required tool argument: {key}. Allowed arguments: {allowed}."
+            )
     if schema.get("additionalProperties") is False:
         unknown = set(value) - set(properties)
         if unknown:
+            hint = ""
+            if tool_name == "search_text" and "max_lines" in unknown:
+                hint = (
+                    " Use max_results to bound search matches, then use "
+                    "read_file_lines for bounded line ranges."
+                )
             raise ToolValidationError(
-                f"Unsupported tool arguments: {', '.join(sorted(unknown))}."
+                f"Unsupported tool arguments: {', '.join(sorted(unknown))}. "
+                f"Allowed arguments: {allowed}.{hint}"
             )
     for key, item in value.items():
         if key in properties:

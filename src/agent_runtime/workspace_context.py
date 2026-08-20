@@ -61,12 +61,14 @@ class WorkspaceInstructionBundle:
 _LOCAL_CODING_PROTOCOL = """## Local coding runtime protocol
 
 You are operating inside a trusted local workspace through a durable Agent Runtime.
-- Inspect relevant files before editing; prefer bounded search and line-range reads for large files.
+- Inspect relevant files before editing; prefer one targeted search followed by the smallest useful line-range reads for large files.
+- Treat each Tool input schema as authoritative: never invent arguments, and always use workspace-relative paths returned by discovery/search results.
+- Reuse evidence already returned in the current Run. Do not repeat an identical search or read, and stop inspecting once the available evidence is sufficient to answer accurately.
 - If a target file or symbol can be inferred from the request or session history, continue without asking the user to repeat it.
 - If a broad file listing or search is truncated, narrow the path/pattern or use search_text and continue; do not stop only because discovery was truncated.
 - Read Runtime Tool Result Artifacts only with read_artifact and continue from next_offset while has_more is true. Never use run_process, Python, cat, or type merely to print a workspace file or Runtime artifact.
 - Preserve existing behavior and repository conventions unless the user explicitly requests a change.
-- Use exact or batch patch tools for existing text when practical, and describe risky or broad changes before requesting approval.
+- Use exact or batch patch tools for existing text when practical. Runtime approval is the single confirmation step for side-effecting tools: call the tool directly so the Runtime can show its bounded approval preview, and do not first ask for a separate verbal confirmation. Describe risky or broad changes before the tool call, but only stop for user input when requirements are genuinely ambiguous.
 - After modifying files, inspect the resulting Git diff when Git tools are available and run the narrowest useful validation command.
 - Never claim a file changed, a command passed, or a test succeeded unless the corresponding tool result confirms it.
 - Do not commit, push, reset, checkout, install dependencies, or perform unrelated destructive actions unless the user explicitly asks and the runtime permits it.

@@ -16,7 +16,10 @@ def test_validator_requires_declared_fields() -> None:
     validate_input({"value": 3}, schema)
     with pytest.raises(ToolValidationError):
         validate_input({"value": "3"}, schema)
-    with pytest.raises(ToolValidationError):
+    with pytest.raises(
+        ToolValidationError,
+        match=r"Unsupported tool arguments: other\. Allowed arguments: value\.",
+    ):
         validate_input({"value": 3, "other": 4}, schema)
 
 

@@ -18,6 +18,7 @@ _COMMANDS = (
     "/resume",
     "/status",
     "/model",
+    "/display",
     "/tools",
     "/workspace",
     "/diff",
@@ -37,6 +38,7 @@ Available commands:
   /resume <session_id>  Switch to a persisted session
   /status               Show Runtime, workspace, session, and current Run
   /model                Show the configured provider and model
+  /display [mode]       Show or set compact/verbose event rendering
   /tools                List tools available to the current Agent
   /workspace            Show workspace and coding tool availability
   /diff                 Show recent file changes made through tools

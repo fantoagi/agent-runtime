@@ -214,7 +214,9 @@ def _search_text(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     )
     base = confined_path(context.workspace_path, requested)
     if not base.exists():
-        raise ToolExecutionError(f"Path does not exist: {requested}")
+        raise ToolExecutionError(
+            _missing_path_message(context.workspace_path, requested, subject="Path")
+        )
 
     matches: list[dict[str, Any]] = []
     files_scanned = 0
@@ -297,8 +299,12 @@ def _read_file_lines(arguments: dict[str, Any], context: ToolContext) -> ToolRes
     if max_chars < 256:
         raise ToolValidationError("max_chars must be at least 256.")
     path = confined_path(context.workspace_path, requested)
+    if not path.exists():
+        raise ToolExecutionError(
+            _missing_path_message(context.workspace_path, requested, subject="File")
+        )
     if not path.is_file():
-        raise ToolExecutionError(f"File does not exist: {requested}")
+        raise ToolExecutionError(f"Path is not a file: {requested}")
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as error:
@@ -545,6 +551,47 @@ def _iter_workspace_files(base: Path, *, recursive: bool) -> Iterator[Path]:
             if path.is_symlink() or name.casefold() in DEFAULT_IGNORED_FILES:
                 continue
             yield path
+
+
+def _missing_path_message(workspace: Path, requested: str, *, subject: str) -> str:
+    normalized = requested.replace("\\", "/").strip("/")
+    normalized_folded = normalized.casefold()
+    requested_name = Path(normalized).name.casefold()
+    ranked: list[tuple[int, str]] = []
+    scanned = 0
+    try:
+        for candidate in _iter_workspace_files(workspace.resolve(), recursive=True):
+            scanned += 1
+            if scanned > _MAX_SEARCH_FILES:
+                break
+            relative = _workspace_relative(workspace, candidate)
+            relative_folded = relative.casefold()
+            relative_without_suffix = Path(relative).with_suffix("").as_posix().casefold()
+            score: int | None = None
+            if relative_folded == normalized_folded:
+                score = 0
+            elif relative_without_suffix == normalized_folded:
+                score = 1
+            elif candidate.stem.casefold() == requested_name:
+                score = 2
+            elif candidate.name.casefold() == requested_name:
+                score = 3
+            elif relative_folded.endswith(normalized_folded):
+                score = 4
+            if score is not None:
+                ranked.append((score, relative))
+    except OSError:
+        ranked = []
+    suggestions = [
+        relative
+        for _, relative in sorted(
+            set(ranked), key=lambda item: (item[0], item[1].casefold())
+        )[:5]
+    ]
+    message = f"{subject} does not exist: {requested}. Use a workspace-relative path."
+    if suggestions:
+        message += " Possible matches: " + ", ".join(suggestions) + "."
+    return message
 
 
 def _workspace_relative(workspace: Path, path: Path) -> str:

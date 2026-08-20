@@ -1,14 +1,14 @@
 # Agent Runtime 当前架构
 
-> 最近更新：2026-08-18
-> 关联记录：[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)、[E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、[E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
-> 关联决策：[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0031](./adr/0031-project-workspace-instructions.md)、[ADR-0030](./adr/0030-bounded-read-batch-patch.md)、[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)、[ADR-0027](./adr/0027-interactive-cli-session-history.md)、[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
+> 最近更新：2026-08-19
+> 关联记录：[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-19-001](./CHANGELOG.md#e2026-08-19-001)、[E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)、[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)、[E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、[E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
+> 关联决策：[ADR-0041](./adr/0041-fresh-finalization-context.md)、[ADR-0040](./adr/0040-dsml-variant-detection.md)、[ADR-0039](./adr/0039-textual-tool-call-guard.md)、[ADR-0038](./adr/0038-finalization-context-integrity.md)、[ADR-0037](./adr/0037-evidence-aware-convergence.md)、[ADR-0036](./adr/0036-read-only-tool-convergence.md)、[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)、[ADR-0034](./adr/0034-interactive-cli-presentation.md)、[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0031](./adr/0031-project-workspace-instructions.md)、[ADR-0030](./adr/0030-bounded-read-batch-patch.md)、[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)、[ADR-0027](./adr/0027-interactive-cli-session-history.md)、[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
 
 ## 1. 系统目标和边界
 
 当前系统是一个面向开发者的、可持久化 Agent Runtime。它既支持单 Agent 模型/工具循环，也支持由 Parent Run 委派独立 Child Run 的单机多 Agent Workflow，并通过 ContextBuilder、Session 和 Scoped Memory 管理模型输入与跨 Run 信息复用。
 
-当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。v0.8.8 的正式支持目标收敛为单机、单用户、本地 SQLite 和可信 Tool/脚本；标准服务只监听 loopback，并通过状态目录 Owner Lock 防止两个本地执行循环并行领取同一状态。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
+当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。v0.8.18 的正式支持目标收敛为单机、单用户、本地 SQLite 和可信 Tool/脚本；标准服务只监听 loopback，并通过状态目录 Owner Lock 防止两个本地执行循环并行领取同一状态。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
 
 ## 2. 总体架构
 
@@ -129,9 +129,55 @@ flowchart LR
 
 Runtime 为这次上下文装配写入 durable `session.history.loaded` Event。Prompt Toolkit 的 `<state_dir>/cli-history` 只用于方向键和自动建议，不属于 Runtime Session、Checkpoint 或恢复事实。Rich Renderer 消费 `Runtime.stream()`，默认显示 `model.delta`、Tool、Approval 和终态，隐藏 Context/Checkpoint 等内部噪音；`--print` 则只输出最终可消费文本。
 
-> 最近更新：2026-08-16
-> 关联记录：[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)
-> 关联决策：[ADR-0027](./adr/0027-interactive-cli-session-history.md)
+v0.8.9 将 Renderer 进一步分为内容缓冲和事件投影两层。连续 `model.delta` 组成一个 Assistant Markdown 段；Renderer 只在空行或 fenced code block 闭合形成稳定 Markdown 块后 append 一次，不再通过 ANSI 光标控制重写旧终端行。Tool、Approval、完成证据和终态作为段边界并刷新剩余内容；`--print` 丢弃所有中间投影并只打印最终 `AgentRun.result`。Tool 事件默认进入 compact summarizer，verbose 才展开有界 JSON/多行结果：
+
+```mermaid
+flowchart LR
+    Delta["durable model.delta"] --> Buffer["Assistant Markdown Buffer"]
+    Buffer --> Boundary{"Stable block boundary?"}
+    Boundary -- "yes" --> Append["Append Rich Markdown once"]
+    Boundary -- "no" --> Retain["Retain incomplete tail"]
+    Segment["Tool / Approval / terminal"] --> Flush["Flush remaining Markdown"]
+    Tool["Tool / Approval Event"] --> Mode{"Display mode"}
+    Mode -- "compact" --> Summary["Bounded one-line summary"]
+    Mode -- "verbose" --> Detail["Bounded Panel / Syntax"]
+```
+
+Display mode 只属于 Shell Adapter，不写入 Run、Session 或 Event；完整执行事实继续由 SQLite Event 与 ToolExecution 提供。
+
+v0.8.10 在同一投影层增加执行透明度。Renderer 根据既有 Tool Event 确定性派生 Inspecting、Editing、Verifying 和 Executing 阶段，只在阶段转换时 append；`approval.requested` 生成 Tool-aware 有界预览，`approval.resolved` 显示批准或拒绝；`completion.evidence` 生成独立 Task Summary，将模型解释与 changed files、Git diff、validation command、failed/rejected Tool 等 Runtime 事实分离：
+
+```mermaid
+flowchart LR
+    ToolEvent["tool / approval durable events"] --> Classify["Deterministic phase classifier"]
+    Classify --> Phase["Append-only phase transition"]
+    ApprovalEvent["approval.requested"] --> Preview["Bounded command / file preview"]
+    Completion["completion.evidence"] --> Facts["Changed files / diff / validations"]
+    ModelText["Assistant Markdown"] --> Explanation["Model explanation"]
+    Facts --> Terminal["Structured Task Summary"]
+    Explanation --> Terminal
+```
+
+v0.8.11 修复 Approval 恢复期间的 Adapter 竞态。`resolve_approval()` 写入 durable Event 后，Shell 启动 `runtime.resume()` 并等待 Run 离开瞬时 `waiting_for_approval`，然后继续从最后 sequence 消费同一 Run；不会因为 `pending_approval` 已清空但状态尚未切换而提前结束投影。该修复不改变 Runtime 状态机或 Event schema。内建 Coding Protocol 同时将 Runtime Approval 定义为副作用 Tool 的唯一确认步骤；失败的无写入任务仅在 CLI 视图中显示为 `incomplete`，底层 `completion.evidence.status=read_only` 保持兼容。
+
+v0.8.12 继续保持该 Adapter 边界：Completion Policy 与 Renderer 共用同一个确定性 validation classifier，使 `python scripts/check_docs.py`、`check_coverage.py`、`verify_distribution.py` 和 `verify_local_runtime.py` 同时进入 durable validation evidence 与终端 `Verifying changes` 阶段。Renderer 根据同一轮 Tool Event 顺序区分 recovered 与 unresolved failure；同名 Tool 后续成功时只显示轻量恢复提示，最后一次仍失败时继续显示 `Task incomplete`。该投影不修改 ToolExecution、Completion Evidence 或 SQLite schema，也不从模型文本推断 clarification 状态。
+
+v0.8.13 在 Runtime Tool Loop 增加保守的只读收敛层：仅对固定白名单 Tool，以规范化 Tool 名和完全相同 arguments 查找当前 Run 中已完成的 ToolExecution；若中间没有副作用 Tool，则创建新的 completed ToolExecution、递增 `tool_call_count`、写入 durable `tool.reused` Event，并把原结果与 convergence note 返回模型，但不再次调用 handler。任何副作用 Tool 都会使此前候选失效；失败、UNKNOWN、Approval 和副作用调用永不复用。参数校验错误同时返回允许字段，错误相对路径返回有界 Workspace 候选。compact Renderer 对常见 inspection Tool 隐藏 requested 行，只显示 completed/failed/reused；verbose 仍保留完整生命周期。
+
+v0.8.14 在该层之上增加 `_EvidenceLedger`。Runtime 从 durable ToolExecution 顺序重建搜索命中、文件行区间、Artifact 字符区间和稳定结果摘要；副作用 Tool 清空账本并关闭自动 finalization。默认 10 次 inspection 或连续 2 次无进展写入 `convergence.warning`，14 次 inspection、连续 3 次无进展或即将达到 `max_steps` 写入 `convergence.finalization_requested`。最终 Model 请求使用空 Tool Definition；未暴露 Tool 的调用绝不执行。两个 Event 和对应 system note 与 Checkpoint 一起持久化，CLI/Learning Console 只做确定性投影，不维护旁路计数。
+
+v0.8.15 为当前 Run 的原始 user message 增加 Runtime 专用 name，并将它作为 ContextBuilder pinned group：即使 Session 历史、Tool 证据和 context summary 触发压缩，也不会省略或截断 durable `run.input`。触发 finalization 时，Checkpoint 额外保存一条 system 收敛说明和一条位于消息尾部、role 仍为 `user` 的原始请求重申；原始文本不会被提升为 system 指令。恢复旧 Checkpoint 时，Runtime 会从 durable `run.input` 补齐或标记当前请求。finalization 提示只要求忠实回答原问题和准确陈述实际动作，不再默认套用“workspace change 未完成”的编码任务模板。
+
+v0.8.16 在无 Tool finalization 响应进入 Step 和 Run 终态前增加协议完整性检查。Runtime 只把主要或完整由 DSML、XML 或已知 Tool JSON envelope 构成的内容判定为文本化 Tool Call，绝不解析执行其中动作。首次命中会写入 detection Event、保存 repair Checkpoint、再次以 `tools=[]` 重申原请求；第二次命中抛出 `ProviderProtocolError`。finalization 的 Streaming delta 在校验前内部缓冲，成功答案再作为单个 durable `model.delta` 发布，避免终端和 SSE 先泄漏伪 Tool 语法。
+
+v0.8.17 将 DSML 识别从字面前缀比较收紧为兼容归一化后的 envelope 校验。检测副本先执行 Unicode NFKC，将全角 `｜` 等兼容字符还原为 ASCII；marker 解析允许有限空白和一个以上竖线，以覆盖真实 Provider 返回的 `<｜｜DSML｜｜...>`、`<||DSML||...>` 及 spaced marker。原始模型内容不被改写，也不会进入 Tool Executor；只有整个非空响应仍主要由已知 DSML tag 行组成时才命中，因此附带自然语言解释的协议示例保持可回答。
+
+v0.8.18 将 finalization 从“在原消息历史末尾追加无 Tool 提示”改为独立综合边界。Runtime 从 SQLite ToolExecution 生成纯文本 evidence digest，对完全相同的 Tool、arguments、status 和 result 做 SHA-256 去重，并按 `context_token_budget` 派生总字符上限；Session 历史只保留当前请求之前的纯文本 user/assistant 片段。新的模型输入不包含 Agent 原 system prompt、Assistant `tool_calls`、`role=tool` 消息或 Provider 私有协议，最后一条仍是完整 durable `run.input`。Evidence 被明确标记为不可信数据；首次文本 Tool Call 修复继续复用同一 Fresh Context。Runtime 只把计数、截断和去重统计写入 `convergence.finalization_context_built`，不把证据原文复制进 Event Payload。
+
+
+> 最近更新：2026-08-19<br>
+> 关联记录：[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-19-001](./CHANGELOG.md#e2026-08-19-001)、[E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)、[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)<br>
+> 关联决策：[ADR-0040](./adr/0040-dsml-variant-detection.md)、[ADR-0039](./adr/0039-textual-tool-call-guard.md)、[ADR-0038](./adr/0038-finalization-context-integrity.md)、[ADR-0037](./adr/0037-evidence-aware-convergence.md)、[ADR-0036](./adr/0036-read-only-tool-convergence.md)、[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)、[ADR-0034](./adr/0034-interactive-cli-presentation.md)、[ADR-0027](./adr/0027-interactive-cli-session-history.md)
 
 ## 2.3 Project-aware Workspace Context
 
@@ -267,7 +313,7 @@ flowchart LR
     Budget --> Provider
 ```
 
-`ContextBuilder` 只构造模型输入副本，不修改 Checkpoint。它使用 Provider-neutral 近似 token 估算，并按以下优先级选择消息：System Prompt、未完成 Tool Call 组、最近消息组、预算允许的旧消息。Assistant Tool Call 与对应 Tool Result 作为不可拆分组；被省略的旧消息生成确定性 Summary。
+`ContextBuilder` 只构造模型输入副本，不修改 Checkpoint。它使用 Provider-neutral 近似 token 估算，并按以下优先级选择消息：System Prompt、当前 Run 原始请求、finalization 请求重申、未完成 Tool Call 组、最近消息组、预算允许的旧消息。Assistant Tool Call 与对应 Tool Result 作为不可拆分组；被省略的旧消息生成确定性 Summary。
 
 Session 是多个 Run 的显式持久化容器。`sessions` 保存 Session 本身，`session_runs` 保存一对多关系；一个 Run 最多属于一个 Session，Child Run 继承 Parent 的 Session。
 
@@ -337,7 +383,8 @@ Provider 调用由 Runtime 统一处理超时和指数退避重试。实现 `Str
 - 同步和异步 Python handler。
 - required、type、enum 和 additionalProperties 校验。
 - 单工具超时。
-- 工具异常标准化并回传给模型。
+- 工具异常标准化并回传给模型；参数错误包含允许字段，常见错误路径包含有界 Workspace 候选。
+- 当前 Run 内完全相同的白名单只读 Tool 可复用 durable 结果；副作用调用后候选失效。
 - `requires_approval` 人工审批标记。
 - `side_effecting` 副作用标记。
 - `capabilities` 与 `sandbox_only` 安全声明。
@@ -504,7 +551,7 @@ agent-runtime memory demo
 
 `InteractiveShell` 将终端输入映射为持久化 Session 和独立 Run，通过 `Runtime.stream()` 渲染 `model.delta`、Tool 与 Approval 事件。Slash Command 只读取或调用公开 Runtime/Store 接口；终端审批调用 `resolve_approval()` 后再恢复同一 Run。活动 Run 期间的 `Ctrl+C` 触发协作式 `cancel()`，输入阶段的 `Ctrl+C` 只清空当前提示，`Ctrl+D` 保存持久化状态后退出。
 
-`chat -c` 选择最近的 Interactive CLI Session，`chat -r` 使用指定 Session，`chat -p` 运行一次后退出。Embedded 模式优先复用现有本地 Bootstrap、Provider、ToolRegistry、SQLite 和 Owner Lock；当前不实现连接到正在运行的 HTTP daemon。
+`chat -c` 选择最近的 Interactive CLI Session，`chat -r` 使用指定 Session，`chat -p` 只输出最终结果后退出。默认 `--compact` 隐藏 Tool started 并显示工具感知的单行摘要；`--verbose` 或 `/display verbose` 展开有界参数、结果和失败详情。Embedded 模式优先复用现有本地 Bootstrap、Provider、ToolRegistry、SQLite 和 Owner Lock；当前不实现连接到正在运行的 HTTP daemon。
 
 ## 9.2 FastAPI Run API 与 SSE
 

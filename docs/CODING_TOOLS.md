@@ -1,9 +1,9 @@
 # Coding Workspace Tools 使用指南
 
-- **适用版本**：v0.8.8+
-- **最近更新**：2026-08-18
-- **关联变更**：[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、[E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)
-- **关联决策**：[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0030](./adr/0030-bounded-read-batch-patch.md)、[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)
+- **适用版本**：v0.8.18+
+- **最近更新**：2026-08-19
+- **关联变更**：[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、[E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)
+- **关联决策**：[ADR-0041](./adr/0041-fresh-finalization-context.md)、[ADR-0039](./adr/0039-textual-tool-call-guard.md)、[ADR-0037](./adr/0037-evidence-aware-convergence.md)、[ADR-0036](./adr/0036-read-only-tool-convergence.md)、[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)、[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0030](./adr/0030-bounded-read-batch-patch.md)、[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)
 
 ## 1. 目标
 
@@ -281,7 +281,7 @@ The standard local Agent composes its built-in coding protocol with bounded root
 - 是否成功写入文件。
 - 修改了哪些文件。
 - 最后一次写入后是否调用 `git_diff`。
-- 代码文件修改后是否调用 pytest、ruff、mypy、unittest 或常见语言 test/check/lint 命令。
+- 代码文件修改后是否调用 pytest、ruff、mypy、unittest、项目内建 `check_docs.py` / `check_coverage.py` / `verify_distribution.py` / `verify_local_runtime.py`，或常见语言 test/check/lint 命令。
 - 验证进程的真实 exit code 是否为零。
 
 第一次最终回答缺少证据时，Runtime 持久化 `completion.verification_requested` 并继续一个 Model Step；不会自动批准、自动运行命令或无限循环。最终 `completion.evidence` 的 `status` 为：
@@ -291,3 +291,38 @@ The standard local Agent composes its built-in coding protocol with bounded root
 - `unverified`：提醒后仍缺 diff 或验证证据。
 
 当前识别是保守 allowlist。项目自定义命令如果不能被识别，仍可执行，但不会被自动计入 validation evidence；模型应在最终回答中准确说明实际执行结果。
+
+
+## 15. v0.8.10 Execution Transparency
+
+Interactive CLI 会从既有 Tool Event 派生 Inspecting、Editing、Verifying 和 Executing 阶段。副作用 Tool 在 Approval 前显示有界预览：
+
+- `run_process`：argv、cwd、timeout、环境变量名称和 sandbox/capability；compact 不显示环境变量值。
+- `write_text_file`：目标路径、字符数和行数，不展开完整正文。
+- `replace_text`：目标路径、expected replacements 和有限 old/new 摘要。
+- `apply_patch`：edit 数、文件数、文件列表和最多四条有限摘要。
+
+批准或拒绝继续写入 `approval.resolved` Event。Runtime Approval 是副作用 Tool 的唯一确认步骤；模型应直接请求 Tool，让 CLI 展示有界预览，而不是先要求一次口头确认。批准后 Shell 从最后 durable sequence 继续显示 Tool 结果、验证和最终回答，Run 结束后才返回输入提示。没有成功写入且存在失败/拒绝 Tool 时，CLI 将 `read_only` 事实投影为 `Task incomplete`。修改任务结束后，CLI 从 `completion.evidence` 显示 changed files、Git diff、validation command/exit code、unmet requirement 和 failed/rejected Tool；模型最终回答不替代这些 Runtime 事实。同名 Tool 的旧失败若被后续成功调用恢复，只在 CLI 投影为 recovered，不从 durable `failed_tools` 历史事实中删除；最后一次仍失败时继续进入 Needs attention。
+
+
+
+
+## 16. v0.8.13 Agent Loop Convergence
+
+Tool input schema 是参数的唯一事实来源。缺少字段或传入未知字段时，Runtime 会在错误中列出 allowed arguments，帮助模型直接修正而不是继续猜测。`search_text` 和 `read_file_lines` 收到不存在的路径时，会在 Workspace 内执行有界候选查找，并返回最多五个 workspace-relative path。
+
+Runtime 只复用当前 Run 中完全相同的白名单只读 Tool 调用。复用会保留新的 ToolExecution、Tool Call 计数、Checkpoint 和 durable `tool.reused` Event，但不会再次执行 handler；模型收到原 durable result 和收敛提示。任何副作用 Tool 都会使此前候选失效，失败、UNKNOWN、审批或副作用结果不会被复用。该机制用于消除模型的机械重复读取，不是跨 Run cache，也不保证不同参数调用的语义等价。
+
+
+## 17. v0.8.14 Evidence-aware No-progress Guard
+
+`search_text` 的 `max_lines` 不是合法参数；Runtime 会明确提示使用 `max_results` 限制命中数量，再调用 `read_file_lines` 读取有界行范围。路径 `src/agent_runtime/providers` 这类遗漏扩展名的输入会优先建议 `src/agent_runtime/providers.py`。
+
+当前 Run 的检查证据按 Tool 类型判断：搜索使用路径和行号，行读取使用文件 SHA-256 与新增行区间，Artifact 使用新增字符区间，文件列表使用新路径。完全重叠、空结果和失败不算新证据。达到默认 warning/finalization 边界后写入 durable Event；无副作用任务最终以 `tools=[]` 请求模型综合答案。阈值可通过 `RuntimeConfig.convergence_warning_inspection_calls`、`convergence_finalization_inspection_calls` 和 `convergence_no_progress_calls` 调整。
+
+
+## 18. v0.8.15 Finalization Context Integrity
+
+当前 Run 的 durable `run.input` 使用 Runtime 专用 message name 标记，并作为 ContextBuilder pinned group 保留。它不会因为旧 Session 历史、Tool 结果或 summary 压缩而被省略，也不会在可选内容缩减时被截断。
+
+触发无 Tool finalization 时，Runtime 在 Checkpoint 中保存收敛说明，并把原始请求作为最后一条 `user` message 重申；不会把用户文本复制进 system role。提示只要求根据已收集证据回答确切问题并准确陈述实际动作，因此纯解释任务不会再自动追加文件修改状态。恢复旧 Checkpoint 时也会从 durable Run 补齐当前请求标记。 v0.8.17 在保存最终 Assistant Message 前识别纯 DSML、XML 和指向已注册 Tool 的 JSON envelope；DSML 检测兼容全角 Unicode、重复竖线和有限空白，这些文本不会被执行或当作完成结果。首次命中保存 detection/repair Event 和 Checkpoint，并继续以 `tools=[]` 请求一次自然语言答案；重复命中转为 Provider 协议失败。 v0.8.18 的 finalization 请求改用 Fresh Context：从 durable ToolExecution 构建去重、有界的纯文本证据摘要，排除原 Agent system prompt、Assistant Tool Call、`role=tool` 和私有协议轨迹；证据只作为不可信数据，最后一条仍是完整原始请求。

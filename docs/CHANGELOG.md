@@ -4,6 +4,777 @@
 
 ---
 
+<a id="e2026-08-19-010"></a>
+## E2026-08-19-010：v0.8.18 Fresh Finalization Context
+
+- **完成时间**：2026-08-19
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/lab/explanations.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/version.py`
+  - `tests/test_runtime.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0041-fresh-finalization-context.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0041](./adr/0041-fresh-finalization-context.md)
+
+### 变更摘要
+
+修复真实模型在 `tools=[]` finalization 中仍因原始 Tool-heavy 消息历史连续输出 DSML 的问题。v0.8.17 Guard 已能阻止错误完成，但 durable Run `run_29c2c0fc35364adfb0e86477ae6ba70a` 证明首次最终综合和一次修复都复用了包含 14 次 Tool 调用模式的旧上下文，最终只能以 ProviderProtocolError 失败。
+
+### 系统架构
+
+Finalization 现在是独立的模型输入边界。Runtime 不再把原 Agent system prompt、Assistant Tool Call、`role=tool` 或 Provider 私有协议传给最终综合请求，而是从 durable ToolExecution 构建有界 evidence digest，附加必要的纯文本 Session 摘要，并把完整 `run.input` 放在最后。
+
+### 实现方式
+
+新增 `_build_finalization_context()`、Session 纯文本摘要、ToolExecution evidence digest、SHA-256 去重和预算截断。Evidence 被标记为不可信数据；Event `convergence.finalization_context_built` 只保存计数和字符统计。普通 finalization 与一次 repair 均通过 `_request_model(context_override=...)` 使用 Fresh Context，Streaming 仍先缓冲校验。
+
+### 当前功能
+
+解释型只读任务达到收敛边界后，模型只看到严格自然语言综合指令、必要 Session 摘要、去重后的 durable 工具事实和原始问题。历史 Tool syntax、Tool Result role 和鼓励继续调用工具的 Agent prompt 不再进入该请求；Evidence 中出现的伪调用也不会执行。
+
+### 已知限制
+
+Fresh Context 只在自动 convergence finalization 中使用，普通模型步骤仍使用完整 ContextBuilder。Evidence digest 是有界纯文本，极大结果可能被截断；若已有工具证据本身不足，最终答案仍可能保守或不完整。真实 Provider 仍需复测确认自然语言收敛效果。
+
+### 测试与验收
+
+新增 Tool history 隔离、Agent prompt 排除、durable evidence 保留、Session 纯文本历史、重复证据去重、超长结果截断、一次 Fresh Context repair、重复违规失败和 Streaming 不泄漏回归。完整测试结果为 `330 passed`；总体 coverage 为 `84.53%`，core line coverage 为 `91.43%`，core branch coverage 为 `80.36%`；Ruff、Mypy strict、文档门禁、coverage 门禁、sdist/Wheel 构建和干净虚拟环境发行验证通过。
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check --no-cache src tests scripts
+.\.venv\Scripts\python.exe -m mypy src/agent_runtime
+.\.venv\Scripts\python.exe -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -q
+.\.venv\Scripts\python.exe scripts/check_coverage.py coverage.json
+python scripts/check_docs.py
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.18-py3-none-any.whl
+```
+
+### 后续计划
+
+使用同一真实问题和真实 Provider 重新运行 Interactive CLI，确认 `convergence.finalization_context_built` 后直接得到自然语言回答；若仍失败，只依据新的 durable Event 和响应事实继续优化，不新增无证据的协议分支。
+
+---
+<a id="e2026-08-19-009"></a>
+## E2026-08-19-009：v0.8.17 DSML Variant Guard
+
+- **完成时间**：2026-08-19
+- **状态**：✅ stable
+- **类型**：bugfix
+- **影响范围**：
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_runtime.py`
+  - `tests/test_api.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0040-dsml-variant-detection.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0040](./adr/0040-dsml-variant-detection.md)
+
+### 变更摘要
+
+修复 v0.8.16 DSML Guard 被真实模型的 Unicode 全角双竖线输出绕过的问题。持久化 Run `run_b29171c707834365866203386194f49d` 证明 Provider 返回的是 `<｜｜DSML｜｜tool_calls>`，而不是终端渲染产生的视觉空白；旧实现因此把伪 Tool Call 写入 `model.delta`、`run.result` 并错误标记 completed。
+
+### 系统架构
+
+Finalization 协议边界保持不变：文本 Tool Call 永不执行，首次违规最多修复一次，重复违规则明确失败，Streaming 内容先缓冲再校验。DSML 检测从精确 ASCII 前缀升级为“Unicode 兼容归一化 + 有限 envelope 语法”检查，仅扩大识别层，不改变 Tool、Provider、Event 或 SQLite 公共协议。
+
+### 实现方式
+
+检测副本先执行 Unicode NFKC，将全角 `｜` 还原为 ASCII；正则 marker 允许一个或多个竖线及有限空白，并限制 tag 为 `tool_calls`、`invoke`、`parameter`。只有响应以 DSML envelope 开始、包含 invoke，且每个非空行仍满足 DSML tag 边界时才命中。原始内容不改写、不解析、不送入 Tool Executor。
+
+### 当前功能
+
+`<｜｜DSML｜｜...>`、`<||DSML||...>` 和带有限 marker 空白的纯 DSML envelope 会触发既有 detection/repair 流程。连续两次变体输出会使 Run failed；带解释正文的全角 DSML 示例保持可返回；Streaming 拼接出的变体不会进入 durable `model.delta` 或成功 `run.result`。
+
+### 已知限制
+
+检测器仍只覆盖有真实证据或明确合同的 DSML/XML/JSON envelope，不尝试识别任意 Provider 私有协议。Finalization 成功流仍以完整缓冲后单个 delta 发布。纯协议 envelope 教学请求若恰好进入自动 finalization，仍可能被保守拦截。
+
+### 测试与验收
+
+新增真实全角双竖线 DSML、ASCII spaced/double-pipe DSML、连续两次变体违规、全角协议解释反例及 Streaming 分片变体回归；验证非法内容不会成为成功结果。完整测试结果为 `329 passed`；总体 coverage 为 `84.53%`，core line coverage 为 `91.46%`，core branch coverage 为 `80.53%`；Ruff、Mypy strict、文档门禁、coverage 门禁、sdist/Wheel 构建和干净虚拟环境发行验证通过。
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check --no-cache src tests scripts
+.\.venv\Scripts\python.exe -m mypy src/agent_runtime
+.\.venv\Scripts\python.exe -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -q
+.\.venv\Scripts\python.exe scripts/check_coverage.py coverage.json
+python scripts/check_docs.py
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.17-py3-none-any.whl
+```
+
+### 后续计划
+
+使用同一真实问题重新运行 Interactive CLI，确认模型最终返回上下文组织说明而非文本 Tool Call；在该问题稳定通过前，不扩展新的 Tool 或编排功能。
+
+---
+<a id="e2026-08-19-008"></a>
+## E2026-08-19-008：v0.8.16 Textual Tool-call Guard
+
+- **完成时间**：2026-08-19
+- **状态**：✅ stable
+- **类型**：bugfix
+- **影响范围**：
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/interactive/renderer.py`
+  - `src/agent_runtime/lab/explanations.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `src/agent_runtime/version.py`
+  - `tests/test_runtime.py`
+  - `tests/test_interactive.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0039-textual-tool-call-guard.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0039](./adr/0039-textual-tool-call-guard.md)
+
+### 变更摘要
+
+修复模型在 no-progress finalization 中绕过结构化 Tool Call 字段、把 DSML/XML/JSON 调用协议作为普通文本输出，导致 Runtime 将伪 Tool Call 当作最终答案并错误标记 Run completed 的问题。
+
+### 系统架构
+
+Finalization 响应在进入 Assistant Message、Step 和 Run 终态前新增协议完整性边界。Runtime 只识别主要或完整由 Tool envelope 构成的文本，不执行其中动作；首次命中进入一次有界 repair，第二次命中转为明确 Provider 协议失败。Finalization Streaming 在校验前由 Runtime 缓冲，通过后再发布单个 durable `model.delta`，防止无效 DSML/XML/JSON 先泄漏到 CLI、SSE 或 Learning Console。
+
+### 实现方式
+
+新增 DSML、XML 和已知 Tool JSON envelope 的保守检测器。`_request_finalization_model()` 始终使用 `tools=[]`，检测后写入 `convergence.textual_tool_call_detected`，保存 `convergence.finalization_repair_requested` Checkpoint，追加 system repair note 和原始 user request，再请求一次纯自然语言答案。修复严格限制为一次；连续违规抛出 `ProviderProtocolError`。Interactive CLI 显示确定性修复提示，Learning Console 为 detection/repair Event 提供解释和状态投影。
+
+### 当前功能
+
+模型把 Tool Call 序列化为文本时，Runtime 不执行 Tool、不保存伪答案、不错误完成 Run。偶发一次协议漂移可自动恢复；持续违规会留下两个 detection Event、一个 repair Event 和明确失败原因。正文中仅解释 `<tool_call>`、普通 JSON 代码块或带额外解释字段的示例不会被误判。Streaming Provider 的无效内容在校验前不会发布。
+
+### 已知限制
+
+Finalization 的流式答案改为完整缓冲后一次发布，失去最后一轮逐 token 体验。自动 repair 会额外消耗一次模型调用。检测器有意保守，不尝试覆盖任意未知私有协议；纯 Tool envelope 教学请求若进入自动 finalization 可能被拦截。
+
+### 测试与验收
+
+新增 DSML、XML、直接 JSON、OpenAI-like JSON、连续违规、协议解释反例、普通 JSON 反例和 Streaming 缓冲修复测试；同步覆盖 CLI 修复提示和 Learning Console Event 解释。完整测试结果为 `326 passed`；总体 coverage 为 `84.52%`，core line coverage 为 `91.45%`，core branch coverage 为 `80.53%`；Ruff、Mypy strict、文档门禁、coverage 门禁、sdist/Wheel 构建和干净虚拟环境发行验证通过。
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check --no-cache src tests scripts
+.\.venv\Scripts\python.exe -m mypy src/agent_runtime
+.\.venv\Scripts\python.exe -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -q
+.\.venv\Scripts\python.exe scripts/check_coverage.py coverage.json
+python scripts/check_docs.py
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.16-py3-none-any.whl
+```
+
+### 后续计划
+
+继续基于真实模型复测解释任务和长检查任务；下一阶段只处理现有修改任务的有限修复回合与明确阻塞报告，不扩展新业务 Tool。
+
+---
+<a id="e2026-08-19-007"></a>
+## E2026-08-19-007：v0.8.15 Finalization Context Integrity
+
+- **完成时间**：2026-08-19
+- **状态**：✅ stable
+- **类型**：bugfix
+- **影响范围**：
+  - `src/agent_runtime/context.py`
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_context_memory.py`
+  - `tests/test_runtime.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0038-finalization-context-integrity.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0038](./adr/0038-finalization-context-integrity.md)
+
+### 变更摘要
+
+修复 no-progress finalization 已成功阻止重复检查，但最终模型偶尔声称看不到原始用户请求、并为纯解释问题输出无关文件修改状态的问题。当前 Run 的 durable `run.input` 现在具有独立的 Context 完整性合同；最终无 Tool 请求会重新聚焦确切原问题。
+
+### 系统架构
+
+Runtime 为当前请求和 finalization 请求重申使用专用 message name，ContextBuilder 将对应消息组固定为 pinned。它们不会被历史摘要省略，也不会在可选内容压缩时截断。该设计不增加 Event、SQLite schema 或公共 Provider/Tool 协议；旧 Checkpoint 在加载时从 durable Run 补齐标记。
+
+### 实现方式
+
+`_initial_messages()` 标记当前 Run 的 user message；`_build_model_context()` 在每次 Provider 请求前校验该消息存在；`_load_messages()` 兼容未带标记的历史 Checkpoint。进入 finalization 时，Runtime 先写入收敛 system note，再追加一条 role 保持为 `user`、内容等于 `run.input` 的尾部重申，并继续使用 `tools=[]`。原始用户文本不会被复制到 system role。finalization note 移除默认的 workspace-change 模板，只要求回答原问题并准确陈述实际动作。
+
+### 当前功能
+
+即使存在 Session 历史、多个 Tool Call/Result、Context Summary 或恢复旧 Checkpoint，最终模型请求仍包含完整当前用户问题。解释型任务不会再被 Runtime 提示诱导输出 `No files were modified`；模型也收到明确约束，不得声称用户请求不可见。ADR-0037 的证据感知 no-progress、Tool 禁用和协议绕过保护保持不变。
+
+### 已知限制
+
+为了不静默改变用户目标，极长 `run.input` 即使导致 Context 超预算也保持完整；Provider 的真实上下文上限仍由调用方配置。finalization 会有意重复一次原始 user message，以换取末尾聚焦和恢复确定性。Runtime 只能保证请求进入 Provider 消息，不能保证任意模型永远正确理解答案。
+
+### 测试与验收
+
+新增 Context 压缩下当前请求不丢失、不截断，以及 finalization 同时包含 pinned 原始请求、尾部 user 重申、`tools=[]` 和去除 workspace-change 模板的回归测试。完整测试结果为 `314 passed`；总体 coverage 为 `84.53%`，core line coverage 为 `91.51%`，core branch coverage 为 `80.66%`；Ruff、Mypy strict、文档门禁、coverage 门禁、sdist/Wheel 构建和干净虚拟环境发行验证通过。
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check --no-cache src tests scripts
+.\.venv\Scripts\python.exe -m mypy src/agent_runtime
+.\.venv\Scripts\python.exe -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -q
+.\.venv\Scripts\python.exe scripts/check_coverage.py coverage.json
+python scripts/check_docs.py
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.15-py3-none-any.whl
+```
+
+### 后续计划
+
+使用真实模型重跑“一次模型调用完整的请求消息是什么样的”等解释型问题，观察总 Tool 调用数和最终回答准确性；在不降低证据充分性的前提下，再通过 Eval 校准 warning/finalization 默认阈值。
+
+---
+<a id="e2026-08-19-006"></a>
+## E2026-08-19-006：v0.8.14 Evidence-aware No-progress Guard
+
+- **完成时间**：2026-08-19
+- **状态**：✅ stable
+- **类型**：improvement
+- **影响范围**：
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/storage.py`
+  - `src/agent_runtime/tools.py`
+  - `src/agent_runtime/coding_tools.py`
+  - `src/agent_runtime/interactive/renderer.py`
+  - `src/agent_runtime/lab/explanations.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_runtime.py`
+  - `tests/test_coding_tools.py`
+  - `tests/test_contract_edges.py`
+  - `tests/test_interactive.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0037-evidence-aware-convergence.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0037](./adr/0037-evidence-aware-convergence.md)
+
+### 变更摘要
+
+解决真实模型通过不同 query、不同路径或高度重叠行范围反复检查，最终触发 `Run reached its maximum ... model steps` 的问题。Runtime 现在按搜索命中、文件行区间、Artifact 字符区间和其他只读结果判断是否获得新证据；进展不足时先提示收敛，达到边界后发起一次不暴露 Tool 的最终综合。
+
+### 系统架构
+
+在现有 `tool.reused` 精确调用复用之上增加由 durable ToolExecution 派生的证据账本，不增加 SQLite schema。`convergence.warning` 和 `convergence.finalization_requested` 作为 durable Event 记录原因、检查次数与连续 no-progress 次数；Checkpoint 保存 Runtime 注入的 system note，因此重启后可以从持久化事实重建收敛状态。副作用 Tool 会重置当前证据账本，并阻止自动无工具 finalization。
+
+### 实现方式
+
+`search_text` 以 `(path, line)` 作为证据，`read_file_lines` 以 `(path, sha256)` 下的新行区间作为证据，`list_files`、`read_artifact` 和其他白名单只读 Tool 使用对应集合、区间或稳定摘要。默认在 10 次 inspection 或连续 2 次无进展时警告，在 14 次 inspection、连续 3 次无进展或即将达到 `max_steps` 时 finalization。最终请求通过 `tools_override=[]` 发送；Provider 即使违规返回 Tool Call 也不会执行。无扩展名路径可建议同 stem 文件，`search_text(max_lines=...)` 会提示改用 `max_results` 后再用 `read_file_lines`。
+
+### 当前功能
+
+不同参数但返回相同搜索命中、完全重叠文件区间、空结果和失败检查会累计 no-progress。Interactive CLI 显示 `Inspection is adding little new evidence` 或 `Inspection budget reached`；verbose 模式附带次数和原因。Learning Console 为两个新 Event 提供中文教学解释和 finalizing 状态投影。只读解释任务会优先基于已收集证据回答，而不是耗尽模型步骤后失败。
+
+### 已知限制
+
+证据判断是确定性的结构化启发式，不尝试理解自然语言语义；`search_text` 相同行号内容发生变化时依赖副作用屏障或新的 Run。自动无工具 finalization 仅用于当前 Run 尚未出现副作用 Tool 的检查流程；修改任务不会被强制截断，仍由完成证据和 `max_steps` 保护。Provider 在禁用 Tool 后仍只返回 Tool Call 且没有文本时，Run 会以协议错误失败而不是执行该调用。
+
+### 测试与验收
+
+新增不同 query 相同命中、重叠行范围、副作用屏障、禁用 Tool 绕过、路径 stem 建议、参数纠错、配置边界、CLI 展示和 Learning Console 教学投影测试。完整测试结果为 `313 passed`；总体 coverage 为 `84.54%`，core line coverage 为 `91.53%`，core branch coverage 为 `80.69%`；Ruff、Mypy strict、文档门禁、coverage 门禁、sdist/Wheel 构建和干净虚拟环境发行验证通过。
+
+```powershell
+python -m pytest tests/test_runtime.py tests/test_coding_tools.py tests/test_contract_edges.py tests/test_interactive.py tests/test_lab_api.py -q
+python -m ruff check --no-cache src tests scripts
+python -m mypy src/agent_runtime
+python scripts/check_docs.py
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -q
+python scripts/check_coverage.py coverage.json
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.14-py3-none-any.whl
+```
+
+### 后续计划
+
+继续以真实 CLI 失败记录校准默认阈值和证据类型；下一步优先处理有副作用修改任务中的有限修复回合与明确阻塞报告，不新增业务 Tool、Provider 或分布式能力。
+
+---
+<a id="e2026-08-19-005"></a>
+## E2026-08-19-005：v0.8.13 Agent Loop Convergence
+
+- **完成时间**：2026-08-19
+- **状态**：✅ stable
+- **类型**：improvement
+- **影响范围**：
+  - `src/agent_runtime/runtime.py`
+  - `src/agent_runtime/tools.py`
+  - `src/agent_runtime/coding_tools.py`
+  - `src/agent_runtime/workspace_context.py`
+  - `src/agent_runtime/interactive/renderer.py`
+  - `src/agent_runtime/lab/explanations.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_runtime.py`
+  - `tests/test_tools.py`
+  - `tests/test_coding_tools.py`
+  - `tests/test_interactive.py`
+  - `tests/test_workspace_context.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0036-read-only-tool-convergence.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0036](./adr/0036-read-only-tool-convergence.md)
+
+### 变更摘要
+
+收敛真实模型在简单代码解释任务中的重复 Tool Loop：完全相同的本地只读 Tool 调用复用当前 Run 的 durable result；错误参数返回允许字段，错误路径返回 Workspace 相对候选；compact 终端减少 inspection Tool requested/completed 双行噪声。
+
+### 系统架构
+
+Runtime Kernel 在 Tool Handler 前增加保守的当前 Run 只读结果复用判断。复用不引入跨 Run cache 或 SQLite migration，仍创建 ToolExecution、Checkpoint、Tool Call 计数和 durable `tool.reused` Event。任何副作用 Tool 都是失效屏障，保证 Workspace 变化后重新读取。Learning Console 将 `tool.reused` 作为独立可解释事件。
+
+### 实现方式
+
+仅对白名单 `calculator`、`git_status`、`git_diff`、`list_files`、`read_artifact`、`read_file_lines`、`read_text_file` 和 `search_text` 查找同名、arguments 完全相同、已 completed 的候选。复用后把原结果和 convergence note 返回模型而不调用 handler。Tool schema 校验补充 allowed arguments；不存在的 search/read 路径执行有界候选查找。内建 Coding Protocol 要求一次目标搜索、最小范围读取、复用已有证据并及时停止。compact Renderer 隐藏常见 inspection requested 行，verbose 保持完整生命周期。
+
+### 当前功能
+
+相同只读 Tool Call 在无副作用写入间隔时只执行一次 handler，模型第二次请求显示 `tool.reused` 并继续保留审计事实。错误 `max_lines` 等未知参数会列出合法字段；错误 `runtime.py` 路径会建议 `src/agent_runtime/runtime.py` 等候选。终端默认只显示有信息增量的 completed、failed 或 reused 行。
+
+### 已知限制
+
+复用只按 Tool 名和完全相同 arguments 判断，不识别语义等价请求；白名单外 Tool 不复用。任何副作用 Tool 后都重新执行读取。候选路径最多五个且只做有界文件名匹配。`tool.reused` 是独立 point event，不形成新的 requested-started-completed span。
+
+### 测试与验收
+
+新增只读 Tool Handler 单次执行、`tool.reused` 持久化、convergence note、allowed arguments、错误路径候选、compact inspection 降噪、reused 投影和 Coding Protocol 回归测试。完整测试结果为 `304 passed`；总体 coverage 为 `84.41%`，core line coverage 为 `91.50%`，core branch coverage 为 `80.61%`；Ruff、Mypy strict、文档门禁、coverage 门禁、sdist/Wheel 构建和干净虚拟环境发行验证通过。
+
+```powershell
+python -m pytest tests/test_runtime.py tests/test_tools.py tests/test_coding_tools.py tests/test_interactive.py tests/test_workspace_context.py -q
+python -m ruff check --no-cache src tests scripts
+python -m mypy src/agent_runtime
+python scripts/check_docs.py
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -q
+python scripts/check_coverage.py coverage.json
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.13-py3-none-any.whl
+```
+
+### 后续计划
+
+继续从真实 Interactive CLI 运行记录识别 no-progress 模式；只有出现无法通过相同调用复用和明确错误反馈解决的循环时，才增加有界重复模式预算，不扩展业务 Tool。
+
+---
+<a id="e2026-08-19-004"></a>
+## E2026-08-19-004：v0.8.12 Validation Phase and Recovered Tool Errors
+
+- **完成时间**：2026-08-19
+- **状态**：✅ stable
+- **类型**：fix
+- **影响范围**：
+  - `src/agent_runtime/completion.py`
+  - `src/agent_runtime/interactive/renderer.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_completion.py`
+  - `tests/test_interactive.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0035-interactive-cli-execution-transparency.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)
+
+### 变更摘要
+
+修复已知验证脚本被错误显示为通用执行动作，以及同名 Tool 先失败后成功仍导致 `Task incomplete` 的终端误报。
+
+### 系统架构
+
+Runtime Kernel、ToolExecution、Completion Evidence、Event schema 和 SQLite schema 保持不变。Completion Policy 与 Interactive Renderer 复用同一个确定性 validation classifier；可恢复错误只在 CLI Adapter 中根据当前轮 durable Tool Event 顺序派生。
+
+### 实现方式
+
+新增公共内部 `looks_like_validation_command()`，统一识别 Python module、常见语言检查命令和四个项目内建验证脚本。Renderer 记录本轮同名 Tool 的失败与后续成功：最后结果成功时标记 recovered，之后再次失败则重新视为 unresolved。durable `failed_tools` 仍保留真实历史失败，不做迁移或回写。
+
+### 当前功能
+
+`python scripts/check_docs.py`、`check_coverage.py`、`verify_distribution.py` 和 `verify_local_runtime.py` 会进入 `Verifying changes`。只读任务中已被后续成功调用恢复的 Tool 错误显示为轻量 `Recovered tool error`，不会继续触发 `Task incomplete`；未恢复或最后一次仍失败的 Tool 继续显示 Needs attention。
+
+### 已知限制
+
+validation classifier 仍是保守 allowlist，自定义项目验证脚本需要显式加入规则。恢复判断按 Tool 名和当前轮 Event 顺序投影，不区分同名 Tool 的业务参数语义。Runtime 没有结构化 clarification Event，因此 CLI 不从模型自由文本猜测等待澄清状态。
+
+### 测试与验收
+
+新增直接 Python 验证脚本分类、Renderer 验证阶段、同名 Tool 失败后成功以及失败—成功—再次失败回归测试。完整测试结果为 `301 passed`；总体 coverage 为 `84.50%`，core line coverage 为 `91.49%`，core branch coverage 为 `80.64%`；Ruff、Mypy strict、文档门禁、构建和干净虚拟环境 Wheel 发行验证通过。
+
+```powershell
+python -m pytest tests/test_completion.py tests/test_interactive.py -q
+python -m ruff check src tests scripts
+python -m mypy src/agent_runtime
+python scripts/check_docs.py
+python -m pytest -q
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.12-py3-none-any.whl
+```
+
+### 后续计划
+
+继续进入 Agent Loop Convergence，优先处理重复 Tool 调用、no-progress 检测和有限修复次数，不增加新的业务 Tool 或分布式能力。
+
+---
+
+<a id="e2026-08-19-003"></a>
+## E2026-08-19-003：v0.8.11 Interactive CLI Approval Continuity
+
+- **完成时间**：2026-08-19
+- **状态**：✅ stable
+- **类型**：fix
+- **影响范围**：
+  - `src/agent_runtime/interactive/shell.py`
+  - `src/agent_runtime/interactive/renderer.py`
+  - `src/agent_runtime/workspace_context.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_interactive.py`
+  - `tests/test_workspace_context.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0035-interactive-cli-execution-transparency.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)
+
+### 变更摘要
+
+修复 Interactive CLI 在批准 Tool 后过早返回 `You >` 的竞态，并消除模型口头确认与 Runtime Approval 的重复确认。失败且未产生写入的修改尝试现在显示为 `Task incomplete`；精确替换审批使用聚焦 `- old` / `+ new` 预览。
+
+### 系统架构
+
+Runtime 状态机、Approval、ToolExecution、Event schema、SQLite schema 和 Completion Evidence 合同保持不变。修复位于 Interactive CLI Adapter：Shell 在 `approval.resolved` 后启动 `runtime.resume()`，等待 Run 离开瞬时 `waiting_for_approval`，再从最后 durable sequence 继续消费同一 Run。Renderer 只改变终端投影，Workspace Protocol 只改变模型使用现有 Tool Approval 的方式。
+
+### 实现方式
+
+新增有界的 resume activation 等待，避免 `pending_approval` 已清空但 Run 尚未切换为 running 时结束事件循环。内建 Coding Protocol 将 Runtime Approval 定义为副作用 Tool 的唯一确认步骤，要求模型直接发起 Tool Call。Renderer 对 `read_only + failed/rejected` 派生 `incomplete`，隐藏无意义的 diff/validation not required 行；old/new 预览通过公共前后缀定位实际变化，并保留有限上下文。
+
+### 当前功能
+
+批准或拒绝 Tool 后，CLI 会继续显示 `approval.resolved`、Tool 结果、后续验证、最终 Assistant 回答、Task Summary 和 Run footer，之后才重新显示输入提示。用户只需在 Runtime 审批卡片确认一次。失败且没有应用修改时会明确看到 `No changes applied`，长句中的细小标点或局部替换也更容易在审批前识别。
+
+### 已知限制
+
+Approval 仍只支持 allow once 或 deny，不提供会话级规则缓存。Coding Protocol 可以显著减少模型口头确认，但外部自定义 System Prompt 仍可能要求额外确认。聚焦 diff 是有界文本预览，不是完整 unified diff；完整变更仍应在执行后通过 `git_diff` 检查。
+
+### 测试与验收
+
+新增 Approval 后 `Approved → tool.completed → final answer → Run footer` 顺序回归、单次 Runtime Approval Prompt 合同、失败只读任务 incomplete 投影以及长公共前缀的聚焦差异测试。完整测试结果为 `295 passed`；总体 coverage 为 `84.40%`，core line coverage 为 `91.50%`，core branch coverage 为 `80.67%`；Ruff、Mypy strict、文档门禁、构建和干净虚拟环境 Wheel 发行验证通过。
+
+```powershell
+python -m pytest tests/test_interactive.py tests/test_workspace_context.py -q
+python -m ruff check src tests scripts
+python -m mypy src/agent_runtime
+python scripts/check_docs.py
+python -m pytest -q
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.11-py3-none-any.whl
+```
+
+### 后续计划
+
+继续进入 Agent Loop Convergence，优先处理重复 Tool 调用、no-progress 检测和有限修复次数，不扩展新的 Provider 或分布式能力。
+
+---
+
+<a id="e2026-08-19-002"></a>
+## E2026-08-19-002：v0.8.10 Interactive CLI Execution Transparency
+
+- **完成时间**：2026-08-19
+- **状态**：✅ stable
+- **类型**：improvement
+- **影响范围**：
+  - `src/agent_runtime/interactive/renderer.py`
+  - `src/agent_runtime/interactive/shell.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_interactive.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/0035-interactive-cli-execution-transparency.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)
+
+### 变更摘要
+
+将 Interactive CLI 从“显示 Tool 名和结果”升级为可解释的本地 Coding Task 投影。CLI 现在会以 append-only 方式展示 Inspecting、Editing、Verifying 和通用 Executing 阶段；Approval 在用户输入 y/n 前显示命令、工作目录、超时、文件、编辑数量、有限 old/new 预览及 capability/sandbox 信息；任务结束时以 durable Completion Evidence 输出变更文件、Git diff、validation 命令、失败和未满足条件。
+
+### 系统架构
+
+Runtime Kernel、Provider、Tool Protocol、Event schema、SQLite schema 和恢复语义均保持不变。`EventRenderer` 只消费既有 `tool.requested`、`approval.requested`、`approval.resolved`、`completion.verification_requested` 和 `completion.evidence` Event，并将它们派生为终端阶段、审批卡片和结构化摘要。展示状态不写入 Session、Run 或 Event Log，durable Event sequence 仍是事实来源。
+
+### 实现方式
+
+新增 `ExecutionPhase` 与确定性 Tool 分类：文件发现/搜索/读取进入 Inspecting，写入与 Patch 进入 Editing，`git_diff` 和已识别测试/静态检查命令进入 Verifying，其他 Tool 进入 Executing。阶段只在转换时输出一次。Approval 使用 Tool-aware formatter；compact 不展开完整文件正文、完整 Patch 或环境变量值，verbose 可追加有界 JSON。Renderer 通过 tool execution id 关联 `approval.resolved` 并显示 Approved/Denied。Completion Evidence 使用有界 Rich Panel 分离模型结论与 Runtime 事实，Run footer 增加执行耗时。
+
+### 当前功能
+
+用户可以在 `agent-runtime chat` 中直观看到 Agent 当前处于检查、修改还是验证阶段；批准 `run_process` 前能看到 argv、cwd、timeout 和安全约束，批准文件修改前能看到目标文件、编辑数量和有限预览。完成修改任务后，终端列出 changed files、Git diff 检查状态、实际 validation command/exit code，以及 unmet、failed 或 rejected Tool。`--compact`、`--verbose`、`/display` 和 `--print` 合同保持兼容。
+
+### 已知限制
+
+阶段是基于 Tool 名和已知 validation 命令的确定性投影，不等同于模型完整计划；自定义 Tool 默认显示 `Executing action`。compact Approval 有意省略完整正文、Patch 和环境变量值。只读任务如果没有 Completion Evidence，不额外输出变更摘要。当前审批仍只支持 allow once 或 deny，没有会话级“批准同类命令”能力。
+
+### 测试与验收
+
+新增执行阶段只在转换时出现、Python validation 命令识别、非 validation 进程避免误分类、process Approval 隐藏环境变量值、Patch Approval 有界预览、approval.resolved 投影和 verified/unverified Task Summary 测试。完整测试结果为 `293 passed`；总体 coverage 为 `84.21%`，core line coverage 为 `91.50%`，core branch coverage 为 `80.67%`；Ruff、Mypy strict、文档门禁、构建和干净虚拟环境 Wheel 发行验证通过。版本、API health、诊断包与 Learning Console 同步升级为 `0.8.10`。
+
+```powershell
+python -m pytest tests/test_interactive.py -q
+python -m ruff check src tests scripts
+python -m mypy src/agent_runtime
+python scripts/check_docs.py
+python -m pytest -q
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.10-py3-none-any.whl
+```
+
+### 后续计划
+
+下一阶段优先建设 Agent Loop Convergence：重复 Tool 调用检测、no-progress 识别、验证失败后的有限修复次数和明确阻塞报告；不新增 Provider、多 Agent 编排或分布式能力。
+
+---
+
+<a id="e2026-08-19-001"></a>
+## E2026-08-19-001：修复 Interactive CLI Streaming Markdown 重复输出
+
+- **完成时间**：2026-08-19
+- **状态**：✅ stable
+- **类型**：fix
+- **影响范围**：
+  - `src/agent_runtime/interactive/renderer.py`
+  - `tests/test_interactive.py`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/0034-interactive-cli-presentation.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0034](./adr/0034-interactive-cli-presentation.md)
+
+### 变更摘要
+
+修复 Windows PowerShell 等终端中 Assistant 回答重复出现的问题。重复内容不是 Model Provider 多次生成，也不是 durable `model.delta` 重复写入，而是 Rich Live 将累计 Markdown Buffer 多次完整重绘后，终端未能可靠覆盖旧帧，导致每一帧都被追加保留。
+
+### 系统架构
+
+Runtime Kernel、Provider、Event schema、SQLite Event Log 和 `model.delta` durable 语义保持不变。修复仅位于 Interactive CLI 投影层：Renderer 继续缓冲跨 delta Markdown，但不再重写已经输出的终端行，而是在段落空行或完整代码围栏形成稳定 Markdown 块后按顺序追加一次；Tool、Approval、完成证据或 Run 终态会刷新剩余内容。
+
+### 实现方式
+
+移除 `EventRenderer` 对 Rich `Live`、刷新节流和 ANSI 光标回退的依赖。新增稳定 Markdown 前缀识别：普通内容只在空行边界刷新，fenced code block 必须等待匹配的结束围栏，未完成尾部继续留在内存。每个已完成块只调用一次 Rich Markdown 渲染，避免终端宽度、中文全角字符或宿主 ANSI 兼容性差异造成累计帧重复。
+
+### 当前功能
+
+Interactive CLI 仍可逐段看到模型输出，标题、列表和代码围栏继续使用 Rich Markdown 展示；完整段落可能在空行、代码围栏闭合或 Assistant 内容段结束时出现。compact/verbose Tool 展示、`--print` 最终结果合同和 durable Event 查询方式不变。
+
+### 已知限制
+
+为了优先保证本地终端输出确定性，当前不再提供逐 token 原位置重绘。没有空行的超长单段回答会在 Assistant 内容段结束时一次性显示；Markdown 表格和跨块结构也可能延迟到稳定边界后显示。
+
+### 测试与验收
+
+新增强制 TTY 下“每个 Markdown 块只出现一次”的回归断言、禁止 cursor-up/erase-line 控制序列断言，以及跨 delta fenced code block 只渲染一次的测试。针对性 Interactive CLI 测试与完整测试集均通过，当前为 `288 passed`；Ruff、Mypy strict 和文档演进检查通过。
+
+```powershell
+python -m pytest tests/test_interactive.py -q
+python -m ruff check src tests scripts
+python -m mypy src/agent_runtime
+python scripts/check_docs.py
+```
+
+### 后续计划
+
+继续以 append-only 输出作为默认稳定合同；未来若重新提供原位置逐 token 动态刷新，应作为显式实验模式，并使用真实终端屏幕状态模拟器验证最终屏幕，而不能只检查原始 ANSI 字节流。
+
+---
+
+<a id="e2026-08-18-003"></a>
+## E2026-08-18-003：v0.8.9 Interactive CLI Presentation
+
+- **完成时间**：2026-08-18
+- **状态**：✅ stable
+- **类型**：improvement
+- **影响范围**：
+  - `src/agent_runtime/interactive/renderer.py`
+  - `src/agent_runtime/interactive/shell.py`
+  - `src/agent_runtime/interactive/commands.py`
+  - `src/agent_runtime/interactive/__init__.py`
+  - `src/agent_runtime/cli.py`
+  - `tests/test_interactive.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/0034-interactive-cli-presentation.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0034](./adr/0034-interactive-cli-presentation.md)
+
+### 变更摘要
+
+将 Interactive CLI 从逐 `model.delta` 原样追加升级为缓冲式 Streaming Markdown。交互式 TTY 使用 Rich Live 原位置刷新完整 Markdown，代码围栏、标题、列表和强调不再以源标记占据终端；Tool 调用默认采用 compact 单行摘要，并提供 `--verbose` 与 `/display verbose` 诊断视图。`--print` 现在只输出最终 Run result，不混入中间 delta 或 Tool 状态。
+
+### 系统架构
+
+Runtime Kernel、Provider、Event schema、ToolExecution 和 SQLite 均保持不变。变化严格位于 `agent_runtime.interactive` Adapter：Renderer 合并连续 delta，按 Tool/Approval/完成证据边界结束 Assistant 内容段；TTY 用 Live 刷新，非 TTY 在段边界渲染。Display mode 只属于当前 Shell，不进入持久化 Session 或 Run 事实。
+
+### 实现方式
+
+新增 `DisplayMode.COMPACT/VERBOSE`。Compact 通过 Tool-aware summarizer 提取路径、搜索词、行范围、argv、Patch 文件数和 Artifact 路径，参数与结果限制约 180 字符；started 事件默认隐藏。Verbose 使用有界 Rich Panel/Syntax 展示 JSON 参数、多行结果和失败详情，单块最多 4000 字符。Markdown Live 刷新按 50ms、换行或围栏边界节流，结束时强制刷新完整内容。
+
+### 当前功能
+
+`agent-runtime chat` 默认 compact；可用 `--compact`、`--verbose` 或 Shell 内 `/display compact|verbose` 切换。`/status` 与 Banner 显示当前模式。交互式回答支持动态 Markdown，重定向或 `--no-color` 在内容段边界输出 Markdown；`chat -p` 只输出最终可消费文本。完整 durable Event 仍可通过 `/events`、API 或 Learning Console 检查。
+
+### 已知限制
+
+Rich Live 需要 TTY 和 ANSI 光标控制；非 TTY 与 `--no-color` 无法同时保持原位置动态刷新，因此会缓冲到 Assistant 内容段结束。长 Markdown 每次刷新需要重新解析当前段，虽然已经节流但仍有终端渲染成本。Display mode 不跨 Shell 重启持久化；compact 摘要不是完整诊断事实。
+
+### 测试与验收
+
+新增 CLI 参数互斥、`/display`、Markdown 围栏跨 delta、真实 Rich Live 分支、compact 大参数隐藏、Artifact 摘要、verbose JSON/多行结果、失败详情边界以及 print-only 最终输出测试。最终全量结果为 `287 passed`，总体 coverage 为 `83.80%`，core line coverage 为 `91.50%`，core branch coverage 为 `80.67%`；Ruff、Mypy strict 和 core coverage gate 通过。
+
+```powershell
+python scripts/check_docs.py
+python -m ruff check src tests scripts
+python -m mypy src/agent_runtime
+python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
+python scripts/check_coverage.py coverage.json
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.9-py3-none-any.whl
+```
+
+### 后续计划
+
+用真实长回答和多 Tool Coding 任务观察终端重绘成本与摘要信息密度；下一阶段优先评估 Approval 的 command/diff 预览和最终变更摘要，不改变 Runtime Kernel 或增加新编排能力。
+
+---
+
 <a id="e2026-08-18-002"></a>
 ## E2026-08-18-002：v0.8.8 Verified Task Completion
 
@@ -26,7 +797,7 @@
   - `docs/CODING_TOOLS.md`
   - `docs/adr/0033-verified-task-completion.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`8026e8c`
 - **关联 ADR**：[ADR-0033](./adr/0033-verified-task-completion.md)
 
 ### 变更摘要
@@ -56,11 +827,11 @@ Runtime Kernel 保持原有状态机和公共 Provider/Tool 协议，新增构�
 ```powershell
 python scripts/check_docs.py
 python -m ruff check src tests scripts
-python -m mypy srcgent_runtime
+python -m mypy src/agent_runtime
 python -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -p no:cacheprovider
 python scripts/check_coverage.py coverage.json
 python -m build
-python scripts/verify_distribution.py distgent_runtime-0.8.8-py3-none-any.whl
+python scripts/verify_distribution.py dist/agent_runtime-0.8.8-py3-none-any.whl
 ```
 
 ### 后续计划
@@ -92,7 +863,7 @@ python scripts/verify_distribution.py distgent_runtime-0.8.8-py3-none-any.whl
   - `docs/LOCAL_RUNTIME.md`
   - `docs/adr/0032-artifact-paging-workspace-discovery.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`8026e8c`
 - **关联 ADR**：[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)
 
 ### 变更摘要
@@ -153,7 +924,7 @@ python scripts/verify_distribution.py dist\agent_runtime-0.8.7-py3-none-any.whl
   - `docs/LOCAL_RUNTIME.md`
   - `docs/adr/0031-project-workspace-instructions.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`8026e8c`
 - **关联 ADR**：[ADR-0031](./adr/0031-project-workspace-instructions.md)
 
 ### 变更摘要
@@ -212,7 +983,7 @@ Validate the prompt behavior with real coding tasks and improve the existing loo
   - `docs/CODING_TOOLS.md`
   - `docs/adr/0030-bounded-read-batch-patch.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`8026e8c`
 - **关联 ADR**：[ADR-0030](./adr/0030-bounded-read-batch-patch.md)
 
 ### 变更摘要
@@ -271,7 +1042,7 @@ python scripts/verify_distribution.py dist
   - `scripts/verify_distribution.py`
   - `docs/CODING_TOOLS.md`
   - `docs/adr/0029-read-only-git-workspace-tools.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`8026e8c`
 - **关联 ADR**：[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)
 
 ### 变更摘要
@@ -331,7 +1102,7 @@ python -m pytest tests\test_git_tools.py -p no:cacheprovider
   - `docs/CODING_TOOLS.md`
   - `docs/adr/0028-coding-workspace-tools.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`8026e8c`
 - **关联 ADR**：[ADR-0028](./adr/0028-coding-workspace-tools.md)
 
 ### 变更摘要
@@ -400,7 +1171,7 @@ python scripts/verify_distribution.py dist
   - `docs/INTERACTIVE_CLI.md`
   - `docs/adr/0027-interactive-cli-session-history.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`8026e8c`
 - **关联 ADR**：[ADR-0027](./adr/0027-interactive-cli-session-history.md)
 
 ### 变更摘要

@@ -26,6 +26,14 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
+| [ADR-0041](./0041-fresh-finalization-context.md) | Accepted | 2026-08-19 | Finalization Tool-heavy 历史隔离与 durable evidence digest | E2026-08-19-010 |
+| [ADR-0040](./0040-dsml-variant-detection.md) | Accepted | 2026-08-19 | Unicode 兼容的 DSML 变体识别边界 | E2026-08-19-009 |
+| [ADR-0039](./0039-textual-tool-call-guard.md) | Accepted | 2026-08-19 | Finalization 文本化 Tool Call 检测与有界修复 | E2026-08-19-008 |
+| [ADR-0038](./0038-finalization-context-integrity.md) | Accepted | 2026-08-19 | Finalization 原始请求完整性与 Context pin | E2026-08-19-007 |
+| [ADR-0037](./0037-evidence-aware-convergence.md) | Accepted | 2026-08-19 | 证据感知的只读检查收敛与无工具最终综合 | E2026-08-19-006 |
+| [ADR-0036](./0036-read-only-tool-convergence.md) | Accepted | 2026-08-19 | 当前 Run 只读 Tool 结果复用与收敛边界 | E2026-08-19-005 |
+| [ADR-0035](./0035-interactive-cli-execution-transparency.md) | Accepted | 2026-08-19 | Interactive CLI 执行阶段、审批连续性、预览与事实摘要 | E2026-08-19-002、E2026-08-19-003、E2026-08-19-004 |
+| [ADR-0034](./0034-interactive-cli-presentation.md) | Accepted | 2026-08-18 | Streaming Markdown 与 compact/verbose 终端展示 | E2026-08-18-003 |
 | [ADR-0033](./0033-verified-task-completion.md) | Accepted | 2026-08-18 | 本地 Coding Run 一次性完成证据检查 | E2026-08-18-002 |
 | [ADR-0032](./0032-artifact-paging-workspace-discovery.md) | Accepted | 2026-08-18 | Artifact 分页读取与 Workspace 继续发现策略 | E2026-08-18-001 |
 | [ADR-0031](./0031-project-workspace-instructions.md) | Accepted | 2026-08-17 | 项目指令作为有界本地 Agent 上下文 | E2026-08-17-004 |

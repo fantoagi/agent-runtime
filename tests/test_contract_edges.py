@@ -61,6 +61,12 @@ def test_cancellation_token_and_runtime_config_validation(workspace: Path) -> No
         {"sqlite_busy_timeout_seconds": -1},
         {"memory_search_limit": -1},
         {"large_tool_result_chars": 127},
+        {"convergence_warning_inspection_calls": 0},
+        {
+            "convergence_warning_inspection_calls": 3,
+            "convergence_finalization_inspection_calls": 2,
+        },
+        {"convergence_no_progress_calls": 0},
     ):
         with pytest.raises(ValueError):
             RuntimeConfig(**base, **override)

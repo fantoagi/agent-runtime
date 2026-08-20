@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
-- **最近更新**：2026-08-17
-- **当前版本**：v0.8.8
-- **当前阶段**：v0.8.8 Verified Task Completion 已完成；继续通过真实本地编码任务评估 false completion 与验证成本
+- **最近更新**：2026-08-19
+- **当前版本**：v0.8.18
+- **当前阶段**：v0.8.18 Fresh Finalization Context 已完成；下一阶段用真实模型复测解释任务，并只根据 durable 失败事实继续收敛
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -53,6 +53,16 @@
 | v0.8.6 | ✅ completed | Project-aware Workspace Context | [E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004) |
 | v0.8.7 | ✅ completed | Artifact 分页读取与 Workspace 发现优化 | [E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001) |
 | v0.8.8 | ✅ completed | 修改任务完成证据、一次性验证提醒与配置误提交保护 | [E2026-08-18-002](./CHANGELOG.md#e2026-08-18-002) |
+| v0.8.9 | ✅ completed | append-only Streaming Markdown 与 compact/verbose Tool 展示（稳定性修复见 E2026-08-19-001） | [E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003) |
+| v0.8.10 | ✅ completed | 执行阶段、Tool-aware Approval 与结构化 Task Summary | [E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002) |
+| v0.8.11 | ✅ completed | Approval 恢复连续事件流、单次确认、聚焦差异与 incomplete 摘要 | [E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003) |
+| v0.8.12 | ✅ completed | 统一 validation 阶段分类与同名 Tool 可恢复错误投影 | [E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004) |
+| v0.8.13 | ✅ completed | 相同只读 Tool 结果复用、参数/路径修复提示与 compact 降噪 | [E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005) |
+| v0.8.14 | ✅ completed | 证据感知 no-progress、无工具最终综合、stem 路径与参数纠错 | [E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006) |
+| v0.8.15 | ✅ completed | 当前请求 pin、finalization 原始问题重申与解释任务去噪 | [E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007) |
+| v0.8.16 | ✅ completed | 文本化 Tool Call 检测、一次有界修复与流式输出隔离 | [E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008) |
+| v0.8.17 | ✅ completed | Unicode/重复竖线 DSML 变体检测与协议绕过修复 | [E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009) |
+| v0.8.18 | ✅ completed | Fresh Finalization Context、durable evidence digest 与 Tool-heavy 历史隔离 | [E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010) |
 | v0.9 | ⏸ deferred | 分布式 Worker、Queue 与 Lease | — |
 | v0.10 | ⏸ deferred | 多租户、权限、预算和生产治理 | — |
 | v1.0 | ⏸ deferred | 稳定 Runtime Contract 与生产发布 | — |
@@ -243,7 +253,7 @@
 
 - **状态**：✅ completed
 - **前置版本**：v0.7.12
-- **完成阶段**：v0.8.0 [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、v0.8.1 [E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、v0.8.2 [E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、v0.8.3 [E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、v0.8.4 [E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、v0.8.5 [E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、v0.8.6 [E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)、v0.8.7 [E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、v0.8.8 [E2026-08-18-002](./CHANGELOG.md#e2026-08-18-002)
+- **完成阶段**：v0.8.0 [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、v0.8.1 [E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、v0.8.2 [E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、v0.8.3 [E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、v0.8.4 [E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、v0.8.5 [E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、v0.8.6 [E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)、v0.8.7 [E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、v0.8.8 [E2026-08-18-002](./CHANGELOG.md#e2026-08-18-002)、v0.8.9 [E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)、v0.8.10 [E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、v0.8.11 [E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、v0.8.12 [E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、v0.8.13 [E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、v0.8.14 [E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、v0.8.15 [E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、v0.8.16 [E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、v0.8.17 [E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、v0.8.18 [E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)
 - **目标**：在单机、单用户、本地可信环境中，既能受限执行本地进程，又能通过统一配置和 CLI 长期、稳定、可恢复地运行 Runtime。
 
 ### 已完成范围
@@ -257,6 +267,16 @@
 - v0.8.6：有界加载 `AGENTS.md/CLAUDE.md`、内建 Coding Protocol 和 AgentDefinition Prompt 快照。
 - v0.8.7：`read_artifact` 同 Run 分页读取、防递归 Artifact 化、发现噪声过滤和截断后继续策略。
 - v0.8.8：可选 Completion Policy、修改任务一次性验证提醒、durable completion evidence、CLI 证据摘要和本地配置误提交保护。
+- v0.8.9：append-only Streaming Markdown、默认 compact、可切换 verbose、Tool-aware 摘要和 print-only 最终输出。
+- v0.8.10：Inspecting/Editing/Verifying 阶段、命令/文件 Approval 预览、Approved/Denied 投影和结构化 Task Summary。
+- v0.8.11：Approval 后继续消费同一 Run、避免重复口头确认、聚焦 `- old/+ new` 预览和失败只读任务的 incomplete 投影。
+- v0.8.12：Completion 与 Renderer 共用 validation classifier；已恢复的同名 Tool 错误不再误报 incomplete，最后一次失败仍保持显式告警。
+- v0.8.13：完全相同的白名单只读 Tool 复用 durable result；参数错误给出允许字段，错误路径给出候选，compact inspection 生命周期降噪。
+- v0.8.14：按搜索命中和读取区间判断新证据；warning 后以无 Tool 模型请求强制综合，并增强路径 stem/参数修正提示。
+- v0.8.15：当前 Run 的 durable 原始请求在 ContextBuilder 中不可被压缩或截断；finalization 以最后一个 user message 重申原问题，并移除无关的修改任务模板措辞。
+- v0.8.16：finalization 拒绝把 DSML/XML/已知 Tool JSON 文本当作答案；不执行伪调用，缓冲 Streaming 输出并最多修复一次。
+- v0.8.17：DSML 检测兼容全角 Unicode、重复竖线和有限 marker 空白；只规范化检测副本，不执行或改写原始文本。
+- v0.8.18：最终综合改用隔离上下文和 durable evidence digest；原 Tool-heavy 消息不再传给 Provider，一次修复也不回退到旧上下文。
 - FastAPI 默认 `app` 惰性构造，import Adapter 不再产生隐藏 Runtime 或 SQLite 副作用。
 - Wheel 验证覆盖本地初始化、状态、服务健康、重复 Owner 拒绝和重启。
 
@@ -280,6 +300,7 @@
 - [ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)：配置驱动本地启动与单执行 Owner。
 - [ADR-0027](./adr/0027-interactive-cli-session-history.md)：Interactive CLI Adapter 与显式 Session 历史。
 - [ADR-0028](./adr/0028-coding-workspace-tools.md)：结构化 Coding Tool、精确替换和 argv 进程执行。
+- [ADR-0034](./adr/0034-interactive-cli-presentation.md)：缓冲式 Streaming Markdown 与分层终端展示。
 
 ## v0.9：分布式 Worker、Queue 与 Lease
 

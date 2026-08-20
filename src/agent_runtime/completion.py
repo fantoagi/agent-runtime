@@ -72,6 +72,14 @@ _DIRECT_VALIDATION_COMMANDS = frozenset(
 _PYTHON_VALIDATION_MODULES = frozenset(
     {"mypy", "pyright", "pytest", "ruff", "unittest"}
 )
+_PYTHON_VALIDATION_SCRIPTS = frozenset(
+    {
+        "check_coverage.py",
+        "check_docs.py",
+        "verify_distribution.py",
+        "verify_local_runtime.py",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,7 +267,7 @@ def _validation_evidence(execution: ToolExecution) -> ValidationEvidence | None:
     ):
         return None
     argv = tuple(raw_argv)
-    if not _looks_like_validation(argv):
+    if not looks_like_validation_command(argv):
         return None
     data = execution.result_data or {}
     raw_exit_code = data.get("exit_code")
@@ -272,14 +280,20 @@ def _validation_evidence(execution: ToolExecution) -> ValidationEvidence | None:
     )
 
 
-def _looks_like_validation(argv: tuple[str, ...]) -> bool:
-    executable = Path(argv[0]).name.casefold()
+def looks_like_validation_command(argv: Sequence[str]) -> bool:
+    """Return whether argv is a known test, check, lint, or verification command."""
+    if not argv:
+        return False
+    executable = argv[0].replace("\\", "/").rsplit("/", 1)[-1].casefold()
     arguments = tuple(item.casefold() for item in argv[1:])
-    if executable in {"python", "python.exe", "py", "py.exe"}:
+    if executable in {"python", "python.exe", "python3", "python3.exe", "py", "py.exe"}:
         for index, item in enumerate(arguments[:-1]):
             if item == "-m" and arguments[index + 1] in _PYTHON_VALIDATION_MODULES:
                 return True
-        return False
+        return any(
+            item.replace("\\", "/").rsplit("/", 1)[-1] in _PYTHON_VALIDATION_SCRIPTS
+            for item in arguments
+        )
     if executable not in _DIRECT_VALIDATION_COMMANDS:
         return False
     if executable.startswith(("npm", "pnpm", "yarn")):
@@ -291,6 +305,11 @@ def _looks_like_validation(argv: tuple[str, ...]) -> bool:
     if executable == "dotnet":
         return any(item in {"test", "build"} for item in arguments)
     return True
+
+
+def _looks_like_validation(argv: tuple[str, ...]) -> bool:
+    """Backward-compatible private alias for existing callers and tests."""
+    return looks_like_validation_command(argv)
 
 
 def _followup_message(evidence: CompletionEvidence) -> str:

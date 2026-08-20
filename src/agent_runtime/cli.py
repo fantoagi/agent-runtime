@@ -93,6 +93,22 @@ def build_parser() -> argparse.ArgumentParser:
         dest="resume_session_id",
         help="Resume a persisted session by id",
     )
+    chat_display = chat.add_mutually_exclusive_group()
+    chat_display.add_argument(
+        "--compact",
+        dest="display_mode",
+        action="store_const",
+        const="compact",
+        help="Show concise Tool calls and results (default)",
+    )
+    chat_display.add_argument(
+        "--verbose",
+        dest="display_mode",
+        action="store_const",
+        const="verbose",
+        help="Show structured Tool arguments and bounded multi-line results",
+    )
+    chat.set_defaults(display_mode="compact")
     chat.add_argument("--no-color", action="store_true", help="Disable ANSI color output")
 
     subcommands.add_parser("status", help="Show local Runtime ownership and state health")
@@ -292,7 +308,7 @@ async def _serve_local(arguments: argparse.Namespace) -> int:
 async def _chat_local(arguments: argparse.Namespace) -> int:
     from rich.console import Console
 
-    from .interactive import ChatOptions, InteractiveShell
+    from .interactive import ChatOptions, DisplayMode, InteractiveShell
 
     settings = _local_settings(arguments)
     configure_structured_logging(
@@ -315,6 +331,7 @@ async def _chat_local(arguments: argparse.Namespace) -> int:
                 print_only=arguments.print_only,
                 continue_session=arguments.continue_session,
                 resume_session_id=arguments.resume_session_id,
+                display_mode=DisplayMode(arguments.display_mode),
             ),
             console=Console(
                 no_color=arguments.no_color,
