@@ -32,7 +32,7 @@
   - `docs/adr/README.md`
   - `docs/adr/0041-fresh-finalization-context.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0041](./adr/0041-fresh-finalization-context.md)
 
 ### 变更摘要
@@ -102,7 +102,7 @@ python scripts/verify_distribution.py dist/agent_runtime-0.8.18-py3-none-any.whl
   - `docs/adr/README.md`
   - `docs/adr/0040-dsml-variant-detection.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0040](./adr/0040-dsml-variant-detection.md)
 
 ### 变更摘要
@@ -175,7 +175,7 @@ python scripts/verify_distribution.py dist/agent_runtime-0.8.17-py3-none-any.whl
   - `docs/adr/README.md`
   - `docs/adr/0039-textual-tool-call-guard.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0039](./adr/0039-textual-tool-call-guard.md)
 
 ### 变更摘要
@@ -247,7 +247,7 @@ python scripts/verify_distribution.py dist/agent_runtime-0.8.16-py3-none-any.whl
   - `docs/adr/README.md`
   - `docs/adr/0038-finalization-context-integrity.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0038](./adr/0038-finalization-context-integrity.md)
 
 ### 变更摘要
@@ -325,7 +325,7 @@ python scripts/verify_distribution.py dist/agent_runtime-0.8.15-py3-none-any.whl
   - `docs/adr/README.md`
   - `docs/adr/0037-evidence-aware-convergence.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0037](./adr/0037-evidence-aware-convergence.md)
 
 ### 变更摘要
@@ -403,7 +403,7 @@ python scripts/verify_distribution.py dist/agent_runtime-0.8.14-py3-none-any.whl
   - `docs/adr/README.md`
   - `docs/adr/0036-read-only-tool-convergence.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0036](./adr/0036-read-only-tool-convergence.md)
 
 ### 变更摘要
@@ -474,7 +474,7 @@ python scripts/verify_distribution.py dist/agent_runtime-0.8.13-py3-none-any.whl
   - `docs/adr/README.md`
   - `docs/adr/0035-interactive-cli-execution-transparency.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)
 
 ### 变更摘要
@@ -546,7 +546,7 @@ python scripts/verify_distribution.py dist/agent_runtime-0.8.12-py3-none-any.whl
   - `docs/adr/README.md`
   - `docs/adr/0035-interactive-cli-execution-transparency.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)
 
 ### 变更摘要
@@ -614,7 +614,7 @@ python scripts/verify_distribution.py dist/agent_runtime-0.8.11-py3-none-any.whl
   - `docs/ROADMAP.md`
   - `docs/adr/0035-interactive-cli-execution-transparency.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)
 
 ### 变更摘要
@@ -671,7 +671,7 @@ python scripts/verify_distribution.py dist/agent_runtime-0.8.10-py3-none-any.whl
   - `docs/CURRENT.md`
   - `docs/ROADMAP.md`
   - `docs/adr/0034-interactive-cli-presentation.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0034](./adr/0034-interactive-cli-presentation.md)
 
 ### 变更摘要
@@ -732,7 +732,7 @@ python scripts/check_docs.py
   - `docs/ROADMAP.md`
   - `docs/adr/0034-interactive-cli-presentation.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`9d269c3`
 - **关联 ADR**：[ADR-0034](./adr/0034-interactive-cli-presentation.md)
 
 ### 变更摘要
