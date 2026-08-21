@@ -1,6 +1,6 @@
 # Coding Workspace Tools 使用指南
 
-- **适用版本**：v0.8.20+
+- **适用版本**：v0.8.21+
 - **最近更新**：2026-08-19
 - **关联变更**：[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、[E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)
 - **关联决策**：[ADR-0041](./adr/0041-fresh-finalization-context.md)、[ADR-0039](./adr/0039-textual-tool-call-guard.md)、[ADR-0037](./adr/0037-evidence-aware-convergence.md)、[ADR-0036](./adr/0036-read-only-tool-convergence.md)、[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)、[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0030](./adr/0030-bounded-read-batch-patch.md)、[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)
@@ -291,7 +291,7 @@ The standard local Agent composes its built-in coding protocol with bounded root
 - `verified`：当前可用门禁均有成功证据。
 - `unverified`：提醒后仍缺 diff、new-file status 或验证证据。
 
-`git_status` 只作为只读证据，不会 stage、commit 或改变 Workspace；覆盖已有文件时 `created=false`，不额外要求 status。当前识别是保守 allowlist。项目自定义命令如果不能被识别，仍可执行，但不会被自动计入 validation evidence；模型应在最终回答中准确说明实际执行结果。
+`git_status` 只作为只读证据，不会 stage、commit 或改变 Workspace；覆盖已有文件时 `created=false`，不额外要求 status。当前识别是保守 allowlist。 `git_diff`、`git_status` 和 validation 还必须发生在最后一次成功写入之后；写入前的成功命令不会满足 post-change verification。项目自定义命令如果不能被识别，仍可执行，但不会被自动计入 validation evidence；模型应在最终回答中准确说明实际执行结果。
 
 
 ## 15. v0.8.10 Execution Transparency

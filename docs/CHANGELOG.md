@@ -4,6 +4,76 @@
 
 ---
 
+<a id="e2026-08-21-001"></a>
+## E2026-08-21-001：v0.8.21 Post-change Verification Evidence
+
+- **完成时间**：2026-08-21
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/acceptance.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_acceptance.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/README.md`
+  - `docs/REAL_MODEL_EVALS.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0044-post-change-verification-boundary.md`
+  - `pyproject.toml`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0044](./adr/0044-post-change-verification-boundary.md)
+
+### 变更摘要
+
+修正 Acceptance Metrics 的验证时间边界。此前 v0.8.20 已要求新建文件补充 `git_status`，但 Acceptance 仍可能把最后一次写入之前执行的 pytest、git diff 或 git status 计入最终修改证据。v0.8.21 让验收指标与 Completion Policy 一致，只接受最后一次成功写入之后的 post-change 证据。
+
+### 系统架构
+
+不改变 Runtime 状态机、Provider 协议、Tool Handler、Event schema 或 SQLite schema。变化发生在基于 durable ToolExecution 派生 Completion/Acceptance Metrics 的边界：最后一次成功副作用写入将后续执行划分为修改后的验证阶段。
+
+### 实现方式
+
+`AcceptanceMetrics` 先定位最后一次成功的 `write_text_file`、`replace_text` 或 `apply_patch`，然后仅从其后的 ToolExecution 统计 `git_diff`、`git_status`、validation attempts 和 validation successes。写入前的成功测试不再满足代码修改验证；写入前的 Git 检查也不再满足最终 Workspace 检查。无成功写入的只读 Run 仍为 `not_required`。
+
+### 当前功能
+
+对于代码修改任务，标准完成证据现在要求：最后一次成功写入之后成功检查 Git diff；创建新文件时还要在该边界之后成功执行 Git status；代码文件还要在该边界之后运行并通过可识别的 validation 命令。Acceptance 报告与 Runtime Completion Policy 使用相同的时间语义。
+
+### 已知限制
+
+该规则只判断证据是否发生在最后一次写入之后，不判断测试是否真正覆盖业务逻辑，也不判断 diff 内容是否满足用户意图。一个 Tool 原子修改多个文件时它们共享同一写入边界；未来若引入多阶段修改，需要单独定义阶段级证据关系。
+
+### 测试与验收
+
+新增回归测试验证“先 pytest、后写入、再仅 git diff”不会被标记为 verified；本地 Python 3.13 全量结果为 `360 passed`，总体 coverage 为 `85.00%`，core line coverage 为 `91.87%`，core branch coverage 为 `81.01%`；Ruff、Mypy strict、文档门禁和 coverage 门禁通过；已成功构建 `agent_runtime-0.8.21.tar.gz` 与 `agent_runtime-0.8.21-py3-none-any.whl`，并在干净虚拟环境完成 CLI、SDK、FastAPI/SSE、备份恢复、诊断和 Wheel smoke。
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check --no-cache src tests scripts
+.\.venv\Scripts\python.exe -m mypy src/agent_runtime
+.\.venv\Scripts\python.exe -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -q
+.\.venv\Scripts\python.exe scripts/check_coverage.py coverage.json
+python scripts/check_docs.py
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.21-py3-none-any.whl
+```
+
+### 后续计划
+
+使用同一真实模型重跑 `small-verified-edit --repeat 3` 和 `approval-lifecycle --repeat 3`，确认模型在最后一次写入后再次执行 diff/status/validation；若出现失败，只根据对应 durable Run/Event/ToolExecution 事实做下一轮最小修复。
+
+---
 <a id="e2026-08-20-002"></a>
 ## E2026-08-20-002：v0.8.20 New-file Verification Evidence
 

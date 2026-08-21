@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
-- **最近更新**：2026-08-20
-- **当前版本**：v0.8.20
-- **当前阶段**：v0.8.20 New-file Verification Evidence 已完成；下一阶段继续用固定真实 Suite 复测，只针对可复现失败做一次有界修复与重新验证
+- **最近更新**：2026-08-21
+- **当前版本**：v0.8.21
+- **当前阶段**：v0.8.21 Post-change Verification Evidence 已完成；下一阶段继续用固定真实 Suite 复测，只针对可复现失败做一次有界修复与重新验证
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -65,7 +65,7 @@
 | v0.8.18 | ✅ completed | Fresh Finalization Context、durable evidence digest 与 Tool-heavy 历史隔离 | [E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010) |
 | v0.8.19 | ✅ completed | 隔离真实模型 Acceptance Suite、durable 指标和脱敏报告 | [E2026-08-20-001](./CHANGELOG.md#e2026-08-20-001) |
 | v0.8.20 | ✅ completed | 新建文件 Git status 证据、Acceptance verified 语义和 Fixture 噪声收敛 | [E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002) |
-| v0.8.21 | 📋 planned | 修改任务的一次有界修复与重新验证 | — |
+| v0.8.21 | ✅ completed | 修改任务只接受最后一次写入后的 diff/status/validation 证据 | [E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001) |
 | v0.8.22 | 📋 planned | CLI Context/Run/Event 诊断体验 | — |
 | v0.8.23 | 📋 planned | 长稳、Crash、恢复与本地稳定版验收 | — |
 | v0.9 | ⏸ deferred | 分布式 Worker、Queue 与 Lease | — |
@@ -258,7 +258,7 @@
 
 - **状态**：✅ completed
 - **前置版本**：v0.7.12
-- **完成阶段**：v0.8.0 [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、v0.8.1 [E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、v0.8.2 [E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、v0.8.3 [E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、v0.8.4 [E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、v0.8.5 [E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、v0.8.6 [E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)、v0.8.7 [E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、v0.8.8 [E2026-08-18-002](./CHANGELOG.md#e2026-08-18-002)、v0.8.9 [E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)、v0.8.10 [E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、v0.8.11 [E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、v0.8.12 [E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、v0.8.13 [E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、v0.8.14 [E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、v0.8.15 [E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、v0.8.16 [E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、v0.8.17 [E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、v0.8.18 [E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、v0.8.19 [E2026-08-20-001](./CHANGELOG.md#e2026-08-20-001)、v0.8.20 [E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002)
+- **完成阶段**：v0.8.0 [E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、v0.8.1 [E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、v0.8.2 [E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、v0.8.3 [E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、v0.8.4 [E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、v0.8.5 [E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、v0.8.6 [E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)、v0.8.7 [E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、v0.8.8 [E2026-08-18-002](./CHANGELOG.md#e2026-08-18-002)、v0.8.9 [E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)、v0.8.10 [E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、v0.8.11 [E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、v0.8.12 [E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、v0.8.13 [E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、v0.8.14 [E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、v0.8.15 [E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、v0.8.16 [E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、v0.8.17 [E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、v0.8.18 [E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、v0.8.19 [E2026-08-20-001](./CHANGELOG.md#e2026-08-20-001)、v0.8.20 [E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002)、v0.8.21 [E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001)
 - **目标**：在单机、单用户、本地可信环境中，既能受限执行本地进程，又能通过统一配置和 CLI 长期、稳定、可恢复地运行 Runtime。
 
 ### 已完成范围
@@ -284,6 +284,7 @@
 - v0.8.18：最终综合改用隔离上下文和 durable evidence digest；原 Tool-heavy 消息不再传给 Provider，一次修复也不回退到旧上下文。
 - v0.8.19：固定五类真实模型 Case；每次在隔离合成 Git Workspace 中走正式 Provider/Tool/Approval 路径，并生成不含原文的 durable 验收报告。
 - v0.8.20：记录 5 Cases × 3 repeats 的 15/15 真实基线；区分 tracked diff 与 untracked status，新建文件缺少 `git_status` 时不再误标 verified，并过滤验收 Fixture 的 Python cache 噪声。
+- v0.8.21：修正 Acceptance Metrics 的时间边界；最后一次成功写入之前的 diff/status/validation 不再被计入修改完成证据，避免“先测试、后修改、仍被标记 verified”。
 - FastAPI 默认 `app` 惰性构造，import Adapter 不再产生隐藏 Runtime 或 SQLite 副作用。
 - Wheel 验证覆盖本地初始化、状态、服务健康、重复 Owner 拒绝和重启。
 

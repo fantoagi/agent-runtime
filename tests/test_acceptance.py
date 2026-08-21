@@ -554,6 +554,42 @@ def test_metric_collection_and_case_assertions_cover_tool_outcomes() -> None:
 
 
 
+def test_acceptance_requires_evidence_after_the_latest_write() -> None:
+    run = AgentRun.create("agent", "edit a file")
+    run.id = "run-latest-write"
+    run.status = RunStatus.COMPLETED
+    run.result = "changed"
+    executions = [
+        make_execution(
+            "run_process",
+            {"argv": ["python", "-m", "pytest"]},
+            ToolExecutionStatus.COMPLETED,
+            position=1,
+            result_data={"exit_code": 0},
+        ),
+        make_execution(
+            "write_text_file",
+            {"path": "src/sample.py"},
+            ToolExecutionStatus.COMPLETED,
+            position=2,
+            result_data={"path": "src/sample.py", "created": False},
+        ),
+        make_execution("git_diff", {}, ToolExecutionStatus.COMPLETED, position=3),
+    ]
+    for execution in executions:
+        execution.run_id = run.id
+    store = SimpleNamespace(
+        events_since=lambda run_id: [],
+        tool_executions_for_run=lambda run_id: executions,
+    )
+
+    metrics = acceptance._collect_metrics(SimpleNamespace(store=store), run)
+
+    assert metrics.diff_inspected is True
+    assert metrics.validation_attempts == 0
+    assert metrics.validation_successes == 0
+    assert metrics.verification_status == "unverified"
+
 def test_new_file_acceptance_requires_git_status_evidence() -> None:
     run = AgentRun.create("agent", "create a file")
     run.id = "run-new-file"

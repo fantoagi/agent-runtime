@@ -564,29 +564,38 @@ def _collect_metrics(runtime: Runtime, run: AgentRun) -> AcceptanceMetrics:
         ToolExecutionStatus.REJECTED,
         ToolExecutionStatus.CANCELLED,
     }
-    validation_attempts = [item for item in executions if _is_validation_execution(item)]
-    validation_successes = sum(
-        item.status is ToolExecutionStatus.COMPLETED
-        and isinstance((item.result_data or {}).get("exit_code"), int)
-        and (item.result_data or {}).get("exit_code") == 0
-        for item in validation_attempts
-    )
     write_executions = [
         item
         for item in executions
         if item.tool_call.name in _WRITE_TOOLS
         and item.status is ToolExecutionStatus.COMPLETED
     ]
+    latest_write_index = max(
+        (index for index, item in enumerate(executions) if item in write_executions),
+        default=-1,
+    )
+    post_change_executions = (
+        executions[latest_write_index + 1 :] if latest_write_index >= 0 else ()
+    )
+    validation_attempts = [
+        item for item in post_change_executions if _is_validation_execution(item)
+    ]
+    validation_successes = sum(
+        item.status is ToolExecutionStatus.COMPLETED
+        and isinstance((item.result_data or {}).get("exit_code"), int)
+        and (item.result_data or {}).get("exit_code") == 0
+        for item in validation_attempts
+    )
     code_changed = any(_execution_changes_code(item) for item in write_executions)
     diff_inspected = any(
         item.tool_call.name == "git_diff"
         and item.status is ToolExecutionStatus.COMPLETED
-        for item in executions
+        for item in post_change_executions
     )
     git_status_inspected = any(
         item.tool_call.name == "git_status"
         and item.status is ToolExecutionStatus.COMPLETED
-        for item in executions
+        for item in post_change_executions
     )
     created_file_writes = sum(
         item.tool_call.name == "write_text_file"

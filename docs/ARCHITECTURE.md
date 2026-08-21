@@ -8,7 +8,7 @@
 
 当前系统是一个面向开发者的、可持久化 Agent Runtime。它既支持单 Agent 模型/工具循环，也支持由 Parent Run 委派独立 Child Run 的单机多 Agent Workflow，并通过 ContextBuilder、Session 和 Scoped Memory 管理模型输入与跨 Run 信息复用。
 
-当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。v0.8.20 的正式支持目标收敛为单机、单用户、本地 SQLite 和可信 Tool/脚本；标准服务只监听 loopback，并通过状态目录 Owner Lock 防止两个本地执行循环并行领取同一状态。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
+当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。v0.8.21 的正式支持目标收敛为单机、单用户、本地 SQLite 和可信 Tool/脚本；标准服务只监听 loopback，并通过状态目录 Owner Lock 防止两个本地执行循环并行领取同一状态。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
 
 ## 2. 总体架构
 
@@ -606,11 +606,11 @@ FastAPI 暴露：
 
 v0.8.19 新增 `RealModelAcceptanceRunner`。它不在调用者 Workspace 直接运行，而是为每个 Case 创建隔离合成 Git Workspace、独立 SQLite 和 Artifact，然后复用 configured Local Runtime 的真实 Provider、Coding Tool、Approval 与 resume 路径。报告从 durable Run/Event/ToolExecution 派生 completion、convergence、Tool efficiency、protocol integrity、verification 和 lifecycle 指标；默认只保存结构统计、Run/Trace ID、Tool 名称、最终答案长度与 SHA-256，不保存 Prompt、Fixture、Tool 参数/结果或答案原文。Suite checksum、Runtime version 和模型名使多次报告可以比较。当前 Case 串行执行以减少干扰，尚未实现统计显著性或 LLM-as-a-Judge。
 
-v0.8.20 将修改验证证据进一步区分为 tracked diff 和 untracked status。`write_text_file` 的 durable result 兼容性增加 `created`；Completion Policy 和 Acceptance 指标在检测到新建文件、且 Runtime 提供 `git_status` 时，要求最后一次写入后成功执行 `git_status`。这是因为 `git diff` 默认不会展示未跟踪文件，单独调用它不能证明新文件已进入 Workspace。该规则不自动 stage/commit，也不改变普通 SDK 在未注册 Git Tool 时的行为。真实基线 `deepseek-v4-flash` 在 5 Cases × 3 repeats 中达到 15/15 attempts、0 failed assertions，正是对其 durable ToolExecution 深挖后发现这一证据缺口。
+v0.8.20 将修改验证证据进一步区分为 tracked diff 和 untracked status。`write_text_file` 的 durable result 兼容性增加 `created`；Completion Policy 和 Acceptance 指标在检测到新建文件、且 Runtime 提供 `git_status` 时，要求最后一次写入后成功执行 `git_status`。这是因为 `git diff` 默认不会展示未跟踪文件，单独调用它不能证明新文件已进入 Workspace。该规则不自动 stage/commit，也不改变普通 SDK 在未注册 Git Tool 时的行为。真实基线 `deepseek-v4-flash` 在 5 Cases × 3 repeats 中达到 15/15 attempts、0 failed assertions，正是对其 durable ToolExecution 深挖后发现这一证据缺口。 v0.8.21 继续沿用同一时间边界：Acceptance 只从最后一次成功写入之后的 ToolExecution 计算 `git_diff`、`git_status` 和 validation；写入前的检查不会被重新解释为修改后的验证。
 
 > 最近更新：2026-08-20<br>
-> 关联记录：[E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002)、[E2026-08-20-001](./CHANGELOG.md#e2026-08-20-001)<br>
-> 关联决策：[ADR-0043](./adr/0043-new-file-verification-evidence.md)、[ADR-0042](./adr/0042-real-model-acceptance-baseline.md)
+> 关联记录：[E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001)、[E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002)、[E2026-08-20-001](./CHANGELOG.md#e2026-08-20-001)<br>
+> 关联决策：[ADR-0044](./adr/0044-post-change-verification-boundary.md)、[ADR-0043](./adr/0043-new-file-verification-evidence.md)、[ADR-0042](./adr/0042-real-model-acceptance-baseline.md)
 
 ## 9.5 Learning Console
 

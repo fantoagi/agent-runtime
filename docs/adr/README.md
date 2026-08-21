@@ -26,6 +26,7 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
+| [ADR-0044](./0044-post-change-verification-boundary.md) | Accepted | 2026-08-21 | 修改后的 diff/status/validation 证据时间边界 | E2026-08-21-001 |
 | [ADR-0043](./0043-new-file-verification-evidence.md) | Accepted | 2026-08-20 | 新建文件使用 durable created 与 Git status 验证证据 | E2026-08-20-002 |
 | [ADR-0042](./0042-real-model-acceptance-baseline.md) | Accepted | 2026-08-20 | 隔离真实模型验收与 durable 脱敏报告 | E2026-08-20-001 |
 | [ADR-0041](./0041-fresh-finalization-context.md) | Accepted | 2026-08-19 | Finalization Tool-heavy 历史隔离与 durable evidence digest | E2026-08-19-010 |
