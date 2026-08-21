@@ -151,8 +151,10 @@ def compare_acceptance_reports(
         compared_case_names = requested
         baseline_keys = _keys_for_cases(baseline_results, requested)
         candidate_keys = _keys_for_cases(candidate_results, requested)
-        missing_baseline = [name for name in requested if name not in baseline_scope["case_names"]]
-        missing_candidate = [name for name in requested if name not in candidate_scope["case_names"]]
+        baseline_case_names = set(baseline_scope.get("case_names", ()))
+        candidate_case_names = set(candidate_scope.get("case_names", ()))
+        missing_baseline = [name for name in requested if name not in baseline_case_names]
+        missing_candidate = [name for name in requested if name not in candidate_case_names]
         if missing_baseline or missing_candidate:
             regressions.append(
                 AcceptanceRegression(

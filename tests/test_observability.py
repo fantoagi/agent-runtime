@@ -90,7 +90,7 @@ async def test_provider_retries_feed_failure_metrics_and_diagnostics(
     assert metrics.model_duration_ms_p95 >= 0
     assert "agent_runtime_provider_retries_total 1" in metrics.to_prometheus()
     assert diagnostics.status == "ok"
-    assert diagnostics.version == "0.8.23"
+    assert diagnostics.version == "0.8.24"
     assert diagnostics.runtime["state"] == "accepting"
     assert diagnostics.runtime["tools"]["pending_sync_tools"] == 0
     assert diagnostics.process["thread_count"] >= 1

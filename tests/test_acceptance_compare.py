@@ -17,7 +17,7 @@ def report_payload(*, passed: bool = True, verification_status: str = "not_requi
         "suite_name": "local-real-model",
         "suite_version": 1,
         "suite_checksum": "suite-checksum",
-        "runtime_version": "0.8.23",
+        "runtime_version": "0.8.24",
         "provider": "openai-compatible",
         "model": model,
         "results": [
@@ -234,3 +234,26 @@ def test_compare_acceptance_reports_rejects_incorrect_actual_attempt_count(tmp_p
         item.kind == "incomplete_scope" and "actual_attempts" in item.message
         for item in comparison.regressions
     )
+
+def test_compare_acceptance_reports_returns_structured_incompatible_for_invalid_partial_scope(
+    tmp_path: Path,
+) -> None:
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    baseline_payload = report_payload()
+    candidate_payload = report_payload()
+    baseline_payload["selection"] = "invalid"
+    candidate_payload["selection"] = {
+        "case_names": ["case-a"],
+        "repeat": 1,
+        "expected_attempts": 1,
+        "actual_attempts": 1,
+    }
+    write_report(baseline, baseline_payload)
+    write_report(candidate, candidate_payload)
+
+    comparison = compare_acceptance_reports(baseline, candidate, case_names=["case-a"])
+
+    assert comparison.status == "incompatible"
+    assert comparison.passed is False
+    assert any(item.kind == "incomplete_scope" for item in comparison.regressions)

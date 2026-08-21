@@ -1,6 +1,6 @@
 # Agent Runtime
 
-一个以 Python + SQLite 实现的可持久化 Agent Runtime。当前版本是 **v0.8.23 Acceptance Scope Integrity**，优先解决单机、单用户、本地可信环境下的稳定启动、持续运行、恢复、诊断、学习和直接终端交互问题。
+一个以 Python + SQLite 实现的可持久化 Agent Runtime。当前版本是 **v0.8.24 Acceptance Comparator Error Containment**，优先解决单机、单用户、本地可信环境下的稳定启动、持续运行、恢复、诊断、学习和直接终端交互问题。
 
 当前支持 Interactive CLI、单 Agent、多 Agent Workflow、Tool Calling、Model Streaming、Approval、Checkpoint、Session/Memory、FastAPI/SSE、备份恢复、诊断、Learning Console，以及受限本地进程 Sandbox。当前不把公网部署、分布式 Worker、多租户、Docker 强隔离和 Secret 生命周期作为本地稳定版的前置条件。
 
@@ -29,7 +29,7 @@ agent-runtime chat -p "19 * 23" --no-color   # 只输出最终结果后退出
 
 ## 本地编码闭环
 
-v0.8.23 的标准本地 Agent 已注册 `list_files`、`search_text`、`read_file_lines`、`read_text_file`、`read_artifact`、`replace_text`、`apply_patch`、`write_text_file`、只读 `git_status/git_diff` 和受限 `run_process`。可以直接在 `chat` 中要求模型检查、修改并验证 Workspace。修改发生后，Runtime 会根据持久化 diff/status/validation 证据标记 `verified` 或 `unverified`；新建未跟踪文件除了 `git_diff` 还必须成功检查 `git_status`，缺证据时最多追加一次验证提醒。
+v0.8.24 的标准本地 Agent 已注册 `list_files`、`search_text`、`read_file_lines`、`read_text_file`、`read_artifact`、`replace_text`、`apply_patch`、`write_text_file`、只读 `git_status/git_diff` 和受限 `run_process`。可以直接在 `chat` 中要求模型检查、修改并验证 Workspace。修改发生后，Runtime 会根据持久化 diff/status/validation 证据标记 `verified` 或 `unverified`；新建未跟踪文件除了 `git_diff` 还必须成功检查 `git_status`，缺证据时最多追加一次验证提醒。
 
 ```text
 请找到 examples 里的最小 Python 示例，补充一条清晰注释，并运行 Python 做语法检查。修改文件和执行进程前先让我确认。

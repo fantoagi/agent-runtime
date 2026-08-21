@@ -76,7 +76,7 @@ def main() -> int:
         )
         initialized_payload = json.loads(initialized_status.stdout)
         assert initialized_payload["status"] == "stopped", initialized_payload
-        assert initialized_payload["version"] == "0.8.23", initialized_payload
+        assert initialized_payload["version"] == "0.8.24", initialized_payload
         tool_settings = initialized_payload["configuration"]["tools"]
         assert tool_settings["enable_process"] is True, tool_settings
         assert tool_settings["process_max_concurrent"] == 2, tool_settings
@@ -196,7 +196,7 @@ def main() -> int:
                         if response.status_code == 200:
                             payload = response.json()
                             assert payload["status"] == "ok", payload
-                            assert payload["version"] == "0.8.23", payload
+                            assert payload["version"] == "0.8.24", payload
                             return process
                     except httpx.HTTPError:
                         pass
@@ -275,7 +275,7 @@ def main() -> int:
             cwd=workspace,
         )
         diagnostics_payload = json.loads(diagnostics.stdout)
-        assert diagnostics_payload["version"] == "0.8.23", diagnostics_payload
+        assert diagnostics_payload["version"] == "0.8.24", diagnostics_payload
         assert diagnostics_payload["store"]["status"] == "ok", diagnostics_payload
 
         incident = workspace / "incident.zip"
@@ -293,7 +293,7 @@ def main() -> int:
         )
         with zipfile.ZipFile(incident) as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            assert manifest["runtime_version"] == "0.8.23", manifest
+            assert manifest["runtime_version"] == "0.8.24", manifest
             assert "diagnostics.json" in archive.namelist()
 
         backup = workspace / "runtime.agent-backup"
@@ -366,7 +366,7 @@ def main() -> int:
                     health = await client.get("/health")
                     health.raise_for_status()
                     assert health.json()["status"] == "ok"
-                    assert health.json()["version"] == "0.8.23"
+                    assert health.json()["version"] == "0.8.24"
                     sandbox_status = await client.get("/observability/sandbox")
                     sandbox_status.raise_for_status()
                     assert sandbox_status.json()["policy"]["network.access"] == "deny"

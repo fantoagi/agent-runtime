@@ -112,7 +112,7 @@ failed assertions: 0
 
 这说明固定断言全部通过，但不等于证据模型没有缺口。进一步检查每个隔离 Case 的 durable Run/Event/ToolExecution 后发现：`approval-lifecycle` 创建的 `RESULT.txt` 是 untracked 文件，默认 `git diff` 返回 no tracked differences；旧逻辑只看是否调用过 `git_diff`，因此可能在没有 `git_status` 的情况下误标 `verified`。v0.8.20 通过 `write_text_file.created`、Completion Evidence 和 Acceptance Metrics 修复该问题，并给 pytest Fixture 增加 `.gitignore`，排除 `__pycache__`/`.pytest_cache` 噪声。
 
-该修复来自真实 durable 事实，不是针对模型名称、答案文本或单次随机输出的特判。 v0.8.21 延续该原则：验收指标只把最后一次成功写入之后的 diff/status/validation 视为修改后的证据。v0.8.23 进一步将 Case/Repeat selection 写入报告，避免不同范围的报告被误判为完整通过。
+该修复来自真实 durable 事实，不是针对模型名称、答案文本或单次随机输出的特判。 v0.8.21 延续该原则：验收指标只把最后一次成功写入之后的 diff/status/validation 视为修改后的证据。v0.8.23 将 Case/Repeat selection 写入报告，避免不同范围的报告被误判为完整通过。
 ## 建议的收敛流程
 
 ```text

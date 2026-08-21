@@ -4,6 +4,65 @@
 
 ---
 
+<a id="e2026-08-21-004"></a>
+## E2026-08-21-004：v0.8.24 Acceptance Comparator Error Containment
+
+- **完成时间**：2026-08-21
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/acceptance_compare.py`
+  - `tests/test_acceptance_compare.py`
+  - `src/agent_runtime/version.py`
+  - `pyproject.toml`
+  - `README.md`
+  - `docs/REAL_MODEL_EVALS.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/CHANGELOG.md`
+  - `docs/ROADMAP.md`
+  - `scripts/verify_distribution.py`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0046](./adr/0046-acceptance-scope-integrity.md)
+
+### 变更摘要
+
+修复 partial Acceptance compare 遇到非法 `selection` 元数据时的未处理异常。报告格式问题现在始终转换为结构化 `incomplete_scope` 回归，并最终返回 `incompatible`，不会因为缺少 `case_names` 等字段触发 `KeyError` 或 CLI traceback。
+
+### 系统架构
+
+- Scope 解析继续由 `_report_scope` 负责验证 selection 元数据。
+- Partial compare 不再假设 scope 校验成功后一定存在 `case_names`。
+- Scope 错误先进入统一兼容性判定，再决定是否执行行为回归比较。
+
+### 实现方式
+
+- 对非法 selection 使用 `.get("case_names", ())` 安全读取。
+- 增加非法 selection partial compare 回归测试。
+- 保持已有公共 CLI 退出码：格式/范围不可比较时返回 `2`。
+
+### 当前功能
+
+```powershell
+agent-runtime eval compare .\baseline.json .\candidate.json --case approval-lifecycle
+```
+
+即使报告 selection 损坏，也会输出 JSON 形式的 `incompatible`，而不是输出 Python 异常堆栈。
+
+### 已知限制
+
+本修复只改善报告比较器的错误收敛，不会修复原始 Acceptance Runner、Provider 或 Tool 执行失败。旧报告仍可能缺少显式 selection，并在比较时产生兼容性 warning。
+
+### 测试与验收
+
+新增非法 selection partial compare 回归测试；本地 Python 3.13 全量 `370 passed`，总体 coverage `85.01%`，Core line/branch coverage `91.84% / 81.05%`，Ruff、Mypy、文档检查和 Wheel smoke 通过。
+
+### 后续计划
+
+重新生成同范围真实模型基线，并继续针对可复现的 durable 失败做最小修复。
+
+---
+
 <a id="e2026-08-21-003"></a>
 ## E2026-08-21-003：v0.8.23 Acceptance Scope Integrity
 

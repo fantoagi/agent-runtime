@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.8.23`
-- **当前里程碑**：v0.8.23 Acceptance Scope Integrity
+- **当前版本**：`0.8.24`
+- **当前里程碑**：v0.8.24 Acceptance Comparator Error Containment
 - **Runtime 构建完成时间**：2026-08-21（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
 - **当前代码基线 commit**：`aee1136`
-- **最近演进记录**：[E2026-08-21-003](./CHANGELOG.md#e2026-08-21-003)、[E2026-08-21-002](./CHANGELOG.md#e2026-08-21-002)、[E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001)、[E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002)、[E2026-08-20-001](./CHANGELOG.md#e2026-08-20-001)、[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-19-001](./CHANGELOG.md#e2026-08-19-001)、[E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)
+- **最近演进记录**：[E2026-08-21-004](./CHANGELOG.md#e2026-08-21-004)、[E2026-08-21-003](./CHANGELOG.md#e2026-08-21-003)、[E2026-08-21-002](./CHANGELOG.md#e2026-08-21-002)、[E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001)、[E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002)、[E2026-08-20-001](./CHANGELOG.md#e2026-08-20-001)、[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-19-001](./CHANGELOG.md#e2026-08-19-001)、[E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)
 
 ## 状态定义
 
@@ -80,8 +80,8 @@
 
 ## 当前测试状态
 
-- 自动化测试：`369 passed`（2026-08-21，本地 Python 3.13），包含单元、集成、append-only Streaming Markdown、统一 validation 阶段、Tool-aware Approval、可恢复 Tool 错误、只读 Tool 结果复用、证据感知 no-progress、无工具 finalization、文本化 Tool Call 有界修复、全角/双竖线 DSML 变体防护、参数/路径修复提示、结构化 Task Summary、重复输出回归、compact/verbose、Interactive CLI、Artifact 分页、防递归、Workspace 发现、Verified Task Completion、配置边界、跨进程 Owner Lock、定义快照、幂等并发、容量背压、真实模型验收 Suite schema、隔离/脱敏、指标/断言、Approval lifecycle、真实进程强杀与备份恢复测试。
-- 总体 coverage：`84.97%`；Core line coverage：`91.81%`；core branch coverage：`80.95%`。
+- 自动化测试：`370 passed`（2026-08-21，本地 Python 3.13），包含单元、集成、append-only Streaming Markdown、统一 validation 阶段、Tool-aware Approval、可恢复 Tool 错误、只读 Tool 结果复用、证据感知 no-progress、无工具 finalization、文本化 Tool Call 有界修复、全角/双竖线 DSML 变体防护、参数/路径修复提示、结构化 Task Summary、重复输出回归、compact/verbose、Interactive CLI、Artifact 分页、防递归、Workspace 发现、Verified Task Completion、配置边界、跨进程 Owner Lock、定义快照、幂等并发、容量背压、真实模型验收 Suite schema、隔离/脱敏、指标/断言、Approval lifecycle、真实进程强杀与备份恢复测试。
+- 总体 coverage：`85.01%`；Core line coverage：`91.84%`；core branch coverage：`81.05%`。
 - PR：Ubuntu Python 3.11/3.12/3.13、Windows Python 3.13。
 - Nightly：100 并发、20 轮 Crash Matrix、备份恢复演练、故障测试重复、30 分钟 soak 和性能回退检查。
 
