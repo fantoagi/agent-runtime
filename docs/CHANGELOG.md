@@ -26,7 +26,7 @@
   - `docs/ROADMAP.md`
   - `docs/adr/README.md`
   - `docs/adr/0046-acceptance-scope-integrity.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`aee1136`
 - **关联 ADR**：[ADR-0046](./adr/0046-acceptance-scope-integrity.md)
 
 ### 变更摘要
