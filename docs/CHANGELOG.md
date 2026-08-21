@@ -4,6 +4,73 @@
 
 ---
 
+<a id="e2026-08-21-003"></a>
+## E2026-08-21-003：v0.8.23 Acceptance Scope Integrity
+
+- **完成时间**：2026-08-21
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/acceptance.py`
+  - `src/agent_runtime/acceptance_compare.py`
+  - `src/agent_runtime/cli.py`
+  - `tests/test_acceptance.py`
+  - `tests/test_acceptance_compare.py`
+  - `src/agent_runtime/version.py`
+  - `pyproject.toml`
+  - `README.md`
+  - `docs/REAL_MODEL_EVALS.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/CHANGELOG.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0046-acceptance-scope-integrity.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0046](./adr/0046-acceptance-scope-integrity.md)
+
+### 变更摘要
+
+修正验收报告范围不一致时的“假通过”风险。严格比较现在要求 Baseline 和 Candidate 的 `case_name + attempt` 集合完全一致；只有显式使用 `--case` 时才允许部分比较。
+
+### 系统架构
+
+- Acceptance Runner 在报告中持久化 `selection.case_names`、`selection.repeat`、`expected_attempts` 和 `actual_attempts`。
+- 比较器先校验 Suite identity 和报告 Scope，再执行 Case 级回归判断。
+- 范围不同返回 `incompatible`，不再把额外 Candidate Attempt 作为普通 warning 后返回 `passed`。
+- 显式 `--case` 的结果返回 `partial`，并要求被选 Case 的 Attempt 在两份报告中完整存在。
+
+### 实现方式
+
+- `AcceptanceReport` 使用兼容的 selection 元数据描述本次实际验收范围。
+- `compare_acceptance_reports` 默认先做 Suite/Scope 合法性检查，再按 `(case_name, attempt)` 对齐执行回归判断。
+- 严格模式发现缺失或额外 Attempt 时返回 `incompatible`；CLI 的 `--case` 显式选择才启用 `partial` 比较。
+- 旧报告缺失 selection 时允许从结果推断，并通过 warning 提示重新生成基线。
+- 比较过程只读取脱敏 JSON，不启动 Runtime、不打开验收数据库、不调用模型。
+
+### 当前功能
+
+```powershell
+agent-runtime eval compare .\baseline.json .\candidate.json
+agent-runtime eval compare .\baseline.json .\candidate.json --case approval-lifecycle
+```
+
+退出码保持兼容：`0` 表示 passed/partial 且无回归，`1` 表示真实回归，`2` 表示 incompatible 或报告格式错误。
+
+### 已知限制
+
+旧报告没有 selection 元数据时会从结果推断范围并给出 warning；建议新基线使用 v0.8.23 及以上生成。比较器仍不判断最终答案语义，也不做性能统计显著性分析。
+
+### 测试与验收
+
+新增测试覆盖 selection 元数据、`actual_attempts` 一致性、严格范围不一致、显式部分比较和不完整报告；本地 Python 3.13 全量 `369 passed`，总体 coverage `84.97%`，Core line/branch coverage `91.81% / 80.95%`，Wheel 干净安装 smoke 通过。
+
+### 后续计划
+
+用 v0.8.23 重新生成完整 5 Case × 3 repeats 基线，再对后续 Runtime 修改执行同范围 compare。
+
+---
+
 <a id="e2026-08-21-002"></a>
 ## E2026-08-21-002：v0.8.22 Acceptance Report Regression Gate
 

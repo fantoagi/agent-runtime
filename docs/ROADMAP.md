@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
 - **最近更新**：2026-08-21
-- **当前版本**：v0.8.22
-- **当前阶段**：v0.8.22 Acceptance Report Regression Gate 已完成；下一阶段先用离线 compare 判断真实模型回归，再针对可复现失败做一次有界修复与重新验证
+- **当前版本**：v0.8.23
+- **当前阶段**：v0.8.23 Acceptance Scope Integrity 已完成；下一阶段用同范围真实基线复测，再针对可复现失败做一次有界修复与重新验证
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -67,7 +67,7 @@
 | v0.8.20 | ✅ completed | 新建文件 Git status 证据、Acceptance verified 语义和 Fixture 噪声收敛 | [E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002) |
 | v0.8.21 | ✅ completed | 修改任务只接受最后一次写入后的 diff/status/validation 证据 | [E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001) |
 | v0.8.22 | ✅ completed | Acceptance Report Regression Gate | [E2026-08-21-002](./CHANGELOG.md#e2026-08-21-002) |
-| v0.8.23 | 📋 planned | 长稳、Crash、恢复与本地稳定版验收 | — |
+| v0.8.23 | ✅ completed | Acceptance Scope Integrity | [E2026-08-21-003](./CHANGELOG.md#e2026-08-21-003) |
 | v0.9 | ⏸ deferred | 分布式 Worker、Queue 与 Lease | — |
 | v0.10 | ⏸ deferred | 多租户、权限、预算和生产治理 | — |
 | v1.0 | ⏸ deferred | 稳定 Runtime Contract 与生产发布 | — |
@@ -286,6 +286,7 @@
 - v0.8.20：记录 5 Cases × 3 repeats 的 15/15 真实基线；区分 tracked diff 与 untracked status，新建文件缺少 `git_status` 时不再误标 verified，并过滤验收 Fixture 的 Python cache 噪声。
 - v0.8.21：修正 Acceptance Metrics 的时间边界；最后一次成功写入之前的 diff/status/validation 不再被计入修改完成证据，避免“先测试、后修改、仍被标记 verified”。
 - v0.8.22：增加离线 Acceptance Report compare；以前通过的 Case 失败、verified/协议/UNKNOWN 证据退化会成为回归，模型和版本变化只产生 warning。
+- v0.8.23：Acceptance Report 持久化 Case/Repeat 选择范围；严格 compare 要求 Baseline/Candidate 的 Case/Attempt 集合一致，`--case` 才能显式执行 partial compare，避免范围不同造成假通过。
 - FastAPI 默认 `app` 惰性构造，import Adapter 不再产生隐藏 Runtime 或 SQLite 副作用。
 - Wheel 验证覆盖本地初始化、状态、服务健康、重复 Owner 拒绝和重启。
 

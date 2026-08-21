@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,6 +36,8 @@ class AcceptanceRegression:
 @dataclass(frozen=True, slots=True)
 class AcceptanceComparison:
     status: str
+    scope: str
+    compared_case_names: tuple[str, ...]
     baseline_path: str
     candidate_path: str
     baseline_report_id: str | None
@@ -46,11 +48,13 @@ class AcceptanceComparison:
 
     @property
     def passed(self) -> bool:
-        return self.status == "passed"
+        return self.status in {"passed", "partial"}
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
+            "scope": self.scope,
+            "compared_case_names": list(self.compared_case_names),
             "baseline_path": self.baseline_path,
             "candidate_path": self.candidate_path,
             "baseline_report_id": self.baseline_report_id,
@@ -66,19 +70,24 @@ class AcceptanceComparison:
 def compare_acceptance_reports(
     baseline_path: str | Path,
     candidate_path: str | Path,
+    *,
+    case_names: Sequence[str] = (),
 ) -> AcceptanceComparison:
     """Compare two redacted acceptance reports without contacting a model.
 
-    A comparison is a gate only for durable regressions: a previously passing
-    attempt that no longer passes, loss of post-change verification, newly
-    observed protocol violations, or newly observed unknown tool outcomes.
-    Runtime/provider/model changes and performance drift are reported as
-    warnings so the same command remains useful across intentional upgrades.
+    Strict comparisons require identical Case/Attempt keys. A caller may pass
+    ``case_names`` to explicitly compare a partial scope; that result is marked
+    ``partial`` and still requires every requested Case/Attempt to exist in
+    both reports.
     """
     baseline_file = Path(baseline_path).resolve()
     candidate_file = Path(candidate_path).resolve()
     baseline = _load_report(baseline_file)
     candidate = _load_report(candidate_file)
+    baseline_results = _index_results(baseline, "baseline")
+    candidate_results = _index_results(candidate, "candidate")
+    baseline_scope, baseline_scope_error = _report_scope(baseline, baseline_results)
+    candidate_scope, candidate_scope_error = _report_scope(candidate, candidate_results)
     regressions: list[AcceptanceRegression] = []
     warnings: list[str] = []
 
@@ -101,100 +110,167 @@ def compare_acceptance_reports(
             )
         )
 
+    if baseline_scope_error:
+        regressions.append(
+            AcceptanceRegression(
+                None,
+                None,
+                "incomplete_scope",
+                f"Baseline report scope is invalid: {baseline_scope_error}",
+                baseline_scope,
+                None,
+            )
+        )
+    if candidate_scope_error:
+        regressions.append(
+            AcceptanceRegression(
+                None,
+                None,
+                "incomplete_scope",
+                f"Candidate report scope is invalid: {candidate_scope_error}",
+                None,
+                candidate_scope,
+            )
+        )
+
     for field in ("provider", "model", "runtime_version"):
         if baseline.get(field) != candidate.get(field):
             warnings.append(
                 f"{field} changed from {baseline.get(field)!r} to {candidate.get(field)!r}."
             )
+    if "selection" not in baseline:
+        warnings.append("Baseline report has no explicit selection metadata; scope was inferred.")
+    if "selection" not in candidate:
+        warnings.append("Candidate report has no explicit selection metadata; scope was inferred.")
 
-    baseline_results = _index_results(baseline, "baseline")
-    candidate_results = _index_results(candidate, "candidate")
-    for key, baseline_result in sorted(baseline_results.items()):
-        case_name, attempt = key
-        candidate_result = candidate_results.get(key)
-        if candidate_result is None:
+    requested = _normalize_case_names(case_names)
+    if case_names and not requested:
+        raise AcceptanceComparisonError("At least one non-empty case name is required for partial comparison.")
+
+    if requested:
+        compared_case_names = requested
+        baseline_keys = _keys_for_cases(baseline_results, requested)
+        candidate_keys = _keys_for_cases(candidate_results, requested)
+        missing_baseline = [name for name in requested if name not in baseline_scope["case_names"]]
+        missing_candidate = [name for name in requested if name not in candidate_scope["case_names"]]
+        if missing_baseline or missing_candidate:
             regressions.append(
                 AcceptanceRegression(
-                    case_name,
-                    attempt,
-                    "missing_attempt",
-                    "Candidate report is missing an attempt present in the baseline.",
-                    _result_summary(baseline_result),
                     None,
+                    None,
+                    "scope_mismatch",
+                    "Requested partial comparison Case is missing from one or both reports.",
+                    {"missing": missing_baseline},
+                    {"missing": missing_candidate},
                 )
             )
-            continue
-        if bool(baseline_result.get("passed")) and not bool(candidate_result.get("passed")):
+        elif baseline_keys != candidate_keys:
             regressions.append(
                 AcceptanceRegression(
-                    case_name,
-                    attempt,
-                    "case_failed",
-                    "An attempt that passed in the baseline failed in the candidate.",
-                    _result_summary(baseline_result),
-                    _result_summary(candidate_result),
+                    None,
+                    None,
+                    "scope_mismatch",
+                    "Requested partial comparison has different Case/Attempt keys.",
+                    _sorted_key_strings(baseline_keys),
+                    _sorted_key_strings(candidate_keys),
                 )
             )
-            continue
-        baseline_metrics = _mapping(baseline_result.get("metrics"))
-        candidate_metrics = _mapping(candidate_result.get("metrics"))
-        if (
-            baseline_metrics.get("verification_status") == "verified"
-            and candidate_metrics.get("verification_status") != "verified"
-        ):
+        comparison_baseline = {key: baseline_results[key] for key in baseline_keys & candidate_keys}
+        comparison_candidate = {key: candidate_results[key] for key in baseline_keys & candidate_keys}
+        scope = "partial"
+        warnings.append("Comparison explicitly limited to: " + ", ".join(requested) + ".")
+    else:
+        compared_case_names = tuple(baseline_scope["case_names"])
+        if set(baseline_results) != set(candidate_results):
             regressions.append(
                 AcceptanceRegression(
-                    case_name,
-                    attempt,
-                    "verification_regressed",
-                    "Post-change verification regressed from verified to a non-verified state.",
-                    baseline_metrics.get("verification_status"),
-                    candidate_metrics.get("verification_status"),
+                    None,
+                    None,
+                    "scope_mismatch",
+                    "Baseline and candidate must contain the same Case/Attempt keys for a strict comparison.",
+                    _scope_comparison_payload(baseline_scope, baseline_results),
+                    _scope_comparison_payload(candidate_scope, candidate_results),
                 )
             )
-        if (
-            int(baseline_metrics.get("protocol_violations", 0)) == 0
-            and int(candidate_metrics.get("protocol_violations", 0)) > 0
-        ):
-            regressions.append(
-                AcceptanceRegression(
-                    case_name,
-                    attempt,
-                    "protocol_regressed",
-                    "Candidate introduced protocol violations where the baseline had none.",
-                    baseline_metrics.get("protocol_violations", 0),
-                    candidate_metrics.get("protocol_violations", 0),
-                )
-            )
-        if (
-            int(baseline_metrics.get("unknown_tool_calls", 0)) == 0
-            and int(candidate_metrics.get("unknown_tool_calls", 0)) > 0
-        ):
-            regressions.append(
-                AcceptanceRegression(
-                    case_name,
-                    attempt,
-                    "unknown_outcome_regressed",
-                    "Candidate introduced unknown tool outcomes where the baseline had none.",
-                    baseline_metrics.get("unknown_tool_calls", 0),
-                    candidate_metrics.get("unknown_tool_calls", 0),
-                )
-            )
-        _append_performance_warnings(warnings, case_name, attempt, baseline_result, candidate_result)
+            comparison_baseline = {}
+            comparison_candidate = {}
+        else:
+            comparison_baseline = baseline_results
+            comparison_candidate = candidate_results
+        scope = "full"
 
-    extra_keys = sorted(set(candidate_results) - set(baseline_results))
-    if extra_keys:
-        warnings.append(
-            "Candidate contains additional attempts not present in baseline: "
-            + ", ".join(f"{case}#{attempt}" for case, attempt in extra_keys)
-            + "."
-        )
+    if not any(item.kind in {"incompatible_suite", "incomplete_scope", "scope_mismatch"} for item in regressions):
+        for key in sorted(comparison_baseline):
+            baseline_result = comparison_baseline[key]
+            candidate_result = comparison_candidate[key]
+            case_name, attempt = key
+            if bool(baseline_result.get("passed")) and not bool(candidate_result.get("passed")):
+                regressions.append(
+                    AcceptanceRegression(
+                        case_name,
+                        attempt,
+                        "case_failed",
+                        "An attempt that passed in the baseline failed in the candidate.",
+                        _result_summary(baseline_result),
+                        _result_summary(candidate_result),
+                    )
+                )
+                continue
+            baseline_metrics = _mapping(baseline_result.get("metrics"))
+            candidate_metrics = _mapping(candidate_result.get("metrics"))
+            if (
+                baseline_metrics.get("verification_status") == "verified"
+                and candidate_metrics.get("verification_status") != "verified"
+            ):
+                regressions.append(
+                    AcceptanceRegression(
+                        case_name,
+                        attempt,
+                        "verification_regressed",
+                        "Post-change verification regressed from verified to a non-verified state.",
+                        baseline_metrics.get("verification_status"),
+                        candidate_metrics.get("verification_status"),
+                    )
+                )
+            if (
+                int(baseline_metrics.get("protocol_violations", 0)) == 0
+                and int(candidate_metrics.get("protocol_violations", 0)) > 0
+            ):
+                regressions.append(
+                    AcceptanceRegression(
+                        case_name,
+                        attempt,
+                        "protocol_regressed",
+                        "Candidate introduced protocol violations where the baseline had none.",
+                        baseline_metrics.get("protocol_violations", 0),
+                        candidate_metrics.get("protocol_violations", 0),
+                    )
+                )
+            if (
+                int(baseline_metrics.get("unknown_tool_calls", 0)) == 0
+                and int(candidate_metrics.get("unknown_tool_calls", 0)) > 0
+            ):
+                regressions.append(
+                    AcceptanceRegression(
+                        case_name,
+                        attempt,
+                        "unknown_outcome_regressed",
+                        "Candidate introduced unknown tool outcomes where the baseline had none.",
+                        baseline_metrics.get("unknown_tool_calls", 0),
+                        candidate_metrics.get("unknown_tool_calls", 0),
+                    )
+                )
+            _append_performance_warnings(warnings, case_name, attempt, baseline_result, candidate_result)
 
-    status = "incompatible" if any(item.kind == "incompatible_suite" for item in regressions) else (
-        "failed" if regressions else "passed"
+    incompatible = any(
+        item.kind in {"incompatible_suite", "incomplete_scope", "scope_mismatch"}
+        for item in regressions
     )
+    status = "incompatible" if incompatible else ("failed" if regressions else ("partial" if requested else "passed"))
     return AcceptanceComparison(
         status=status,
+        scope=scope,
+        compared_case_names=tuple(compared_case_names),
         baseline_path=str(baseline_file),
         candidate_path=str(candidate_file),
         baseline_report_id=_optional_string(baseline.get("id")),
@@ -239,6 +315,115 @@ def _index_results(report: Mapping[str, Any], label: str) -> dict[tuple[str, int
     return indexed
 
 
+def _report_scope(
+    report: Mapping[str, Any],
+    results: Mapping[tuple[str, int], Mapping[str, Any]],
+) -> tuple[dict[str, Any], str | None]:
+    raw_selection = report.get("selection")
+    if raw_selection is None:
+        case_names = tuple(sorted({case for case, _ in results}))
+        attempts = [attempt for _, attempt in results]
+        repeat = max(attempts) if attempts else None
+        return (
+            {
+                "case_names": list(case_names),
+                "repeat": repeat,
+                "expected_attempts": None,
+                "actual_attempts": len(results),
+                "explicit": False,
+            },
+            None,
+        )
+    if not isinstance(raw_selection, dict):
+        return ({"explicit": True}, "selection must be an object")
+    raw_cases = raw_selection.get("case_names")
+    repeat = raw_selection.get("repeat")
+    expected = raw_selection.get("expected_attempts")
+    actual = raw_selection.get("actual_attempts")
+    if (
+        not isinstance(raw_cases, list)
+        or not raw_cases
+        or any(not isinstance(item, str) or not item for item in raw_cases)
+        or len(raw_cases) != len(set(raw_cases))
+    ):
+        return ({"explicit": True}, "selection.case_names must be a unique non-empty string list")
+    if isinstance(repeat, bool) or not isinstance(repeat, int) or repeat < 1:
+        return ({"explicit": True, "case_names": raw_cases}, "selection.repeat must be a positive integer")
+    calculated = len(raw_cases) * repeat
+    if expected != calculated:
+        return (
+            {"explicit": True, "case_names": raw_cases, "repeat": repeat, "expected_attempts": expected},
+            "selection.expected_attempts does not match case_names × repeat",
+        )
+    if isinstance(actual, bool) or not isinstance(actual, int) or actual < 0:
+        return (
+            {
+                "explicit": True,
+                "case_names": raw_cases,
+                "repeat": repeat,
+                "expected_attempts": calculated,
+                "actual_attempts": actual,
+            },
+            "selection.actual_attempts must be a non-negative integer",
+        )
+    if actual != len(results):
+        return (
+            {
+                "explicit": True,
+                "case_names": raw_cases,
+                "repeat": repeat,
+                "expected_attempts": calculated,
+                "actual_attempts": actual,
+            },
+            "selection.actual_attempts does not match the result count",
+        )
+    expected_keys = {(case_name, attempt) for case_name in raw_cases for attempt in range(1, repeat + 1)}
+    actual_keys = set(results)
+    if expected_keys != actual_keys:
+        return (
+            {
+                "explicit": True,
+                "case_names": raw_cases,
+                "repeat": repeat,
+                "expected_attempts": calculated,
+                "actual_attempts": len(results),
+            },
+            "selection does not cover exactly case_names × attempts 1..repeat",
+        )
+    return (
+        {
+            "explicit": True,
+            "case_names": raw_cases,
+            "repeat": repeat,
+            "expected_attempts": calculated,
+            "actual_attempts": len(results),
+        },
+        None,
+    )
+
+
+def _normalize_case_names(case_names: Sequence[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(name for name in case_names if isinstance(name, str) and name))
+
+
+def _keys_for_cases(results: Mapping[tuple[str, int], Mapping[str, Any]], case_names: Sequence[str]) -> set[tuple[str, int]]:
+    requested = set(case_names)
+    return {key for key in results if key[0] in requested}
+
+
+def _sorted_key_strings(keys: set[tuple[str, int]]) -> list[str]:
+    return [f"{case}#{attempt}" for case, attempt in sorted(keys)]
+
+
+def _scope_comparison_payload(
+    scope: Mapping[str, Any],
+    results: Mapping[tuple[str, int], Mapping[str, Any]],
+) -> dict[str, Any]:
+    payload = dict(scope)
+    payload["keys"] = _sorted_key_strings(set(results))
+    return payload
+
+
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -273,4 +458,3 @@ def _append_performance_warnings(
             f"{case_name}#{attempt} duration increased by more than 20% "
             f"({baseline_duration:.1f}ms -> {candidate_duration:.1f}ms)."
         )
-

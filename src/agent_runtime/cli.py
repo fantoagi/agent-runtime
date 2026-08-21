@@ -200,6 +200,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_compare.add_argument("baseline", help="Earlier acceptance-report.json")
     eval_compare.add_argument("candidate", help="New acceptance-report.json")
+    eval_compare.add_argument(
+        "--case",
+        dest="case_names",
+        action="append",
+        default=[],
+        help="Explicitly compare one or more Cases; repeat the option for partial comparison",
+    )
 
     runs = subcommands.add_parser("runs", help="Inspect or control existing runs")
     runs_subcommands = runs.add_subparsers(dest="runs_command", required=True)
@@ -457,7 +464,11 @@ async def async_main(arguments: argparse.Namespace) -> int:
 
     if arguments.command == "eval" and arguments.eval_command == "compare":
         try:
-            comparison = compare_acceptance_reports(arguments.baseline, arguments.candidate)
+            comparison = compare_acceptance_reports(
+                arguments.baseline,
+                arguments.candidate,
+                case_names=arguments.case_names,
+            )
             _print(comparison.to_dict())
             return 0 if comparison.passed else (2 if comparison.status == "incompatible" else 1)
         except AcceptanceSuiteError as error:

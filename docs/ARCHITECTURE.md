@@ -1,14 +1,14 @@
 # Agent Runtime 当前架构
 
 > 最近更新：2026-08-21
-> 关联记录：[E2026-08-21-002](./CHANGELOG.md#e2026-08-21-002)、[E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001)、[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-19-001](./CHANGELOG.md#e2026-08-19-001)、[E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)、[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)、[E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、[E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
-> 关联决策：[ADR-0045](./adr/0045-acceptance-regression-gate.md)、[ADR-0044](./adr/0044-post-change-verification-boundary.md)、[ADR-0041](./adr/0041-fresh-finalization-context.md)、[ADR-0040](./adr/0040-dsml-variant-detection.md)、[ADR-0039](./adr/0039-textual-tool-call-guard.md)、[ADR-0038](./adr/0038-finalization-context-integrity.md)、[ADR-0037](./adr/0037-evidence-aware-convergence.md)、[ADR-0036](./adr/0036-read-only-tool-convergence.md)、[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)、[ADR-0034](./adr/0034-interactive-cli-presentation.md)、[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0031](./adr/0031-project-workspace-instructions.md)、[ADR-0030](./adr/0030-bounded-read-batch-patch.md)、[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)、[ADR-0027](./adr/0027-interactive-cli-session-history.md)、[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
+> 关联记录：[E2026-08-21-003](./CHANGELOG.md#e2026-08-21-003)、[E2026-08-21-002](./CHANGELOG.md#e2026-08-21-002)、[E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001)、[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-19-001](./CHANGELOG.md#e2026-08-19-001)、[E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)、[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-004](./CHANGELOG.md#e2026-08-17-004)、[E2026-08-17-003](./CHANGELOG.md#e2026-08-17-003)、[E2026-08-17-002](./CHANGELOG.md#e2026-08-17-002)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)、[E2026-08-16-005](./CHANGELOG.md#e2026-08-16-005)、[E2026-08-16-004](./CHANGELOG.md#e2026-08-16-004)、[E2026-08-16-002](./CHANGELOG.md#e2026-08-16-002)、[E2026-08-16-001](./CHANGELOG.md#e2026-08-16-001)、[E2026-08-15-010](./CHANGELOG.md#e2026-08-15-010)、[E2026-08-15-009](./CHANGELOG.md#e2026-08-15-009)、[E2026-08-15-008](./CHANGELOG.md#e2026-08-15-008)、[E2026-08-15-007](./CHANGELOG.md#e2026-08-15-007)、[E2026-08-15-006](./CHANGELOG.md#e2026-08-15-006)、[E2026-08-15-005](./CHANGELOG.md#e2026-08-15-005)、[E2026-08-15-004](./CHANGELOG.md#e2026-08-15-004)
+> 关联决策：[ADR-0046](./adr/0046-acceptance-scope-integrity.md)、[ADR-0045](./adr/0045-acceptance-regression-gate.md)、[ADR-0044](./adr/0044-post-change-verification-boundary.md)、[ADR-0041](./adr/0041-fresh-finalization-context.md)、[ADR-0040](./adr/0040-dsml-variant-detection.md)、[ADR-0039](./adr/0039-textual-tool-call-guard.md)、[ADR-0038](./adr/0038-finalization-context-integrity.md)、[ADR-0037](./adr/0037-evidence-aware-convergence.md)、[ADR-0036](./adr/0036-read-only-tool-convergence.md)、[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)、[ADR-0034](./adr/0034-interactive-cli-presentation.md)、[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0031](./adr/0031-project-workspace-instructions.md)、[ADR-0030](./adr/0030-bounded-read-batch-patch.md)、[ADR-0029](./adr/0029-read-only-git-workspace-tools.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)、[ADR-0027](./adr/0027-interactive-cli-session-history.md)、[ADR-0026](./adr/0026-local-runtime-bootstrap-single-owner.md)、[ADR-0025](./adr/0025-local-process-sandbox-capability-policy.md)、[ADR-0023](./adr/0023-operational-observability.md)、[ADR-0022](./adr/0022-runtime-backup-restore.md)、[ADR-0021](./adr/0021-agent-definition-snapshots.md)、[ADR-0020](./adr/0020-run-submission-idempotency-admission.md)、[ADR-0019](./adr/0019-runtime-doctor.md)、[ADR-0018](./adr/0018-crash-recovery-contract.md)、[ADR-0017](./adr/0017-unknown-outcome-confirmation.md)、[ADR-0016](./adr/0016-fastapi-runtime-ownership-sse.md)、[ADR-0015](./adr/0015-runtime-shutdown-sqlite-recovery.md)、[ADR-0014](./adr/0014-provider-async-transport-retry.md)、[ADR-0013](./adr/0013-tool-isolation-unknown-outcome.md)、[ADR-0012](./adr/0012-quality-gates.md)、[ADR-0011](./adr/0011-context-session-memory.md)、[ADR-0010](./adr/0010-parent-child-run-delegation.md)
 
 ## 1. 系统目标和边界
 
 当前系统是一个面向开发者的、可持久化 Agent Runtime。它既支持单 Agent 模型/工具循环，也支持由 Parent Run 委派独立 Child Run 的单机多 Agent Workflow，并通过 ContextBuilder、Session 和 Scoped Memory 管理模型输入与跨 Run 信息复用。
 
-当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。v0.8.22 的正式支持目标收敛为单机、单用户、本地 SQLite 和可信 Tool/脚本；标准服务只监听 loopback，并通过状态目录 Owner Lock 防止两个本地执行循环并行领取同一状态。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
+当前架构优先保证：接口可替换、执行有界、状态可观察、失败可收敛、人工可介入。v0.8.23 的正式支持目标收敛为单机、单用户、本地 SQLite 和可信 Tool/脚本；标准服务只监听 loopback，并通过状态目录 Owner Lock 防止两个本地执行循环并行领取同一状态。它不是分布式调度平台。v0.8.0 已提供受限 `LocalProcessSandbox`，但它不是容器或虚拟机，不能宣称对任意不可信代码形成强隔离。
 
 ## 2. 总体架构
 
@@ -604,13 +604,37 @@ FastAPI 暴露：
 
 `EvalReport` 汇总用例级断言、通过率、Run ID、Trace ID 和耗时，并写入 Artifact Store。`WorkflowEvalRunner` 通过真实 Workflow 路径运行用例，并可断言 Parent 状态、输出和 Child Run 数量。
 
-v0.8.19 新增 `RealModelAcceptanceRunner`。它不在调用者 Workspace 直接运行，而是为每个 Case 创建隔离合成 Git Workspace、独立 SQLite 和 Artifact，然后复用 configured Local Runtime 的真实 Provider、Coding Tool、Approval 与 resume 路径。报告从 durable Run/Event/ToolExecution 派生 completion、convergence、Tool efficiency、protocol integrity、verification 和 lifecycle 指标；默认只保存结构统计、Run/Trace ID、Tool 名称、最终答案长度与 SHA-256，不保存 Prompt、Fixture、Tool 参数/结果或答案原文。Suite checksum、Runtime version 和模型名使多次报告可以比较。当前 Case 串行执行以减少干扰，尚未实现统计显著性或 LLM-as-a-Judge。 v0.8.22 新增 `compare_acceptance_reports`，只在报告层对齐 `case_name + attempt` 并执行离线回归 Gate；它不创建 Runtime、不读取 Case SQLite，也不触碰 Provider。
+v0.8.19 新增 `RealModelAcceptanceRunner`。它不在调用者 Workspace 直接运行，而是为每个 Case 创建隔离合成 Git Workspace、独立 SQLite 和 Artifact，然后复用 configured Local Runtime 的真实 Provider、Coding Tool、Approval 与 resume 路径。报告从 durable Run/Event/ToolExecution 派生 completion、convergence、Tool efficiency、protocol integrity、verification 和 lifecycle 指标；默认只保存结构统计、Run/Trace ID、Tool 名称、最终答案长度与 SHA-256，不保存 Prompt、Fixture、Tool 参数/结果或答案原文。Suite checksum、Runtime version 和模型名使多次报告可以比较。当前 Case 串行执行以减少干扰，尚未实现统计显著性或 LLM-as-a-Judge。v0.8.22 新增 `compare_acceptance_reports`，只在报告层对齐 `case_name + attempt` 并执行离线回归 Gate；它不创建 Runtime、不读取 Case SQLite，也不触碰 Provider。
+
+v0.8.23 将 Acceptance Scope 变成比较前的显式不变量：Runner 在报告 `selection` 中保存 `case_names`、`repeat`、`expected_attempts` 和 `actual_attempts`。默认 strict compare 必须先确认 suite identity、selection 元数据和完整的 `(case_name, attempt)` 集合完全一致，只有通过后才执行回归断言；范围不一致返回 `incompatible`，不再把额外或缺失 Attempt 降级为 warning 后假设通过。CLI 只有在显式重复传入 `--case` 时才进入 partial compare，结果标记为 `partial`，并要求选中 Case 的 Attempt 集合在两份报告中一致。旧报告缺少 selection 时允许基于结果推断，但必须产生兼容性 warning，不能把它当作新格式基线。
 
 v0.8.20 将修改验证证据进一步区分为 tracked diff 和 untracked status。`write_text_file` 的 durable result 兼容性增加 `created`；Completion Policy 和 Acceptance 指标在检测到新建文件、且 Runtime 提供 `git_status` 时，要求最后一次写入后成功执行 `git_status`。这是因为 `git diff` 默认不会展示未跟踪文件，单独调用它不能证明新文件已进入 Workspace。该规则不自动 stage/commit，也不改变普通 SDK 在未注册 Git Tool 时的行为。真实基线 `deepseek-v4-flash` 在 5 Cases × 3 repeats 中达到 15/15 attempts、0 failed assertions，正是对其 durable ToolExecution 深挖后发现这一证据缺口。 v0.8.21 继续沿用同一时间边界：Acceptance 只从最后一次成功写入之后的 ToolExecution 计算 `git_diff`、`git_status` 和 validation；写入前的检查不会被重新解释为修改后的验证。
 
 > 最近更新：2026-08-21<br>
 > 关联记录：[E2026-08-21-002](./CHANGELOG.md#e2026-08-21-002)、[E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001)、[E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002)、[E2026-08-20-001](./CHANGELOG.md#e2026-08-20-001)<br>
 > 关联决策：[ADR-0044](./adr/0044-post-change-verification-boundary.md)、[ADR-0043](./adr/0043-new-file-verification-evidence.md)、[ADR-0042](./adr/0042-real-model-acceptance-baseline.md)
+
+### Acceptance Scope Integrity
+
+> 最近更新：2026-08-21
+> 关联记录：[E2026-08-21-003](./CHANGELOG.md#e2026-08-21-003)
+> 关联决策：[ADR-0046](./adr/0046-acceptance-scope-integrity.md)
+
+Acceptance 报告的 `selection` 是报告自身的范围合同，而不是 UI 展示字段：
+
+```text
+selection.case_names       本次选择的 Case 名称（稳定排序）
+selection.repeat           每个 Case 计划执行次数
+selection.expected_attempts 计划的 Case × repeat 数量
+selection.actual_attempts   实际落盘的 Attempt 数量
+```
+
+比较器采用两阶段流程：
+
+1. **范围兼容性**：校验 suite identity、selection 完整性，以及两份报告的 `(case_name, attempt)` 集合。
+2. **行为回归**：仅对范围已兼容的 Attempt 检查失败、断言退化、协议违规和 UNKNOWN Outcome。
+
+因此，默认 `agent-runtime eval compare baseline candidate` 是全量严格比较；范围不一致输出 `incompatible` 并使用退出码 `2`。需要只比较明确子集时，调用方必须显式传递一个或多个 `--case`；此时结果输出 `scope: partial` 和 `status: partial`，且所选 Case 在两份报告中的 Attempt 集合仍必须一致。比较器保持离线纯函数边界，不执行 Runtime、不读取验收 Workspace、不发送 Provider 请求。
 
 ## 9.5 Learning Console
 

@@ -431,6 +431,15 @@ async def test_runner_supports_selected_case_and_repeat(tmp_path: Path) -> None:
     assert [result.case_name for result in report.results] == ["second", "second"]
     assert report.total_attempts == 2
     assert report.failed_attempts == 0
+    assert report.selected_case_names == ("second",)
+    assert report.repeat == 2
+    payload = json.loads(Path(report.artifact_path or "").read_text(encoding="utf-8"))
+    assert payload["selection"] == {
+        "case_names": ["second"],
+        "repeat": 2,
+        "expected_attempts": 2,
+        "actual_attempts": 2,
+    }
 
 
 def test_initialize_git_fixture_success_and_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

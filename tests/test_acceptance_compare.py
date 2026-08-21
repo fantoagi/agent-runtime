@@ -17,7 +17,7 @@ def report_payload(*, passed: bool = True, verification_status: str = "not_requi
         "suite_name": "local-real-model",
         "suite_version": 1,
         "suite_checksum": "suite-checksum",
-        "runtime_version": "0.8.22",
+        "runtime_version": "0.8.23",
         "provider": "openai-compatible",
         "model": model,
         "results": [
@@ -124,3 +124,113 @@ def test_compare_acceptance_reports_rejects_duplicate_results(tmp_path: Path) ->
 
     with pytest.raises(AcceptanceComparisonError, match="duplicate result"):
         compare_acceptance_reports(baseline, candidate)
+
+
+def test_compare_acceptance_reports_rejects_different_strict_scope(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    baseline_payload = report_payload()
+    candidate_payload = report_payload()
+    baseline_payload["selection"] = {
+        "case_names": ["case-a"],
+        "repeat": 1,
+        "expected_attempts": 1,
+        "actual_attempts": 1,
+    }
+    candidate_payload["results"][0]["case_name"] = "case-b"  # type: ignore[index]
+    candidate_payload["selection"] = {
+        "case_names": ["case-b"],
+        "repeat": 1,
+        "expected_attempts": 1,
+        "actual_attempts": 1,
+    }
+    write_report(baseline, baseline_payload)
+    write_report(candidate, candidate_payload)
+
+    comparison = compare_acceptance_reports(baseline, candidate)
+
+    assert comparison.status == "incompatible"
+    assert comparison.passed is False
+    assert {item.kind for item in comparison.regressions} == {"scope_mismatch"}
+
+
+def test_compare_acceptance_reports_allows_explicit_partial_scope(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    baseline_payload = report_payload()
+    candidate_payload = report_payload()
+    baseline_result = baseline_payload["results"][0]  # type: ignore[index]
+    candidate_result = candidate_payload["results"][0]  # type: ignore[index]
+    baseline_payload["results"] = [
+        baseline_result,
+        {**baseline_result, "case_name": "case-b"},
+    ]
+    candidate_payload["results"] = [
+        candidate_result,
+        {**candidate_result, "case_name": "case-c"},
+    ]
+    for payload, names in ((baseline_payload, ["case-a", "case-b"]), (candidate_payload, ["case-a", "case-c"])):
+        payload["selection"] = {
+            "case_names": names,
+            "repeat": 1,
+            "expected_attempts": 2,
+            "actual_attempts": 2,
+        }
+    write_report(baseline, baseline_payload)
+    write_report(candidate, candidate_payload)
+
+    comparison = compare_acceptance_reports(baseline, candidate, case_names=["case-a"])
+
+    assert comparison.status == "partial"
+    assert comparison.passed is True
+    assert comparison.scope == "partial"
+    assert comparison.compared_case_names == ("case-a",)
+    assert comparison.regressions == ()
+
+
+def test_compare_acceptance_reports_rejects_incomplete_selection_metadata(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    baseline_payload = report_payload()
+    candidate_payload = report_payload()
+    baseline_payload["selection"] = {
+        "case_names": ["case-a"],
+        "repeat": 2,
+        "expected_attempts": 2,
+        "actual_attempts": 1,
+    }
+    write_report(baseline, baseline_payload)
+    write_report(candidate, candidate_payload)
+
+    comparison = compare_acceptance_reports(baseline, candidate)
+
+    assert comparison.status == "incompatible"
+    assert any(item.kind == "incomplete_scope" for item in comparison.regressions)
+
+def test_compare_acceptance_reports_rejects_incorrect_actual_attempt_count(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    baseline_payload = report_payload()
+    candidate_payload = report_payload()
+    baseline_payload["selection"] = {
+        "case_names": ["case-a"],
+        "repeat": 1,
+        "expected_attempts": 1,
+        "actual_attempts": 2,
+    }
+    candidate_payload["selection"] = {
+        "case_names": ["case-a"],
+        "repeat": 1,
+        "expected_attempts": 1,
+        "actual_attempts": 1,
+    }
+    write_report(baseline, baseline_payload)
+    write_report(candidate, candidate_payload)
+
+    comparison = compare_acceptance_reports(baseline, candidate)
+
+    assert comparison.status == "incompatible"
+    assert any(
+        item.kind == "incomplete_scope" and "actual_attempts" in item.message
+        for item in comparison.regressions
+    )

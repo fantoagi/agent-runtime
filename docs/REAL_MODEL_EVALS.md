@@ -60,14 +60,18 @@ agent-runtime eval run --suite local-real-model --output .\.agent-runtime\eval-r
 
 ```powershell
 agent-runtime eval compare .\baseline-report.json .\candidate-report.json
+
+# 只比较明确指定的 Case（结果标记为 partial）
+agent-runtime eval compare .\baseline-report.json .\candidate-report.json --case approval-lifecycle
 ```
 
 比较规则：
 
 - 退出码 `0`：没有发现可靠性回归。
 - 退出码 `1`：发现以前通过的 Attempt 失败、`verified` 退化、协议违规增加或 UNKNOWN Tool Outcome 增加。
-- 退出码 `2`：报告格式错误，或 Suite name/version/checksum 不一致，不能安全比较。
+- 退出码 `2`：报告格式错误、Suite name/version/checksum 不一致，或严格模式下 Case/Attempt 范围不一致，不能安全比较。
 - Provider、模型、Runtime 版本变化和单 Case 耗时超过 20% 只记录 warning，不自动阻断。
+- 严格模式要求 Baseline/Candidate 的 Case/Attempt 集合完全一致；只有显式 `--case` 才允许 partial compare。
 
 比较结果不包含 Prompt、Fixture、Tool 参数/结果或最终答案原文；输出中的 Case/Run/Trace 标识可用于回看对应的隔离 durable Event。
 
@@ -108,7 +112,7 @@ failed assertions: 0
 
 这说明固定断言全部通过，但不等于证据模型没有缺口。进一步检查每个隔离 Case 的 durable Run/Event/ToolExecution 后发现：`approval-lifecycle` 创建的 `RESULT.txt` 是 untracked 文件，默认 `git diff` 返回 no tracked differences；旧逻辑只看是否调用过 `git_diff`，因此可能在没有 `git_status` 的情况下误标 `verified`。v0.8.20 通过 `write_text_file.created`、Completion Evidence 和 Acceptance Metrics 修复该问题，并给 pytest Fixture 增加 `.gitignore`，排除 `__pycache__`/`.pytest_cache` 噪声。
 
-该修复来自真实 durable 事实，不是针对模型名称、答案文本或单次随机输出的特判。 v0.8.21 延续该原则：验收指标只把最后一次成功写入之后的 diff/status/validation 视为修改后的证据。
+该修复来自真实 durable 事实，不是针对模型名称、答案文本或单次随机输出的特判。 v0.8.21 延续该原则：验收指标只把最后一次成功写入之后的 diff/status/validation 视为修改后的证据。v0.8.23 进一步将 Case/Repeat selection 写入报告，避免不同范围的报告被误判为完整通过。
 ## 建议的收敛流程
 
 ```text

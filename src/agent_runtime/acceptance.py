@@ -187,6 +187,8 @@ class AcceptanceReport:
     results: list[AcceptanceCaseResult]
     artifact_path: str | None = None
     source_workspace_exposed: bool = False
+    selected_case_names: tuple[str, ...] = ()
+    repeat: int = 1
 
     @property
     def total_attempts(self) -> int:
@@ -221,6 +223,12 @@ class AcceptanceReport:
             "pass_rate": self.pass_rate,
             "artifact_path": self.artifact_path,
             "source_workspace_exposed": self.source_workspace_exposed,
+            "selection": {
+                "case_names": list(self.selected_case_names),
+                "repeat": self.repeat,
+                "expected_attempts": len(self.selected_case_names) * self.repeat,
+                "actual_attempts": self.total_attempts,
+            },
             "results": [item.to_dict() for item in self.results],
         }
 
@@ -270,6 +278,8 @@ class RealModelAcceptanceRunner:
             started_at=started_at.isoformat(),
             completed_at=utc_now().isoformat(),
             results=results,
+            selected_case_names=tuple(case.name for case in selected),
+            repeat=repeat,
         )
         target = (output_path or report_root / "acceptance-report.json").resolve()
         report.artifact_path = str(target)

@@ -1,11 +1,11 @@
 # Agent Runtime 当前状态
 
-- **当前版本**：`0.8.22`
-- **当前里程碑**：v0.8.22 Acceptance Report Regression Gate
+- **当前版本**：`0.8.23`
+- **当前里程碑**：v0.8.23 Acceptance Scope Integrity
 - **Runtime 构建完成时间**：2026-08-21（Asia/Shanghai）
 - **文档体系构建完成时间**：2026-08-11（Asia/Shanghai）
 - **当前代码基线 commit**：`85c5dc5`
-- **最近演进记录**：[E2026-08-21-002](./CHANGELOG.md#e2026-08-21-002)、[E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001)、[E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002)、[E2026-08-20-001](./CHANGELOG.md#e2026-08-20-001)、[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-19-001](./CHANGELOG.md#e2026-08-19-001)、[E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)
+- **最近演进记录**：[E2026-08-21-003](./CHANGELOG.md#e2026-08-21-003)、[E2026-08-21-002](./CHANGELOG.md#e2026-08-21-002)、[E2026-08-21-001](./CHANGELOG.md#e2026-08-21-001)、[E2026-08-20-002](./CHANGELOG.md#e2026-08-20-002)、[E2026-08-20-001](./CHANGELOG.md#e2026-08-20-001)、[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-007](./CHANGELOG.md#e2026-08-19-007)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-19-001](./CHANGELOG.md#e2026-08-19-001)、[E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)
 
 ## 状态定义
 
@@ -33,7 +33,7 @@
 | FastAPI 与 SSE | ✅ stable | 健康检查、heartbeat、断线恢复、Runtime 所有权、幂等提交和 429 背压 | E2026-08-15-007、E2026-08-15-009 |
 | 多 Agent Workflow | ✅ stable | Parent/Child、串行/并行、幂等委派、取消传播、Workflow 与 AgentDefinition 确切快照 | E2026-08-14-007、E2026-08-15-006、E2026-08-15-010 |
 | Context、Session、Memory 与 Artifact | ✅ stable | token budget、当前 Run 请求 pin、finalization 原始问题重申、Fresh Finalization Context、Unicode/重复竖线 DSML 变体检测、文本化 Tool Call 一次有界修复、FTS5 scoped memory、TTL、软删除、大结果 Artifact 化和同 Run Tool Result Artifact 分页读取 | E2026-08-15-001、E2026-08-18-001、E2026-08-19-007、E2026-08-19-008、E2026-08-19-009 |
-| Observability、Evals 与 Learning Console | ✅ stable | Trace Tree、p95/失败 Metrics、综合诊断、结构化日志、确定性根因摘要、脱敏诊断包、确定性 Eval、隔离真实模型 Acceptance Suite、动态泳道、可靠性状态和 Fresh Context/finalization 协议事件解释 | E2026-08-15-002、E2026-08-15-003、E2026-08-15-007、E2026-08-16-002、E2026-08-16-003、E2026-08-19-008、E2026-08-20-001、E2026-08-20-002、E2026-08-21-001 |
+| Observability、Evals 与 Learning Console | ✅ stable | Trace Tree、p95/失败 Metrics、综合诊断、结构化日志、确定性根因摘要、脱敏诊断包、确定性 Eval、隔离真实模型 Acceptance Suite、严格 Scope compare、显式 partial compare、动态泳道、可靠性状态和 Fresh Context/finalization 协议事件解释 | E2026-08-15-002、E2026-08-15-003、E2026-08-15-007、E2026-08-16-002、E2026-08-16-003、E2026-08-19-008、E2026-08-20-001、E2026-08-20-002、E2026-08-21-001、E2026-08-21-002、E2026-08-21-003 |
 | Runtime Doctor 与 Crash Matrix | ✅ stable | 只读一致性诊断；模型、Tool、Approval、Workflow 强杀恢复，恢复进程无需重新注册 AgentDefinition | E2026-08-15-008、E2026-08-15-010 |
 | 在线备份与灾难恢复 | ✅ stable | SQLite Online Backup、Artifact 归档、SHA-256/quick_check 校验、离线恢复和回滚副本 | E2026-08-16-001 |
 | 质量与发布门禁 | ✅ stable | Ruff、Mypy strict、coverage、跨平台 CI、Wheel smoke、stress/soak/crash | E2026-08-15-004、E2026-08-15-007、E2026-08-15-008 |
@@ -80,8 +80,8 @@
 
 ## 当前测试状态
 
-- 自动化测试：`360 passed`（2026-08-20，本地 Python 3.13），包含单元、集成、append-only Streaming Markdown、统一 validation 阶段、Tool-aware Approval、可恢复 Tool 错误、只读 Tool 结果复用、证据感知 no-progress、无工具 finalization、文本化 Tool Call 有界修复、全角/双竖线 DSML 变体防护、参数/路径修复提示、结构化 Task Summary、重复输出回归、compact/verbose、Interactive CLI、Artifact 分页、防递归、Workspace 发现、Verified Task Completion、配置边界、跨进程 Owner Lock、定义快照、幂等并发、容量背压、真实模型验收 Suite schema、隔离/脱敏、指标/断言、Approval lifecycle、真实进程强杀与备份恢复测试。
-- 总体 coverage：`85.00%`；Core line coverage：`91.87%`；core branch coverage：`81.01%`。
+- 自动化测试：`369 passed`（2026-08-21，本地 Python 3.13），包含单元、集成、append-only Streaming Markdown、统一 validation 阶段、Tool-aware Approval、可恢复 Tool 错误、只读 Tool 结果复用、证据感知 no-progress、无工具 finalization、文本化 Tool Call 有界修复、全角/双竖线 DSML 变体防护、参数/路径修复提示、结构化 Task Summary、重复输出回归、compact/verbose、Interactive CLI、Artifact 分页、防递归、Workspace 发现、Verified Task Completion、配置边界、跨进程 Owner Lock、定义快照、幂等并发、容量背压、真实模型验收 Suite schema、隔离/脱敏、指标/断言、Approval lifecycle、真实进程强杀与备份恢复测试。
+- 总体 coverage：`84.97%`；Core line coverage：`91.81%`；core branch coverage：`80.95%`。
 - PR：Ubuntu Python 3.11/3.12/3.13、Windows Python 3.13。
 - Nightly：100 并发、20 轮 Crash Matrix、备份恢复演练、故障测试重复、30 分钟 soak 和性能回退检查。
 
