@@ -22,7 +22,7 @@
   - `docs/CHANGELOG.md`
   - `docs/ROADMAP.md`
   - `scripts/verify_distribution.py`
-- **关联 commit**：`pending`
+- **关联 commit**：`3c26382`
 - **关联 ADR**：[ADR-0046](./adr/0046-acceptance-scope-integrity.md)
 
 ### 变更摘要
