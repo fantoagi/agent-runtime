@@ -31,7 +31,7 @@
   - `docs/adr/README.md`
   - `docs/adr/0044-post-change-verification-boundary.md`
   - `pyproject.toml`
-- **关联 commit**：`pending`
+- **关联 commit**：`18c90e8`
 - **关联 ADR**：[ADR-0044](./adr/0044-post-change-verification-boundary.md)
 
 ### 变更摘要
