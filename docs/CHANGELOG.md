@@ -24,7 +24,7 @@
   - `docs/ROADMAP.md`
   - `docs/adr/README.md`
   - `docs/adr/0045-acceptance-regression-gate.md`
-- **关联 commit**：`pending`
+- **关联 commit**：`85c5dc5`
 - **关联 ADR**：[ADR-0045](./adr/0045-acceptance-regression-gate.md)
 
 ### 变更摘要
