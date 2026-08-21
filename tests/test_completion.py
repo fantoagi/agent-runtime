@@ -262,6 +262,47 @@ def test_completion_policy_accepts_docs_change_after_diff_without_process() -> N
     assert decision.evidence.validation_succeeded is None
 
 
+
+def test_completion_policy_requires_git_status_for_new_untracked_file() -> None:
+    policy = CodingCompletionPolicy(
+        {"write_text_file", "git_diff", "git_status", "run_process"}
+    )
+    write = _execution(
+        "write_text_file",
+        {"path": "RESULT.txt", "content": "done"},
+        result_data={"path": "RESULT.txt", "status": "written", "created": True},
+    )
+    diff = _execution("git_diff", {}, result_data={"exit_code": 0}, position=1)
+
+    missing_status = policy.assess(
+        [write, diff],
+        verification_requested=False,
+    )
+
+    assert missing_status.evidence.status == "unverified"
+    assert missing_status.evidence.git_status_required is True
+    assert missing_status.evidence.git_status_inspected is False
+    assert missing_status.evidence.unmet_requirements == (
+        "post-change Git status was not inspected for a newly created file",
+    )
+    assert missing_status.followup_message is not None
+
+    verified = policy.assess(
+        [
+            write,
+            diff,
+            _execution("git_status", {}, result_data={"status": "changes"}, position=2),
+        ],
+        verification_requested=False,
+    )
+
+    assert verified.evidence.status == "verified"
+    assert verified.evidence.git_status_required is True
+    assert verified.evidence.git_status_inspected is True
+    assert verified.evidence.unmet_requirements == ()
+    assert verified.followup_message is None
+
+
 def test_completion_policy_reports_failed_validation_and_patch_files() -> None:
     policy = CodingCompletionPolicy({"apply_patch", "git_diff", "run_process"})
     decision = policy.assess(

@@ -620,9 +620,10 @@ def _read_artifact(
 
 def _write_text_file(
     arguments: dict[str, Any], context: ToolContext
-) -> dict[str, str]:
+) -> dict[str, Any]:
     context.raise_if_cancelled()
     path = confined_path(context.workspace_path, arguments["path"])
+    created = not path.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
@@ -638,4 +639,4 @@ def _write_text_file(
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
-    return {"path": str(path), "status": "written"}
+    return {"path": str(path), "status": "written", "created": created}

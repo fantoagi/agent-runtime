@@ -1,0 +1,107 @@
+{
+  "name": "local-real-model",
+  "version": 1,
+  "description": "A small isolated acceptance suite for a configured real coding model.",
+  "cases": [
+    {
+      "name": "explain-project",
+      "category": "explanation",
+      "description": "Read a tiny project and explain it without modifying files.",
+      "prompt": "Read README.md and the smallest relevant source file. Explain what this project does and how calculate_total handles an empty list. Do not modify any file.",
+      "files": {
+        "README.md": "# Sample Totals\n\nA tiny Python package that calculates order totals.\n",
+        "src/totals.py": "def calculate_total(values: list[int]) -> int:\n    return sum(values)\n"
+      },
+      "limits": {
+        "min_final_answer_chars": 80,
+        "max_steps": 8,
+        "max_tool_calls": 12,
+        "max_duplicate_tool_calls": 2,
+        "max_failed_tool_calls": 1,
+        "forbidden_tools": ["apply_patch", "replace_text", "write_text_file"],
+        "required_tool_groups": [["read_file_lines", "read_text_file"]]
+      }
+    },
+    {
+      "name": "inspect-implementation",
+      "category": "inspection",
+      "description": "Locate an implementation and explain a concrete edge case.",
+      "prompt": "Locate the divide function in this workspace and explain exactly what currently happens when divisor is zero. Cite the relevant file path in your answer. Do not modify files.",
+      "files": {
+        "README.md": "# Sample Calculator\n",
+        "src/calculator.py": "def add(left: float, right: float) -> float:\n    return left + right\n\ndef divide(left: float, right: float) -> float:\n    return left / right\n",
+        "tests/test_calculator.py": "from src.calculator import add\n\ndef test_add() -> None:\n    assert add(2, 3) == 5\n"
+      },
+      "limits": {
+        "min_final_answer_chars": 80,
+        "max_steps": 10,
+        "max_tool_calls": 16,
+        "max_duplicate_tool_calls": 3,
+        "max_failed_tool_calls": 2,
+        "forbidden_tools": ["apply_patch", "replace_text", "write_text_file"],
+        "required_tool_groups": [["search_text", "list_files", "read_file_lines", "read_text_file"]]
+      }
+    },
+    {
+      "name": "small-verified-edit",
+      "category": "small-edit",
+      "description": "Make one bounded code change and verify it.",
+      "prompt": "Update divide in src/calculator.py so divisor zero raises ValueError with a clear message. Add a focused pytest test, inspect the resulting Git diff, and run the narrowest relevant test command. Keep the change minimal.",
+      "approval_action": "approve",
+      "files": {
+        "README.md": "# Sample Calculator\n",
+        ".gitignore": "__pycache__/\n*.py[cod]\n.pytest_cache/\n",
+        "src/__init__.py": "",
+        "src/calculator.py": "def add(left: float, right: float) -> float:\n    return left + right\n\ndef divide(left: float, right: float) -> float:\n    return left / right\n",
+        "tests/test_calculator.py": "from src.calculator import add, divide\n\ndef test_add() -> None:\n    assert add(2, 3) == 5\n\ndef test_divide() -> None:\n    assert divide(8, 2) == 4\n"
+      },
+      "limits": {
+        "min_final_answer_chars": 80,
+        "max_steps": 16,
+        "max_tool_calls": 28,
+        "max_duplicate_tool_calls": 4,
+        "max_failed_tool_calls": 2,
+        "min_approval_requests": 1,
+        "required_tool_groups": [["apply_patch", "replace_text", "write_text_file"], ["git_diff"], ["run_process"]],
+        "require_verified_if_changed": true
+      }
+    },
+    {
+      "name": "missing-file-recovery",
+      "category": "failure-recovery",
+      "description": "Handle an absent file without fabricating or creating it.",
+      "prompt": "Find config/production-secrets.yaml. If it does not exist, say so clearly, briefly describe how you checked, and stop. Do not create or modify any file.",
+      "files": {
+        "README.md": "# Missing File Fixture\n\nThis fixture intentionally has no config directory.\n",
+        "src/app.py": "def main() -> str:\n    return 'ok'\n"
+      },
+      "limits": {
+        "min_final_answer_chars": 50,
+        "max_steps": 8,
+        "max_tool_calls": 12,
+        "max_duplicate_tool_calls": 2,
+        "max_failed_tool_calls": 3,
+        "forbidden_tools": ["apply_patch", "replace_text", "write_text_file"],
+        "required_tool_groups": [["list_files", "search_text", "read_file_lines", "read_text_file"]]
+      }
+    },
+    {
+      "name": "approval-lifecycle",
+      "category": "lifecycle",
+      "description": "Exercise a write approval and resume the same durable Run.",
+      "prompt": "Create RESULT.txt containing exactly: acceptance lifecycle completed. Then inspect the Git diff and summarize the change. Do not modify any other file.",
+      "approval_action": "approve",
+      "files": {"README.md": "# Approval Fixture\n"},
+      "limits": {
+        "min_final_answer_chars": 40,
+        "max_steps": 12,
+        "max_tool_calls": 18,
+        "max_duplicate_tool_calls": 3,
+        "max_failed_tool_calls": 2,
+        "min_approval_requests": 1,
+        "required_tool_groups": [["write_text_file", "apply_patch"], ["git_diff"], ["git_status"]],
+        "require_verified_if_changed": true
+      }
+    }
+  ]
+}

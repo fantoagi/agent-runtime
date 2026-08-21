@@ -148,9 +148,20 @@ async def test_builtin_write_is_atomic_and_leaves_no_temp_file(workspace: Path) 
         {"path": "nested/result.txt", "content": "durable"},
         ToolContext("run", 1, workspace, {}),
     )
-    registry.close()
-    assert result.data == {"path": str(workspace / "nested" / "result.txt"), "status": "written"}
+    assert result.data == {
+        "path": str(workspace / "nested" / "result.txt"),
+        "status": "written",
+        "created": True,
+    }
     assert (workspace / "nested" / "result.txt").read_text(encoding="utf-8") == "durable"
+    overwritten = await registry.invoke(
+        "write_text_file",
+        {"path": "nested/result.txt", "content": "updated"},
+        ToolContext("run", 2, workspace, {}),
+    )
+    assert overwritten.data is not None
+    assert overwritten.data["created"] is False
+    registry.close()
     assert list((workspace / "nested").glob(".*.tmp")) == []
 
 

@@ -1,6 +1,6 @@
 # Interactive CLI 使用指南
 
-- **适用版本**：v0.8.18+
+- **适用版本**：v0.8.19+
 - **最近更新**：2026-08-19
 - **关联变更**：[E2026-08-19-010](./CHANGELOG.md#e2026-08-19-010)、[E2026-08-19-009](./CHANGELOG.md#e2026-08-19-009)、[E2026-08-19-008](./CHANGELOG.md#e2026-08-19-008)、[E2026-08-19-006](./CHANGELOG.md#e2026-08-19-006)、[E2026-08-19-005](./CHANGELOG.md#e2026-08-19-005)、[E2026-08-19-004](./CHANGELOG.md#e2026-08-19-004)、[E2026-08-19-003](./CHANGELOG.md#e2026-08-19-003)、[E2026-08-19-002](./CHANGELOG.md#e2026-08-19-002)、[E2026-08-19-001](./CHANGELOG.md#e2026-08-19-001)、[E2026-08-18-003](./CHANGELOG.md#e2026-08-18-003)、[E2026-08-18-001](./CHANGELOG.md#e2026-08-18-001)、[E2026-08-17-001](./CHANGELOG.md#e2026-08-17-001)、[E2026-08-16-006](./CHANGELOG.md#e2026-08-16-006)
 - **关联决策**：[ADR-0041](./adr/0041-fresh-finalization-context.md)、[ADR-0039](./adr/0039-textual-tool-call-guard.md)、[ADR-0038](./adr/0038-finalization-context-integrity.md)、[ADR-0037](./adr/0037-evidence-aware-convergence.md)、[ADR-0036](./adr/0036-read-only-tool-convergence.md)、[ADR-0035](./adr/0035-interactive-cli-execution-transparency.md)、[ADR-0034](./adr/0034-interactive-cli-presentation.md)、[ADR-0032](./adr/0032-artifact-paging-workspace-discovery.md)、[ADR-0028](./adr/0028-coding-workspace-tools.md)、[ADR-0027](./adr/0027-interactive-cli-session-history.md)
@@ -239,7 +239,7 @@ v0.8.14 不只比较 Tool arguments，还判断调用是否增加新证据。重
 ↻ Inspection budget reached; answering from collected evidence
 ```
 
-verbose 模式同时显示 `inspection_calls`、`consecutive_no_progress` 和 `reason`。该机制只自动 finalization 尚未出现副作用 Tool 的检查任务；一旦修改 Workspace，证据账本重置，验证与修复流程不会被该只读边界截断。v0.8.15 在最终无 Tool 请求中始终保留 durable 原始 user message，并在消息尾部再次以 user role 聚焦本轮问题；解释型任务不会再被默认提示输出无关的 `No files were modified`，也不应声称用户请求不可见。 v0.8.17 若检测到模型把 DSML/XML/JSON Tool Call（包括全角或重复竖线 DSML 变体）作为普通文本返回，会隐藏该伪答案并显示 `Model returned tool syntax as text; retrying a plain-language answer`，随后只进行一次无 Tool 修复；再次违规时 Run 明确失败。 v0.8.18 会先产生 `convergence.finalization_context_built`：这表示 Runtime 已把旧 Tool 轨迹隔离，只把去重、截断后的 durable evidence 与原始请求交给模型；CLI 不展示证据原文，verbose/Learning Console 可查看 included、deduplicated 和 omitted 计数。
+verbose 模式同时显示 `inspection_calls`、`consecutive_no_progress` 和 `reason`。该机制只自动 finalization 尚未出现副作用 Tool 的检查任务；一旦修改 Workspace，证据账本重置，验证与修复流程不会被该只读边界截断。v0.8.15 在最终无 Tool 请求中始终保留 durable 原始 user message，并在消息尾部再次以 user role 聚焦本轮问题；解释型任务不会再被默认提示输出无关的 `No files were modified`，也不应声称用户请求不可见。 v0.8.17 若检测到模型把 DSML/XML/JSON Tool Call（包括全角或重复竖线 DSML 变体）作为普通文本返回，会隐藏该伪答案并显示 `Model returned tool syntax as text; retrying a plain-language answer`，随后只进行一次无 Tool 修复；再次违规时 Run 明确失败。 v0.8.19 会先产生 `convergence.finalization_context_built`：这表示 Runtime 已把旧 Tool 轨迹隔离，只把去重、截断后的 durable evidence 与原始请求交给模型；CLI 不展示证据原文，verbose/Learning Console 可查看 included、deduplicated 和 omitted 计数。
 
 ## 5.6 Project-aware Workspace Context
 

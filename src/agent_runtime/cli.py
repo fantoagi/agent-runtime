@@ -7,6 +7,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .acceptance import (
+    AcceptanceSuiteError,
+    RealModelAcceptanceRunner,
+    load_acceptance_suite,
+)
 from .backup import RuntimeBackupManager
 from .doctor import RuntimeDoctor
 from .domain import BackupError
@@ -171,9 +176,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     trace_tree.add_argument("run_id")
 
-    eval_command = subcommands.add_parser("eval", help="Run deterministic evaluation suites")
+    eval_command = subcommands.add_parser(
+        "eval", help="Run deterministic demos or isolated real-model acceptance suites"
+    )
     eval_subcommands = eval_command.add_subparsers(dest="eval_command", required=True)
     eval_subcommands.add_parser("demo", help="Evaluate the built-in arithmetic agent")
+    eval_run = eval_subcommands.add_parser(
+        "run", help="Run an isolated acceptance suite with the configured model"
+    )
+    eval_run.add_argument("--suite", default="local-real-model")
+    eval_run.add_argument(
+        "--case",
+        dest="case_names",
+        action="append",
+        default=[],
+        help="Run one named case; repeat the option to select multiple cases",
+    )
+    eval_run.add_argument("--repeat", type=int, default=1)
+    eval_run.add_argument("--output", default=None)
 
     runs = subcommands.add_parser("runs", help="Inspect or control existing runs")
     runs_subcommands = runs.add_subparsers(dest="runs_command", required=True)
@@ -345,6 +365,32 @@ async def _chat_local(arguments: argparse.Namespace) -> int:
         lock.release()
 
 
+async def _eval_local(arguments: argparse.Namespace) -> int:
+    settings = _local_settings(arguments)
+    configure_structured_logging(
+        level=settings.log_level,
+        file_path=settings.log_file,
+        max_bytes=settings.log_max_bytes,
+        backup_count=settings.log_backup_count,
+        include_stream=False,
+    )
+    lock = LocalRuntimeLock(settings.lock_path)
+    lock.acquire()
+    try:
+        suite = load_acceptance_suite(arguments.suite)
+        output = Path(arguments.output).resolve() if arguments.output else None
+        report = await RealModelAcceptanceRunner(settings).run(
+            suite,
+            case_names=arguments.case_names,
+            repeat=arguments.repeat,
+            output_path=output,
+        )
+        _print(report.to_dict())
+        return 0 if report.failed_attempts == 0 else 1
+    finally:
+        lock.release()
+
+
 async def async_main(arguments: argparse.Namespace) -> int:
     if arguments.json_logs:
         configure_structured_logging()
@@ -393,6 +439,13 @@ async def async_main(arguments: argparse.Namespace) -> int:
         try:
             return await _chat_local(arguments)
         except (LocalConfigError, LocalRuntimeLockError, KeyError) as error:
+            _print({"status": "error", "code": type(error).__name__, "detail": str(error)})
+            return 2
+
+    if arguments.command == "eval" and arguments.eval_command == "run":
+        try:
+            return await _eval_local(arguments)
+        except (AcceptanceSuiteError, LocalConfigError, LocalRuntimeLockError) as error:
             _print({"status": "error", "code": type(error).__name__, "detail": str(error)})
             return 2
 

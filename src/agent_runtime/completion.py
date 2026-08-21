@@ -103,6 +103,8 @@ class CompletionEvidence:
     write_tool_count: int
     diff_required: bool
     diff_inspected: bool
+    git_status_required: bool
+    git_status_inspected: bool
     validation_required: bool
     validations: tuple[ValidationEvidence, ...]
     failed_tools: tuple[str, ...]
@@ -123,6 +125,8 @@ class CompletionEvidence:
             "write_tool_count": self.write_tool_count,
             "diff_required": self.diff_required,
             "diff_inspected": self.diff_inspected,
+            "git_status_required": self.git_status_required,
+            "git_status_inspected": self.git_status_inspected,
             "validation_required": self.validation_required,
             "validation_attempted": bool(self.validations),
             "validation_succeeded": self.validation_succeeded,
@@ -185,6 +189,8 @@ class CodingCompletionPolicy:
                 write_tool_count=0,
                 diff_required=False,
                 diff_inspected=False,
+                git_status_required=False,
+                git_status_inspected=False,
                 validation_required=False,
                 validations=(),
                 failed_tools=failed_tools,
@@ -202,6 +208,17 @@ class CodingCompletionPolicy:
             and execution.status is ToolExecutionStatus.COMPLETED
             for execution in later_executions
         )
+        created_file_written = any(
+            execution.tool_call.name == "write_text_file"
+            and (execution.result_data or {}).get("created") is True
+            for _, execution in completed_writes
+        )
+        git_status_required = created_file_written and "git_status" in self.available_tool_names
+        git_status_inspected = any(
+            execution.tool_call.name == "git_status"
+            and execution.status is ToolExecutionStatus.COMPLETED
+            for execution in later_executions
+        )
         code_changed = any(Path(path).suffix.casefold() in _CODE_SUFFIXES for path in changed_files)
         validation_required = code_changed and "run_process" in self.available_tool_names
         validations = tuple(
@@ -213,6 +230,8 @@ class CodingCompletionPolicy:
         unmet: list[str] = []
         if diff_required and not diff_inspected:
             unmet.append("post-change Git diff was not inspected")
+        if git_status_required and not git_status_inspected:
+            unmet.append("post-change Git status was not inspected for a newly created file")
         if validation_required:
             if not validations:
                 unmet.append("no post-change validation command was run")
@@ -226,6 +245,8 @@ class CodingCompletionPolicy:
             write_tool_count=len(completed_writes),
             diff_required=diff_required,
             diff_inspected=diff_inspected,
+            git_status_required=git_status_required,
+            git_status_inspected=git_status_inspected,
             validation_required=validation_required,
             validations=validations,
             failed_tools=failed_tools,

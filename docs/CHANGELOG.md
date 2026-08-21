@@ -4,6 +4,157 @@
 
 ---
 
+<a id="e2026-08-20-002"></a>
+## E2026-08-20-002：v0.8.20 New-file Verification Evidence
+
+- **完成时间**：2026-08-20
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/tools.py`
+  - `src/agent_runtime/completion.py`
+  - `src/agent_runtime/acceptance.py`
+  - `src/agent_runtime/eval_suites/local-real-model.json`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_completion.py`
+  - `tests/test_acceptance.py`
+  - `tests/test_reliability.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/README.md`
+  - `docs/REAL_MODEL_EVALS.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0043-new-file-verification-evidence.md`
+  - `pyproject.toml`
+- **关联 commit**：`3c4187e`
+- **关联 ADR**：[ADR-0043](./adr/0043-new-file-verification-evidence.md)
+
+### 变更摘要
+
+基于 v0.8.19 首次完整真实模型基线的 durable 事实，修复新建未跟踪文件只调用 `git_diff` 也可能被误标 `verified` 的证据漏洞。该基线使用 `deepseek-v4-flash` 执行 5 Cases × 3 repeats，15/15 attempts 通过且 failed assertions 为 0；修复来自通过结果背后的 ToolExecution/Git 事实检查，不是模型名称或答案文本特判。
+
+### 系统架构
+
+Completion Evidence 现在明确区分 tracked diff 和 untracked status。`write_text_file` 在 durable result 中记录写入前目标是否不存在；Completion Policy 与 Real-model Acceptance 从同一事实判断新文件是否需要 `git_status`。Run 状态机、Event schema、Provider 协议和 SQLite schema 均未变化。
+
+### 实现方式
+
+`write_text_file` 兼容性增加 `created: bool`。当最后一次成功写入包含 `created=true` 且标准 Runtime 注册了 `git_status` 时，`CodingCompletionPolicy` 要求后续成功执行 `git_status`，否则记录明确 unmet requirement 并保持 `unverified`。`AcceptanceMetrics` 同步增加 `created_file_writes` 和 `git_status_inspected`；`approval-lifecycle` Case 现在显式要求 status，`small-verified-edit` Fixture 用 `.gitignore` 排除 pytest/Python cache 噪声。
+
+### 当前功能
+
+标准本地 Coding Run 创建新文件后，需要同时具备 `git_diff` 和 `git_status` 证据；覆盖已有文件仍沿用 diff 证据。代码修改继续要求成功 validation。CLI、Checkpoint 和 Acceptance 报告可以从 durable result 解释为什么任务是 verified 或 unverified，不会自动 stage、commit 或修改 Git 状态。
+
+### 已知限制
+
+该规则只覆盖当前会创建文件的内置 `write_text_file`；旧 Run 没有 `created` 字段，不会追溯重分类。Git status 证明的是 Workspace 变化存在，不判断内容业务正确性。未注册 `git_status` 的通用 SDK Runtime 不会被强制增加不可用的要求。真实模型存在随机性，15/15 只代表该次模型与 Runtime 组合。
+
+### 测试与验收
+
+新增 Completion Policy 与 Acceptance 新文件证据回归，并验证原子写第一次返回 `created=true`、覆盖写返回 `created=false`。聚焦测试为 `69 passed`；本地 Python 3.13 全量结果为 `359 passed`。总体 coverage 为 `84.99%`，core line coverage 为 `91.87%`，core branch coverage 为 `81.01%`；Ruff、Mypy strict、文档门禁和 coverage 门禁通过；成功构建 `agent_runtime-0.8.20.tar.gz` 与 `agent_runtime-0.8.20-py3-none-any.whl`，并在干净虚拟环境完成 CLI、SDK、FastAPI/SSE、备份恢复、诊断和内置 Acceptance Suite 打包 smoke。
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check --no-cache src tests scripts
+.\.venv\Scripts\python.exe -m mypy src/agent_runtime
+.\.venv\Scripts\python.exe -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -q
+.\.venv\Scripts\python.exe scripts/check_coverage.py coverage.json
+python scripts/check_docs.py
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.20-py3-none-any.whl
+```
+
+### 后续计划
+
+使用相同真实 Provider 重跑 `approval-lifecycle --repeat 3`，确认每轮报告包含 `created_file_writes: 1`、`git_status_inspected: true` 和 `verification_status: verified`。后续继续只针对可复现失败断言和 durable 事实做最小修复。
+
+---
+<a id="e2026-08-20-001"></a>
+## E2026-08-20-001：v0.8.19 Real-model Acceptance Baseline
+
+- **完成时间**：2026-08-20
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/acceptance.py`
+  - `src/agent_runtime/eval_suites/local-real-model.json`
+  - `src/agent_runtime/cli.py`
+  - `src/agent_runtime/__init__.py`
+  - `src/agent_runtime/version.py`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_acceptance.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `docs/README.md`
+  - `docs/REAL_MODEL_EVALS.md`
+  - `docs/INTERACTIVE_CLI.md`
+  - `docs/CODING_TOOLS.md`
+  - `docs/LOCAL_RUNTIME.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CHANGELOG.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0042-real-model-acceptance-baseline.md`
+  - `pyproject.toml`
+- **关联 commit**：`3c4187e`
+- **关联 ADR**：[ADR-0042](./adr/0042-real-model-acceptance-baseline.md)
+
+### 变更摘要
+
+建立真实模型稳定性验收基线，把此前依赖人工截图和单次体验的复测方式转换为固定 Suite、隔离合成 Workspace、durable Run/Event/ToolExecution 指标和可比较的脱敏报告。该版本不增加新的 Coding Tool 或编排能力，只为现有链路建立重复验收入口。
+
+### 系统架构
+
+新增 `RealModelAcceptanceRunner`，每个 Case 创建独立合成 Git Workspace、SQLite、Artifact 和日志，再通过 configured Local Runtime 的真实 Provider、Agent、Tool、Approval 和 resume 路径执行。验收层是 Runtime 外部 Adapter，不修改 Run 状态机、Event schema、Provider 协议或 SQLite migration。
+
+### 实现方式
+
+内置 `local-real-model` Suite 覆盖 explanation、inspection、small-edit、failure-recovery 和 lifecycle 五类任务。报告从 durable 事实派生步骤、Tool 计数、完全相同调用重复、失败/UNKNOWN、Approval、模型重试、收敛、协议违规、diff 和 validation 状态；只保存模型/版本、Run/Trace ID、计数、断言、最终答案长度及 SHA-256，不保存 Prompt、Fixture 内容、Tool arguments/result 或答案原文。CLI 新增 `agent-runtime eval run --suite local-real-model`，支持 `--case`、`--repeat` 和 `--output`。
+
+### 当前功能
+
+用户可以用当前已配置的真实模型运行五个隔离 Case，按确定性阈值检查 completion、convergence、Tool efficiency、protocol integrity、verification 和 Approval lifecycle。每次报告保存在 `<state-dir>/evals/<report-id>/acceptance-report.json`，最新报告同步到 `<state-dir>/evals/latest-report.json`；Case 的独立 SQLite 继续保留，可根据 Run ID 深入诊断。
+
+### 已知限制
+
+真实模型调用会产生费用并受网络、模型版本和随机性影响；一次通过不能代表长期稳定，重要变更建议 `--repeat 3`。第一版不使用 LLM-as-a-Judge，不评价答案文风和深层语义；合成小项目也不能覆盖大型真实 Workspace。修改 Case 依赖本机 Git、启用的 `run_process` 和可用 pytest 环境。
+
+### 测试与验收
+
+新增内置 Suite 加载、Suite schema 错误矩阵、危险 Fixture 路径拒绝、Git Fixture 初始化、隔离执行、报告内容脱敏、Case 选择/repeat、指标与断言、Tool 验证识别和 Approval lifecycle 测试。本地 Python 3.13 全量结果为 `357 passed`；总体 coverage 为 `84.96%`，core line coverage 为 `91.84%`，core branch coverage 为 `80.94%`。Ruff、Mypy strict、文档门禁和 coverage 门禁通过；sdist/wheel 构建、干净虚拟环境安装、CLI/SDK/FastAPI/SSE smoke 以及内置 `local-real-model.json` Wheel 打包检查通过。
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check --no-cache src tests scripts
+.\.venv\Scripts\python.exe -m mypy src/agent_runtime
+.\.venv\Scripts\python.exe -m pytest --cov=agent_runtime --cov-branch --cov-report=json:coverage.json -q
+.\.venv\Scripts\python.exe scripts/check_coverage.py coverage.json
+python scripts/check_docs.py
+python -m build
+python scripts/verify_distribution.py dist/agent_runtime-0.8.19-py3-none-any.whl
+```
+
+### 后续计划
+
+先运行 `explain-project` 和完整 `local-real-model` Suite，记录真实 Provider 的首次 baseline。后续只针对可复现的失败断言和 durable Run 事实优化 Context/Evidence、Tool 收敛或修改后验证，不扩展新 Tool。
+
+---
+
 <a id="e2026-08-19-010"></a>
 ## E2026-08-19-010：v0.8.18 Fresh Finalization Context
 

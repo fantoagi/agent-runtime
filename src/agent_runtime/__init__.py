@@ -1,5 +1,17 @@
 """Durable single-agent and multi-agent runtime primitives."""
 
+from .acceptance import (
+    AcceptanceAssertion,
+    AcceptanceCase,
+    AcceptanceCaseResult,
+    AcceptanceLimits,
+    AcceptanceMetrics,
+    AcceptanceReport,
+    AcceptanceSuite,
+    AcceptanceSuiteError,
+    RealModelAcceptanceRunner,
+    load_acceptance_suite,
+)
 from .backup import BackupCreation, BackupVerification, RestoreResult, RuntimeBackupManager
 from .coding_tools import (
     DEFAULT_IGNORED_DIRECTORIES,
@@ -121,6 +133,14 @@ from .version import __version__
 __all__ = [
     "DEFAULT_IGNORED_DIRECTORIES",
     "DEFAULT_IGNORED_FILES",
+    "AcceptanceAssertion",
+    "AcceptanceCase",
+    "AcceptanceCaseResult",
+    "AcceptanceLimits",
+    "AcceptanceMetrics",
+    "AcceptanceReport",
+    "AcceptanceSuite",
+    "AcceptanceSuiteError",
     "AgentDefinition",
     "AgentDefinitionUnavailable",
     "AgentRegistry",
@@ -173,6 +193,7 @@ __all__ = [
     "OperationalFailure",
     "OperationalSnapshot",
     "ParallelWorkflow",
+    "RealModelAcceptanceRunner",
     "RestoreResult",
     "RunRelation",
     "RunRelationType",
@@ -214,6 +235,7 @@ __all__ = [
     "create_configured_local_runtime",
     "create_memory_demo_runtime",
     "create_multi_agent_demo_runtime",
+    "load_acceptance_suite",
     "load_local_settings",
     "local_runtime_status",
     "memory_demo_agent",
