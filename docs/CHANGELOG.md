@@ -4,6 +4,75 @@
 
 ---
 
+<a id="e2026-08-21-002"></a>
+## E2026-08-21-002：v0.8.22 Acceptance Report Regression Gate
+
+- **完成时间**：2026-08-21
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/acceptance_compare.py`
+  - `src/agent_runtime/cli.py`
+  - `tests/test_acceptance_compare.py`
+  - `src/agent_runtime/version.py`
+  - `pyproject.toml`
+  - `README.md`
+  - `docs/REAL_MODEL_EVALS.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/CHANGELOG.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/README.md`
+  - `docs/adr/0045-acceptance-regression-gate.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0045](./adr/0045-acceptance-regression-gate.md)
+
+### 变更摘要
+
+增加真实模型验收报告的离线对比能力，让一次新的真实模型运行可以与历史基线进行可重复的回归判定，而不需要再次调用模型或把原始 Prompt、Tool 参数和答案写入比较结果。
+
+### 系统架构
+
+- `RealModelAcceptanceRunner` 继续负责隔离 Workspace、durable Run 和脱敏报告。
+- 新增 `compare_acceptance_reports` 作为报告层的纯函数式 Gate，不进入 Runtime 执行路径。
+- CLI 增加 `agent-runtime eval compare <baseline> <candidate>`，读取两个已落盘 JSON 并输出结构化比较结果。
+- 比较以 suite identity 和 `case_name + attempt` 对齐；模型、Provider、Runtime 版本变化是 warning，不自动当作失败。
+
+### 实现方式
+
+- 以前通过的 Attempt 在候选报告中失败，判定为 `case_failed`。
+- `verified` 退化、协议违规增加、UNKNOWN Tool Outcome 增加，分别判定为可靠性回归。
+- Suite checksum/version/name 不一致时返回 `incompatible`，防止把不同验收集合误比较。
+- 缺失 Attempt 是失败；新增 Attempt、模型变化和超过 20% 的单 Case 耗时增加记录为 warning。
+- 比较器只读取脱敏报告，不创建 Runtime、不打开 SQLite、不发起 Provider 请求。
+
+### 当前功能
+
+- 可以在真实模型验收完成后离线执行回归比较。
+- 退出码为 `0` 表示无回归，`1` 表示发现回归，`2` 表示报告不可比较或格式错误。
+- 保留完整报告中的 Run/Trace ID，发现回归后仍可按 ID 回看对应 Case 的 durable Event。
+
+### 已知限制
+
+- 性能变化目前只作为 warning，不建立固定 Runner 的统计显著性门禁。
+- 比较器不判断答案语义，也不替代 Case 自身的断言。
+- 仍需使用同一 Suite checksum；有意修改 Case 后必须生成新的基线。
+
+### 测试与验收
+
+新增离线测试覆盖通过、失败、验证证据退化、协议/UNKNOWN 退化、Suite 不兼容和重复结果；不调用真实模型。
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests/test_acceptance_compare.py
+agent-runtime eval compare .\baseline.json .\candidate.json
+```
+
+### 后续计划
+
+在得到下一轮真实模型报告后，先执行离线 compare，再只针对可复现回归进入 Runtime 修复；不因为单次答案文本波动增加 Provider 特判。
+
+---
+
 <a id="e2026-08-21-001"></a>
 ## E2026-08-21-001：v0.8.21 Post-change Verification Evidence
 

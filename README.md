@@ -110,6 +110,7 @@ python scripts\verify_local_runtime.py --runs 100 --concurrency 8
 
 # 隔离真实模型验收（会调用配置模型并可能产生费用）
 agent-runtime eval run --suite local-real-model --case explain-project
+agent-runtime eval compare .\baseline-report.json .\candidate-report.json
 ```
 
 ## 当前边界

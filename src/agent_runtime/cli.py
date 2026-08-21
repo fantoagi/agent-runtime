@@ -12,6 +12,7 @@ from .acceptance import (
     RealModelAcceptanceRunner,
     load_acceptance_suite,
 )
+from .acceptance_compare import compare_acceptance_reports
 from .backup import RuntimeBackupManager
 from .doctor import RuntimeDoctor
 from .domain import BackupError
@@ -194,6 +195,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_run.add_argument("--repeat", type=int, default=1)
     eval_run.add_argument("--output", default=None)
+    eval_compare = eval_subcommands.add_parser(
+        "compare", help="Compare two persisted acceptance reports without calling a model"
+    )
+    eval_compare.add_argument("baseline", help="Earlier acceptance-report.json")
+    eval_compare.add_argument("candidate", help="New acceptance-report.json")
 
     runs = subcommands.add_parser("runs", help="Inspect or control existing runs")
     runs_subcommands = runs.add_subparsers(dest="runs_command", required=True)
@@ -446,6 +452,15 @@ async def async_main(arguments: argparse.Namespace) -> int:
         try:
             return await _eval_local(arguments)
         except (AcceptanceSuiteError, LocalConfigError, LocalRuntimeLockError) as error:
+            _print({"status": "error", "code": type(error).__name__, "detail": str(error)})
+            return 2
+
+    if arguments.command == "eval" and arguments.eval_command == "compare":
+        try:
+            comparison = compare_acceptance_reports(arguments.baseline, arguments.candidate)
+            _print(comparison.to_dict())
+            return 0 if comparison.passed else (2 if comparison.status == "incompatible" else 1)
+        except AcceptanceSuiteError as error:
             _print({"status": "error", "code": type(error).__name__, "detail": str(error)})
             return 2
 

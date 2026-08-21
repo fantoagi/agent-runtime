@@ -54,6 +54,23 @@ agent-runtime eval run --suite local-real-model --output .\.agent-runtime\eval-r
 
 `serve`、`chat` 和 `eval run` 共用本地 Owner Lock，不能同时占用同一状态目录。
 
+## 离线回归比较
+
+真实模型运行完成后，可以在不调用模型、不占用 Runtime Owner Lock 的情况下比较历史报告：
+
+```powershell
+agent-runtime eval compare .\baseline-report.json .\candidate-report.json
+```
+
+比较规则：
+
+- 退出码 `0`：没有发现可靠性回归。
+- 退出码 `1`：发现以前通过的 Attempt 失败、`verified` 退化、协议违规增加或 UNKNOWN Tool Outcome 增加。
+- 退出码 `2`：报告格式错误，或 Suite name/version/checksum 不一致，不能安全比较。
+- Provider、模型、Runtime 版本变化和单 Case 耗时超过 20% 只记录 warning，不自动阻断。
+
+比较结果不包含 Prompt、Fixture、Tool 参数/结果或最终答案原文；输出中的 Case/Run/Trace 标识可用于回看对应的隔离 durable Event。
+
 ## 报告怎么看
 
 重点字段：
