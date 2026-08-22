@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
+import platform
 import shutil
 import subprocess
+import sys
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -173,6 +176,77 @@ class AcceptanceCaseResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class AcceptanceManifest:
+    """Non-sensitive execution metadata attached to persisted acceptance reports."""
+
+    runtime_version: str = "unknown"
+    git_commit: str | None = None
+    python_version: str = "unknown"
+    platform: str = "unknown"
+    provider: str = "unknown"
+    model: str = "unknown"
+    suite: str = "unknown"
+    cases: tuple[str, ...] = ()
+    repeat: int = 1
+    started_at: str | None = None
+    finished_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "runtime_version": self.runtime_version,
+            "git_commit": self.git_commit,
+            "python_version": self.python_version,
+            "platform": self.platform,
+            "provider": self.provider,
+            "model": self.model,
+            "suite": self.suite,
+            "cases": list(self.cases),
+            "repeat": self.repeat,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+
+    @classmethod
+    def from_report_payload(cls, payload: Mapping[str, Any]) -> AcceptanceManifest:
+        """Read both v0.8.27 manifests and legacy top-level report fields."""
+        raw_manifest = payload.get("manifest")
+        manifest = raw_manifest if isinstance(raw_manifest, Mapping) else {}
+        raw_selection = payload.get("selection")
+        selection = raw_selection if isinstance(raw_selection, Mapping) else {}
+        raw_cases = manifest.get("cases", selection.get("case_names", ()))
+        cases = (
+            tuple(item for item in raw_cases if isinstance(item, str) and item)
+            if isinstance(raw_cases, Sequence) and not isinstance(raw_cases, (str, bytes))
+            else ()
+        )
+        raw_repeat = manifest.get("repeat", selection.get("repeat", 1))
+        repeat = (
+            raw_repeat
+            if isinstance(raw_repeat, int) and not isinstance(raw_repeat, bool) and raw_repeat > 0
+            else 1
+        )
+        return cls(
+            runtime_version=_manifest_string(
+                manifest.get("runtime_version"), payload.get("runtime_version")
+            ),
+            git_commit=_optional_manifest_string(manifest.get("git_commit")),
+            python_version=_manifest_string(manifest.get("python_version")),
+            platform=_manifest_string(manifest.get("platform")),
+            provider=_manifest_string(manifest.get("provider"), payload.get("provider")),
+            model=_manifest_string(manifest.get("model"), payload.get("model")),
+            suite=_manifest_string(manifest.get("suite"), payload.get("suite_name")),
+            cases=cases,
+            repeat=repeat,
+            started_at=_optional_manifest_string(
+                manifest.get("started_at", payload.get("started_at"))
+            ),
+            finished_at=_optional_manifest_string(
+                manifest.get("finished_at", payload.get("completed_at"))
+            ),
+        )
+
+
 @dataclass(slots=True)
 class AcceptanceReport:
     id: str
@@ -189,6 +263,7 @@ class AcceptanceReport:
     source_workspace_exposed: bool = False
     selected_case_names: tuple[str, ...] = ()
     repeat: int = 1
+    manifest: AcceptanceManifest | None = None
 
     @property
     def total_attempts(self) -> int:
@@ -207,6 +282,16 @@ class AcceptanceReport:
         return round(self.passed_attempts / self.total_attempts, 4) if self.results else 0.0
 
     def to_dict(self) -> dict[str, Any]:
+        manifest = self.manifest or AcceptanceManifest(
+            runtime_version=self.runtime_version,
+            provider=self.provider,
+            model=self.model,
+            suite=self.suite_name,
+            cases=self.selected_case_names,
+            repeat=self.repeat,
+            started_at=self.started_at,
+            finished_at=self.completed_at,
+        )
         return {
             "id": self.id,
             "suite_name": self.suite_name,
@@ -217,6 +302,7 @@ class AcceptanceReport:
             "model": self.model,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
+            "manifest": manifest.to_dict(),
             "total_attempts": self.total_attempts,
             "passed_attempts": self.passed_attempts,
             "failed_attempts": self.failed_attempts,
@@ -234,6 +320,80 @@ class AcceptanceReport:
 
 
 RuntimeFactory = Callable[[LocalRuntimeSettings], Runtime]
+
+
+def _manifest_string(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "unknown"
+
+
+def _optional_manifest_string(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _current_git_commit(workspace: Path) -> str | None:
+    """Return the local revision when available without reading configuration secrets."""
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=workspace,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _optional_manifest_string(completed.stdout) if completed.returncode == 0 else None
+
+
+def _build_manifest(
+    settings: LocalRuntimeSettings,
+    suite: AcceptanceSuite,
+    selected: Sequence[AcceptanceCase],
+    repeat: int,
+    started_at: str,
+    finished_at: str,
+) -> AcceptanceManifest:
+    return AcceptanceManifest(
+        runtime_version=__version__,
+        git_commit=_current_git_commit(settings.workspace),
+        python_version=platform.python_version(),
+        platform=platform.platform(),
+        provider=settings.provider,
+        model=settings.model,
+        suite=suite.name,
+        cases=tuple(case.name for case in selected),
+        repeat=repeat,
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
+
+def _acceptance_allowed_executables(configured: tuple[str, ...]) -> tuple[str, ...]:
+    """Use the runner interpreter for isolated fixture commands."""
+    runner_python = str(Path(sys.executable).resolve())
+    non_python = tuple(
+        item
+        for item in configured
+        if not Path(item).name.lower().startswith("python")
+    )
+    return tuple(dict.fromkeys((runner_python, *non_python)))
+
+
+def ensure_real_model_acceptance_ready(settings: LocalRuntimeSettings) -> None:
+    """Reject missing real-model credentials before creating runtime artifacts."""
+    if settings.provider != "openai-compatible":
+        return
+    api_key = os.getenv(settings.api_key_env)
+    if api_key is None or not api_key.strip():
+        raise AcceptanceSuiteError(
+            "Real-model acceptance requires the configured API key environment variable "
+            f"{settings.api_key_env!r}. No key value was read or logged."
+        )
 
 
 class RealModelAcceptanceRunner:
@@ -258,6 +418,7 @@ class RealModelAcceptanceRunner:
     ) -> AcceptanceReport:
         if repeat < 1:
             raise ValueError("repeat must be at least 1.")
+        ensure_real_model_acceptance_ready(self.settings)
         selected = _select_cases(suite, case_names)
         report_id = new_id("acceptance")
         report_root = self.settings.state_dir / "evals" / report_id
@@ -267,6 +428,7 @@ class RealModelAcceptanceRunner:
         for attempt in range(1, repeat + 1):
             for case in selected:
                 results.append(await self._run_case(report_root, report_id, case, attempt))
+        completed_at = utc_now().isoformat()
         report = AcceptanceReport(
             id=report_id,
             suite_name=suite.name,
@@ -276,10 +438,18 @@ class RealModelAcceptanceRunner:
             provider=self.settings.provider,
             model=self.settings.model,
             started_at=started_at.isoformat(),
-            completed_at=utc_now().isoformat(),
+            completed_at=completed_at,
             results=results,
             selected_case_names=tuple(case.name for case in selected),
             repeat=repeat,
+            manifest=_build_manifest(
+                self.settings,
+                suite,
+                selected,
+                repeat,
+                started_at.isoformat(),
+                completed_at,
+            ),
         )
         target = (output_path or report_root / "acceptance-report.json").resolve()
         report.artifact_path = str(target)
@@ -303,6 +473,9 @@ class RealModelAcceptanceRunner:
             workspace=workspace,
             state_dir=state_dir,
             log_file=state_dir / "runtime.log",
+            allowed_executables=_acceptance_allowed_executables(
+                self.settings.allowed_executables
+            ),
         )
         runtime: Runtime | None = None
         run: AgentRun | None = None

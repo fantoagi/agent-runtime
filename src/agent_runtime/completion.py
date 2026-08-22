@@ -97,6 +97,26 @@ class ValidationEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspaceStatusEvidence:
+    """Durable, non-attributing snapshot of Git workspace status."""
+
+    kind: str
+    path: str
+    original_path: str | None = None
+    index_status: str = " "
+    worktree_status: str = " "
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "path": self.path,
+            "original_path": self.original_path,
+            "index_status": self.index_status,
+            "worktree_status": self.worktree_status,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class CompletionEvidence:
     status: str
     changed_files: tuple[str, ...]
@@ -111,6 +131,15 @@ class CompletionEvidence:
     rejected_tools: tuple[str, ...]
     verification_requested: bool
     unmet_requirements: tuple[str, ...]
+    write_changed: bool | None = None
+    workspace_baseline_captured: bool = False
+    dirty_workspace_before_write: bool | None = None
+    workspace_before: tuple[WorkspaceStatusEvidence, ...] = ()
+    workspace_after: tuple[WorkspaceStatusEvidence, ...] = ()
+    tracked_diff_present: bool | None = None
+    untracked_created_files: tuple[str, ...] = ()
+    deleted_files: tuple[str, ...] = ()
+    renamed_files: tuple[tuple[str, str], ...] = ()
 
     @property
     def validation_succeeded(self) -> bool | None:
@@ -135,6 +164,15 @@ class CompletionEvidence:
             "rejected_tools": list(self.rejected_tools),
             "verification_requested": self.verification_requested,
             "unmet_requirements": list(self.unmet_requirements),
+            "write_changed": self.write_changed,
+            "workspace_baseline_captured": self.workspace_baseline_captured,
+            "dirty_workspace_before_write": self.dirty_workspace_before_write,
+            "workspace_before": [item.to_dict() for item in self.workspace_before],
+            "workspace_after": [item.to_dict() for item in self.workspace_after],
+            "tracked_diff_present": self.tracked_diff_present,
+            "untracked_created_files": list(self.untracked_created_files),
+            "deleted_files": list(self.deleted_files),
+            "renamed_files": [list(item) for item in self.renamed_files],
         }
 
 
@@ -226,8 +264,27 @@ class CodingCompletionPolicy:
             for execution in later_executions
             if (validation := _validation_evidence(execution)) is not None
         )
+        write_changed = _write_changed(completed_writes)
+        workspace_before = _latest_workspace_status(
+            executions[: completed_writes[0][0]]
+        )
+        workspace_after = _latest_workspace_status(later_executions)
+        tracked_diff_present = _latest_diff_presence(later_executions)
+        untracked_created_files = tuple(
+            item.path
+            for item in workspace_after or ()
+            if item.kind == "untracked" and item.path in changed_files
+        )
+        deleted_files = tuple(item.path for item in workspace_after or () if item.kind == "deleted")
+        renamed_files = tuple(
+            (item.original_path or item.path, item.path)
+            for item in workspace_after or ()
+            if item.kind == "renamed"
+        )
 
         unmet: list[str] = []
+        if write_changed is False:
+            unmet.append("no workspace file changed by a completed write Tool")
         if diff_required and not diff_inspected:
             unmet.append("post-change Git diff was not inspected")
         if git_status_required and not git_status_inspected:
@@ -253,6 +310,15 @@ class CodingCompletionPolicy:
             rejected_tools=rejected_tools,
             verification_requested=verification_requested,
             unmet_requirements=tuple(unmet),
+            write_changed=write_changed,
+            workspace_baseline_captured=workspace_before is not None,
+            dirty_workspace_before_write=bool(workspace_before) if workspace_before is not None else None,
+            workspace_before=workspace_before or (),
+            workspace_after=workspace_after or (),
+            tracked_diff_present=tracked_diff_present,
+            untracked_created_files=untracked_created_files,
+            deleted_files=deleted_files,
+            renamed_files=renamed_files,
         )
         if not unmet or verification_requested:
             return CompletionDecision(evidence=evidence)
@@ -262,16 +328,104 @@ class CodingCompletionPolicy:
         )
 
 
+def _write_changed(
+    completed_writes: Sequence[tuple[int, ToolExecution]],
+) -> bool | None:
+    values = [
+        value
+        for _, execution in completed_writes
+        if (value := _write_change_value(execution)) is not None
+    ]
+    if not values:
+        return None
+    return any(values)
+
+
+def _write_change_value(execution: ToolExecution) -> bool | None:
+    data = execution.result_data or {}
+    explicit = data.get("changed")
+    if isinstance(explicit, bool):
+        return explicit
+    if execution.tool_call.name == "apply_patch":
+        files = data.get("files")
+        if isinstance(files, list):
+            values = [
+                item["before_sha256"] != item["after_sha256"]
+                for item in files
+                if isinstance(item, dict)
+                and isinstance(item.get("before_sha256"), str)
+                and isinstance(item.get("after_sha256"), str)
+            ]
+            if values:
+                return any(values)
+    before = data.get("before_sha256")
+    after = data.get("after_sha256")
+    if isinstance(before, str) and isinstance(after, str):
+        return before != after
+    return None
+
+
+def _latest_workspace_status(
+    executions: Iterable[ToolExecution],
+) -> tuple[WorkspaceStatusEvidence, ...] | None:
+    latest: tuple[WorkspaceStatusEvidence, ...] | None = None
+    for execution in executions:
+        if execution.tool_call.name != "git_status" or execution.status is not ToolExecutionStatus.COMPLETED:
+            continue
+        data = execution.result_data or {}
+        raw_entries = data.get("entries")
+        if not isinstance(raw_entries, list):
+            continue
+        entries: list[WorkspaceStatusEvidence] = []
+        for raw in raw_entries:
+            if not isinstance(raw, dict):
+                continue
+            path = raw.get("path")
+            kind = raw.get("kind")
+            if not isinstance(path, str) or not isinstance(kind, str):
+                continue
+            original_path = raw.get("original_path")
+            entries.append(
+                WorkspaceStatusEvidence(
+                    kind=kind,
+                    path=path,
+                    original_path=original_path if isinstance(original_path, str) else None,
+                    index_status=str(raw.get("index_status") or " "),
+                    worktree_status=str(raw.get("worktree_status") or " "),
+                )
+            )
+        latest = tuple(entries)
+    return latest
+
+
+def _latest_diff_presence(executions: Iterable[ToolExecution]) -> bool | None:
+    latest: bool | None = None
+    for execution in executions:
+        if execution.tool_call.name != "git_diff" or execution.status is not ToolExecutionStatus.COMPLETED:
+            continue
+        value = (execution.result_data or {}).get("has_changes")
+        if isinstance(value, bool):
+            latest = value
+    return latest
+
+
 def _changed_files(executions: Iterable[ToolExecution]) -> tuple[str, ...]:
     paths: list[str] = []
     for execution in executions:
         data = execution.result_data or {}
+        if _write_change_value(execution) is False:
+            continue
         if execution.tool_call.name == "apply_patch":
             files = data.get("files")
             if isinstance(files, list):
                 for item in files:
-                    if isinstance(item, dict) and isinstance(item.get("path"), str):
-                        paths.append(item["path"])
+                    if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                        continue
+                    before = item.get("before_sha256")
+                    after = item.get("after_sha256")
+                    if isinstance(before, str) and isinstance(after, str) and before == after:
+                        continue
+                    paths.append(item["path"])
             continue
         path = data.get("path") or execution.tool_call.arguments.get("path")
         if isinstance(path, str):

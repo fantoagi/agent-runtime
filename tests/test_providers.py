@@ -172,6 +172,28 @@ def test_openai_http_errors_have_stable_retry_semantics(
     asyncio.run(invoke())
 
 
+def test_openai_stream_http_error_reads_response_before_inspecting_detail() -> None:
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            500,
+            text="upstream unavailable",
+            headers={"content-type": "text/plain"},
+        )
+
+    async def consume() -> None:
+        provider = OpenAICompatibleProvider(
+            api_key="test", transport=httpx.MockTransport(handler)
+        )
+        try:
+            with pytest.raises(ProviderHTTPError, match="upstream unavailable"):
+                async for _ in provider.stream([], [], ModelConfig(model="test")):
+                    pass
+        finally:
+            await provider.aclose()
+
+    asyncio.run(consume())
+
+
 def test_openai_stream_rejects_truncated_response() -> None:
     async def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(

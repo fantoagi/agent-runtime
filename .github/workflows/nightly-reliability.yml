@@ -63,7 +63,7 @@ jobs:
         run: python -m build
 
       - name: Verify release artifact
-        run: python scripts/verify_distribution.py dist
+        run: python scripts/verify_distribution.py dist --report release-candidate-report.json
 
       - name: Upload reliability report
         uses: actions/upload-artifact@v4
@@ -74,4 +74,5 @@ jobs:
             reliability-result.json
             crash-result.json
             backup-result.json
+            release-candidate-report.json
           if-no-files-found: warn

@@ -42,6 +42,44 @@ def write_report(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def test_compare_acceptance_reports_includes_manifest_differences_without_failure(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    baseline_payload = report_payload()
+    candidate_payload = report_payload()
+    baseline_payload["manifest"] = {
+        "runtime_version": "0.8.26",
+        "git_commit": "aaa",
+        "python_version": "3.13.0",
+        "platform": "Windows",
+        "provider": "openai-compatible",
+        "model": "model",
+        "suite": "local-real-model",
+        "cases": ["case-a"],
+        "repeat": 1,
+        "started_at": "2026-08-22T00:00:00+00:00",
+        "finished_at": "2026-08-22T00:00:01+00:00",
+    }
+    candidate_payload["manifest"] = {
+        **baseline_payload["manifest"],  # type: ignore[dict-item]
+        "git_commit": "bbb",
+        "python_version": "3.13.1",
+    }
+    write_report(baseline, baseline_payload)
+    write_report(candidate, candidate_payload)
+
+    comparison = compare_acceptance_reports(baseline, candidate)
+
+    assert comparison.status == "passed"
+    assert comparison.manifest_differences["git_commit"] == {
+        "baseline": "aaa",
+        "candidate": "bbb",
+    }
+    assert comparison.manifest_differences["python_version"]["candidate"] == "3.13.1"
+    payload = comparison.to_dict()
+    assert "manifest_differences" in payload
+
+
 def test_compare_acceptance_reports_passes_and_reports_non_gate_warnings(tmp_path: Path) -> None:
     baseline = tmp_path / "baseline.json"
     candidate = tmp_path / "candidate.json"

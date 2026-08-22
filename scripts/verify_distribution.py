@@ -6,14 +6,111 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import textwrap
+import tomllib
 import venv
 import zipfile
 from pathlib import Path
 from uuid import uuid4
+
+
+def _check(name: str, expected: str, actual: str | None) -> dict[str, object]:
+    return {
+        "name": name,
+        "expected": expected,
+        "actual": actual,
+        "status": "passed" if actual == expected else "failed",
+    }
+
+
+def _project_version(project_root: Path) -> str:
+    data = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
+    version = data.get("project", {}).get("version")
+    if not isinstance(version, str) or not version:
+        raise ValueError("pyproject.toml does not contain project.version")
+    return version
+
+
+def _version_in_wheel_metadata(wheel: Path) -> str | None:
+    with zipfile.ZipFile(wheel) as archive:
+        metadata_names = [
+            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+        ]
+        if len(metadata_names) != 1:
+            return None
+        metadata = archive.read(metadata_names[0]).decode("utf-8")
+    for line in metadata.splitlines():
+        if line.startswith("Version:"):
+            return line.partition(":")[2].strip() or None
+    return None
+
+
+def build_release_candidate_report(project_root: Path, wheel: Path) -> dict[str, object]:
+    """Return deterministic, non-secret release candidate version checks."""
+
+    version = _project_version(project_root)
+    runtime_text = (project_root / "src/agent_runtime/version.py").read_text(encoding="utf-8")
+    runtime_match = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", runtime_text)
+    runtime_version = runtime_match.group(1) if runtime_match else None
+    checks = [
+        _check("pyproject.version", version, version),
+        _check("src/agent_runtime/version.py", version, runtime_version),
+        _check(
+            "README.current_version",
+            version,
+            version if f"当前版本是 **v{version}" in (project_root / "README.md").read_text(encoding="utf-8") else None,
+        ),
+        _check(
+            "docs/CURRENT.md.current_version",
+            version,
+            version if f"当前版本**：`{version}`" in (project_root / "docs/CURRENT.md").read_text(encoding="utf-8") else None,
+        ),
+        _check(
+            "docs/ROADMAP.md.current_version",
+            version,
+            version if f"当前版本**：v{version}" in (project_root / "docs/ROADMAP.md").read_text(encoding="utf-8") else None,
+        ),
+        _check(
+            "learning_console.version",
+            version,
+            version
+            if f"Learning Console · v{version}"
+            in (project_root / "src/agent_runtime/lab/static/index.html").read_text(encoding="utf-8")
+            else None,
+        ),
+        _check(
+            "wheel.filename_version",
+            version,
+            (
+                re.match(r"^agent_runtime-(?P<version>[^-]+)-", wheel.name).group("version")
+                if re.match(r"^agent_runtime-(?P<version>[^-]+)-", wheel.name)
+                else None
+            ),
+        ),
+        _check("wheel.metadata_version", version, _version_in_wheel_metadata(wheel)),
+    ]
+    return {
+        "schema_version": 1,
+        "status": "passed" if all(item["status"] == "passed" for item in checks) else "failed",
+        "version": version,
+        "wheel": wheel.name,
+        "checks": checks,
+    }
+
+
+def emit_release_candidate_report(report: dict[str, object]) -> None:
+    print("Release Candidate checklist:")
+    for item in report["checks"]:
+        check = item
+        print(
+            f"[RC] {check['status'].upper():7} {check['name']}: "
+            f"expected={check['expected']!r} actual={check['actual']!r}"
+        )
+    print(f"[RC] RESULT: {report['status'].upper()} (version {report['version']})")
 
 
 def run(command: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> None:
@@ -43,6 +140,11 @@ def run_capture(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("wheel", type=Path)
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="optional JSON path for the Release Candidate checklist result",
+    )
     args = parser.parse_args()
     wheel = args.wheel.resolve()
     if wheel.is_dir():
@@ -55,17 +157,54 @@ def main() -> int:
     if not wheel.is_file():
         parser.error(f"wheel not found: {wheel}")
 
+    project_root = Path(__file__).resolve().parents[1]
+    release_report = build_release_candidate_report(project_root, wheel)
+    emit_release_candidate_report(release_report)
+    if args.report is not None:
+        report_path = args.report.resolve()
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps(release_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        print(f"[RC] report: {report_path}")
+    if release_report["status"] != "passed":
+        return 1
+
     base = Path.cwd() / ".runtime-test-data" / f"wheel-smoke-{uuid4().hex}"
+    source_environment = base / "source-venv"
     environment = base / "venv"
     workspace = base / "workspace"
     workspace.mkdir(parents=True, exist_ok=False)
     try:
+        venv.EnvBuilder(with_pip=True, clear=True).create(source_environment)
+        source_scripts = source_environment / ("Scripts" if os.name == "nt" else "bin")
+        source_python = source_scripts / ("python.exe" if os.name == "nt" else "python")
+        run([str(source_python), "-m", "pip", "install", "--upgrade", "pip"], cwd=workspace)
+        run(
+            [
+                str(source_python),
+                "-m",
+                "pip",
+                "install",
+                "--editable",
+                f"{project_root}[api]",
+            ],
+            cwd=workspace,
+        )
+        source_import = run_capture(
+            [str(source_python), "-c", "import agent_runtime; print(agent_runtime.__version__)"],
+            cwd=workspace,
+        )
+        assert source_import.stdout.strip() == release_report["version"], source_import.stdout
+        print("[RC] PASSED  source.editable_install")
+
         venv.EnvBuilder(with_pip=True, clear=True).create(environment)
         scripts = environment / ("Scripts" if os.name == "nt" else "bin")
         python = scripts / ("python.exe" if os.name == "nt" else "python")
         cli = scripts / ("agent-runtime.exe" if os.name == "nt" else "agent-runtime")
         run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=workspace)
         run([str(python), "-m", "pip", "install", f"{wheel}[api]"], cwd=workspace)
+        print("[RC] PASSED  wheel.clean_install")
         run([str(cli), "--workspace", str(workspace), "init"], cwd=workspace)
         (workspace / "AGENTS.md").write_text(
             "Always verify changes with focused tests.", encoding="utf-8"
@@ -76,7 +215,7 @@ def main() -> int:
         )
         initialized_payload = json.loads(initialized_status.stdout)
         assert initialized_payload["status"] == "stopped", initialized_payload
-        assert initialized_payload["version"] == "0.8.24", initialized_payload
+        assert initialized_payload["version"] == "0.8.30", initialized_payload
         tool_settings = initialized_payload["configuration"]["tools"]
         assert tool_settings["enable_process"] is True, tool_settings
         assert tool_settings["process_max_concurrent"] == 2, tool_settings
@@ -196,7 +335,7 @@ def main() -> int:
                         if response.status_code == 200:
                             payload = response.json()
                             assert payload["status"] == "ok", payload
-                            assert payload["version"] == "0.8.24", payload
+                            assert payload["version"] == "0.8.30", payload
                             return process
                     except httpx.HTTPError:
                         pass
@@ -275,7 +414,7 @@ def main() -> int:
             cwd=workspace,
         )
         diagnostics_payload = json.loads(diagnostics.stdout)
-        assert diagnostics_payload["version"] == "0.8.24", diagnostics_payload
+        assert diagnostics_payload["version"] == "0.8.30", diagnostics_payload
         assert diagnostics_payload["store"]["status"] == "ok", diagnostics_payload
 
         incident = workspace / "incident.zip"
@@ -293,7 +432,7 @@ def main() -> int:
         )
         with zipfile.ZipFile(incident) as archive:
             manifest = json.loads(archive.read("manifest.json"))
-            assert manifest["runtime_version"] == "0.8.24", manifest
+            assert manifest["runtime_version"] == "0.8.30", manifest
             assert "diagnostics.json" in archive.namelist()
 
         backup = workspace / "runtime.agent-backup"
@@ -366,7 +505,7 @@ def main() -> int:
                     health = await client.get("/health")
                     health.raise_for_status()
                     assert health.json()["status"] == "ok"
-                    assert health.json()["version"] == "0.8.24"
+                    assert health.json()["version"] == "0.8.30"
                     sandbox_status = await client.get("/observability/sandbox")
                     sandbox_status.raise_for_status()
                     assert sandbox_status.json()["policy"]["network.access"] == "deny"

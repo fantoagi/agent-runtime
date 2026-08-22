@@ -86,4 +86,4 @@ jobs:
 
       - name: Verify clean wheel installation and CLI/API/SSE smokes
         if: matrix.python == '3.13'
-        run: python scripts/verify_distribution.py dist
+        run: python scripts/verify_distribution.py dist --report release-candidate-report.json

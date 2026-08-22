@@ -4,6 +4,470 @@
 
 ---
 
+<a id="e2026-08-22-007"></a>
+## E2026-08-22-007：v0.8.30 Release Candidate 本地发布验证
+
+- **完成时间**：2026-08-22
+- **状态**：✅ stable
+- **类型**：release
+- **影响范围**：
+  - `scripts/verify_distribution.py`
+  - `.github/workflows/quality.yml`
+  - `.github/workflows/nightly-reliability.yml`
+  - `tests/test_release_candidate.py`
+  - `pyproject.toml`
+  - `src/agent_runtime/version.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/0051-release-candidate-verification.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0051](./adr/0051-release-candidate-verification.md)
+
+### 变更摘要
+
+在不增加 Agent 业务能力的前提下，固化本地 Release Candidate 的发布验证路径。
+
+### 系统架构
+
+- Wheel smoke 前先执行源码、文档、Learning Console 和 Wheel metadata 版本一致性检查。
+- 验收脚本输出 `[RC]` checklist，并可写出非敏感 JSON 结果。
+- 通过后在全新虚拟环境安装 Wheel，继续执行已有 CLI、SDK、FastAPI/Uvicorn、SSE、备份和诊断 smoke。
+
+### 实现方式
+
+- 复用现有 `scripts/verify_distribution.py`，只增加版本读取、Wheel metadata 检查、清单输出和可选 `--report`。
+- 使用 fake wheel 单元测试验证全量通过和 metadata 漂移失败；发布 smoke 继续使用 Mock Provider，不依赖真实 API Key。
+
+### 当前功能
+
+- 本地可使用 `python scripts/verify_distribution.py dist --report release-candidate-report.json` 进行 RC 验收。
+- CI quality/nightly 均保存 RC JSON 结果，版本漂移会在安装 smoke 前失败。
+
+### 测试与验收
+
+- 新增 Release Candidate 版本一致性回归测试。
+- 继续执行全量 pytest、Ruff、Mypy strict、文档门禁和 `git diff --check`。
+
+### 已知限制
+
+- 不验证真实 Provider 服务端行为，也不替代真实模型 Acceptance Suite。
+- Wheel smoke 需要本机可创建虚拟环境并安装项目依赖。
+
+### 后续计划
+
+保持 v0.8 功能冻结，以发布质量和真实运行失败为依据继续收敛；不开始新的 Agent 业务能力。
+
+---
+
+<a id="e2026-08-22-006"></a>
+## E2026-08-22-006：v0.8.29 Workspace 修改与验证证据闭环
+
+- **完成时间**：2026-08-22
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/completion.py`
+  - `src/agent_runtime/git_tools.py`
+  - `src/agent_runtime/tools.py`
+  - `tests/test_completion.py`
+  - `tests/test_git_tools.py`
+  - `tests/test_coding_tools.py`
+  - `pyproject.toml`
+  - `src/agent_runtime/version.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/0050-workspace-evidence-boundary.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0050](./adr/0050-workspace-evidence-boundary.md)
+
+### 变更摘要
+
+强化既有 Workspace 修改、Git 检查和 Completion Evidence 的事实闭环，不增加业务工具。
+
+### 系统架构
+
+- `write_text_file` 提供 before/after hash、`changed` 和 `created` 结果。
+- Git status 结构化返回 tracked modified、untracked、deleted 和 renamed 条目。
+- Completion Evidence 保存修改前后快照，并将用户已有 dirty workspace 与 Agent 本轮写入分离。
+- 验证命令成功但写入为 no-op 时，不再伪装为 `verified`。
+
+### 实现方式
+
+- 保持现有 Tool Handler 签名、Approval、Workspace 路径限制和旧 Completion Evidence 读取兼容。
+- 只读 Git status/diff 结果通过结构化字段持久化，Agent `changed_files` 仍由成功写入 Tool 归因。
+- 使用 fake/mock 回归测试验证 tracked、untracked、deleted、renamed 和 dirty baseline 场景。
+
+### 当前功能
+
+- 写入结果可判断新建、实际变化和相同内容 no-op。
+- 修改前后快照可用于诊断 Workspace 事实；用户原有 dirty 文件不会被错误计入本轮 Agent 产物。
+- post-change diff/status/validation 证据继续决定 `verified`/`unverified`，不因单独的验证命令成功而放宽。
+
+### 测试与验收
+
+- targeted pytest：61 passed（`test_completion.py`、`test_git_tools.py`、`test_coding_tools.py`）。
+- 使用 fake/mock 覆盖 hash、no-op、dirty baseline、tracked/untracked/deleted/renamed 和 post-write verification 证据。
+
+### 已知限制
+
+- 无 Git 的 Workspace 不能提供 tracked/untracked 分类，只能保留写入 hash 和验证事实。
+- 快照是非归因型 Workspace 事实；Agent 产物归因仍以成功写入 Tool 为准。
+- 本次未自动提交或推送 Git。
+
+### 后续计划
+
+继续以真实运行失败和发布质量信号收敛 v0.8.x，不开始新的业务工具或编排能力。
+
+---
+
+<a id="e2026-08-22-005"></a>
+## E2026-08-22-005：v0.8.28 Interactive CLI 多轮 Session 与恢复稳定性
+
+- **完成时间**：2026-08-22
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/interactive/renderer.py`
+  - `tests/test_interactive.py`
+  - `pyproject.toml`
+  - `src/agent_runtime/version.py`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/0049-interactive-cli-session-recovery.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0049](./adr/0049-interactive-cli-session-recovery.md)
+
+### 变更摘要
+
+在不增加业务工具的前提下，收紧 Interactive CLI 的长会话、Runtime 重启继续、Ctrl+C 和事件渲染行为，使本地终端体验更适合持续使用。
+
+### 系统架构
+
+- 每个交互轮次继续对应一个独立 durable Run，并通过同一 Session 关联。
+- `--continue`/`--resume` 只选择 Session，不复制或重新执行已经完成的 Run。
+- Runtime 已有的进程恢复和副作用 Tool UNKNOWN 语义保持不变；本版本只增加 CLI 层回归覆盖。
+- Renderer 对同一 Run 的 durable Event sequence 做单调去重，断线或重放不会重复渲染；跨轮次在 `begin_turn()` 重置游标。
+
+### 实现方式
+
+- `EventRenderer` 保存当前轮次最后渲染的 Event sequence，忽略小于等于该值的重放事件。
+- Interactive regression test 覆盖同一 durable Event sequence 的重复渲染；Session、`--continue/--resume`、Ctrl+C 和 `--print` 继续沿用已有实现与测试。
+- 只使用 Mock arithmetic Provider；没有调用真实 API，也没有新增 Tool。
+
+### 当前功能
+
+- Session 历史仍限制为最近 20 个已完成 Run；`--continue`/`--resume`、活动 Run cancel 和输入阶段 Ctrl+C 沿用已有 durable 语义。
+- 同一 Run 的 durable Event sequence 重复消费不会重复渲染。
+- `--print` 仍只输出最终结果，缺少初始 Prompt 仍返回参数错误退出码。
+
+### 已知限制
+
+- 交互 Session 历史只恢复有界的已完成 Run 摘要，不回放旧 Tool 中间消息。
+- 同步副作用 Tool 无法被线程强杀，超时或进程中断后的未知结果仍必须通过 Runtime 的 UNKNOWN 流程人工确认。
+- 本版本没有实现跨进程并发调度或多终端共享同一 Owner。
+
+### 测试与验收
+
+- targeted interactive pytest：30 passed。
+- 全量 pytest、Ruff、Mypy、文档门禁和 `git diff --check` 在版本同步后执行。
+
+### 后续计划
+
+继续以真实运行失败和发布质量信号为依据收敛 v0.8.x；不开始新的 Agent 业务能力。
+
+---
+
+<a id="e2026-08-22-004"></a>
+## E2026-08-22-004：v0.8.27 真实模型 Acceptance Manifest 与可重复比较
+
+- **完成时间**：2026-08-22
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/acceptance.py`
+  - `src/agent_runtime/acceptance_compare.py`
+  - `src/agent_runtime/__init__.py`
+  - `tests/test_acceptance.py`
+  - `tests/test_acceptance_compare.py`
+  - `pyproject.toml`
+  - `src/agent_runtime/version.py`
+  - `README.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/ROADMAP.md`
+  - `docs/adr/0048-acceptance-manifest.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0048](./adr/0048-acceptance-manifest.md)
+
+### 变更摘要
+
+为真实模型 Acceptance 报告增加可重复运行所需的非敏感 Manifest，同时保持 v0.8.26 报告和比较行为兼容。
+
+### 系统架构
+
+- Acceptance Runner 继续复用隔离 Workspace、durable Run/Event/ToolExecution 和脱敏报告。
+- 新增报告级 `manifest` 区域，记录运行环境、模型、Suite 范围和时间边界；Manifest 不参与回归通过/失败门禁。
+- `eval compare` 在原有 strict/partial scope 和行为回归之后，额外返回 Manifest 差异摘要。
+
+### 实现方式
+
+- `AcceptanceManifest` 通过 `to_dict()` 序列化，Runner 自动采集 Runtime、Git HEAD、Python、平台、Provider、Model、Suite、Case、repeat 和时间字段。
+- Git 信息通过 `git rev-parse HEAD` 获取；Git 不可用时写入 `null`，环境信息缺失时使用 `unknown`。
+- 旧报告没有 `manifest` 时，从既有顶层字段和 `selection` 推导兼容 Manifest；不读取或保存 API Key、完整环境变量、Prompt、Fixture 或 Tool 内容。
+- compare 的 Manifest 差异只作为结构化摘要，不改变既有 regression、strict scope 或 partial compare 语义。
+
+### 当前功能
+
+- `agent-runtime eval run` 的 JSON 输出和落盘报告均包含 `manifest`。
+- `agent-runtime eval compare` 输出 `manifest_differences`，可识别 Runtime、Git、Python、平台、Provider、Model、Suite、Case 和 repeat 差异。
+- 旧版 v0.8.26 报告仍可离线读取和比较。
+
+### 已知限制
+
+- Manifest 只记录启动 Runner 可见的本地环境事实，不保证外部 Provider 服务端配置完全一致。
+- 未提交工作区的 Git commit 仍只代表当前 HEAD，不包含未提交 diff；代码状态仍应通过既有 Git/Verification 证据判断。
+- `platform` 字符串可能随 Python/OS 版本变化，差异不会自动判定为回归失败。
+
+### 测试与验收
+
+- Acceptance 与 compare targeted pytest：44 passed。
+- 覆盖新报告序列化、旧报告读取、Git 信息缺失、敏感值不落盘和 Manifest 差异摘要。
+- 全量 pytest：377 passed；Ruff、Mypy strict 和文档门禁均通过。
+
+### 后续计划
+
+进入 v0.8.28 Interactive CLI 多轮 Session、Ctrl+C/resume 和重复输出稳定性验收；不新增 Agent 业务能力。
+
+---
+
+
+
+
+<a id="e2026-08-22-003"></a>
+## E2026-08-22-003：v0.8 真实模型失败驱动稳定性收口
+
+- **完成时间**：2026-08-22
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/providers.py`
+  - `src/agent_runtime/acceptance.py`
+  - `tests/test_providers.py`
+  - `tests/test_acceptance.py`
+  - `docs/REAL_MODEL_EVALS.md`
+  - `docs/CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/ROADMAP.md`
+  - `docs/CHANGELOG.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0047](./adr/0047-real-model-failure-driven-hardening.md)
+
+### 变更摘要
+
+基于真实模型 `local-real-model` 首轮 15 次验收中 `small-verified-edit` 的 3 次失败，完成最小根因修复并重新执行同范围基线。
+
+### 系统架构
+
+- Provider 错误处理位于 OpenAI-compatible SSE/普通响应适配层，确保 HTTP 错误先读取响应体再转换为结构化 Provider 错误。
+- Acceptance Runner 的隔离进程启动策略与当前 Runtime Python 环境绑定，避免验证过程跨解释器漂移。
+- Runtime、Tool、Approval、Event Log 和 `verification_status` 的既有闭环保持不变。
+
+### 实现方式
+
+- `_raise_for_status()` 改为异步方法，并在访问响应文本前执行 `await response.aread()`。
+- `_acceptance_allowed_executables()` 优先保留当前 Runner 的 `sys.executable`，过滤配置中可能指向其他 Python 的名称项，同时保留 `git` 等必要非 Python 命令。
+- 通过 Provider 和 Acceptance 回归测试固定上述行为合同。
+
+### 当前功能
+
+- 真实模型验收支持本地隔离 Fixture、工具调用、人工审批、Git 状态/差异验证和最终 `verified` 判定。
+- 当前 `local-real-model` 基线为 5 Cases × 3 repeats，共 15/15 通过。
+- 真实模型验收结果中的协议违规、重复 Tool、未知 Tool 和失败 Tool 均为 0。
+
+### 已知限制
+
+- 真实模型验收仍依赖外部 Provider 的可用性、限流策略和模型输出稳定性。
+- 当前报告证明的是本次同范围基线通过，不等同于所有模型、所有任务和所有网络条件下的绝对可靠。
+- 真实 API Key 只应通过当前进程环境变量注入，不写入代码、文档、日志或报告。
+
+### 真实模型验收
+
+首轮报告：`12/15` 通过，3 个失败全部发生在 `small-verified-edit`，并表现为 Run failed / `verified` 退化。修复后重新运行同一 Suite、同一 Case 范围和 `repeat=3`：
+
+```text
+total_attempts: 15
+passed_attempts: 15
+failed_attempts: 0
+pass_rate: 1.0
+```
+
+修复后 15 次均无协议违规、重复 Tool 或 UNKNOWN Tool；修改类 Case 均完成 Approval、Git diff/status 和 `verified` 闭环。
+
+### 测试与验收
+
+- Provider / Acceptance 回归测试通过。
+- 完整真实模型验收：5 Cases × 3 repeats，15/15 通过。
+- 真实模型报告：`D:\AICoding\Agent\.agent-runtime\evals\v0.8-candidate-report.json`。
+
+### 后续计划
+
+保持 v0.8 功能冻结；后续只根据新的真实失败或本地长期运行证据做有界修复，不因模型输出风格差异增加 Provider 特判。
+
+---
+
+<a id="e2026-08-22-002"></a>
+## E2026-08-22-002：v0.8.26 Acceptance Preflight Side-Effect Containment
+
+- **完成时间**：2026-08-22
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/acceptance.py`
+  - `src/agent_runtime/cli.py`
+  - `tests/test_local_runtime.py`
+  - `src/agent_runtime/version.py`
+  - `pyproject.toml`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `docs/REAL_MODEL_EVALS.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/CHANGELOG.md`
+  - `docs/ROADMAP.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0046](./adr/0046-acceptance-scope-integrity.md)
+
+### 变更摘要
+
+继续收敛真实模型验收的配置失败语义：API Key 缺失时，CLI 现在在配置结构化日志和获取本地 Owner Lock 之前直接失败。这样不会因为一个尚未具备运行条件的验收命令创建日志目录、锁文件或短暂占用 Runtime 状态。
+
+### 系统架构
+
+- `ensure_real_model_acceptance_ready()` 成为 CLI 和 `RealModelAcceptanceRunner` 共用的配置守卫。
+- CLI 顺序固定为：加载配置 → 检查 Provider 凭据 → 配置日志 → 获取 Owner Lock → 加载 Suite → 执行 Runner。
+- SDK/Runner 仍在自身入口重复检查，避免调用方绕过 CLI 后产生验收副作用。
+
+### 实现方式
+
+- OpenAI-compatible Provider 的 API Key 读取只用于判断变量是否存在且非空白；错误消息只包含变量名，不包含 Key 值。
+- CLI `_eval_local()` 将 preflight 放在 `configure_structured_logging()` 和 `LocalRuntimeLock.acquire()` 之前。
+- 新增 CLI 回归测试，确认缺少 Key 时不创建 `.agent-runtime` 和 `logs`。
+- 版本、当前状态、架构、路线图、Learning Console 和 Wheel smoke 同步到 v0.8.26。
+
+### 当前功能
+
+配置缺失时：
+
+```powershell
+agent-runtime eval run --suite local-real-model --case explain-project
+```
+
+会直接返回 `AcceptanceSuiteError` 和所需的 `api_key_env`，不会创建本地 Runtime Lock、日志目录、验收报告目录，也不会调用模型。配置正确时，后续验收流程保持 v0.8.25 行为不变。
+
+### 已知限制
+
+- Preflight 只判断 API Key 环境变量是否存在且非空白，不验证 Key 是否有效。
+- 其他 Provider 配置错误仍需在 Runtime/Provider 初始化或请求阶段发现。
+- 真实模型基线仍需配置凭据后实际运行，离线测试不能替代真实网络和 Provider 行为。
+
+### 测试与验收
+
+- 新增 CLI 无副作用回归测试。
+- 完整门禁目标保持：全量 pytest、coverage、Ruff、Mypy strict、文档检查和 Wheel smoke。
+
+### 后续计划
+
+配置 `DEEPSEEK_API_KEY` 后重新执行同范围真实基线；下一轮优先处理真实 durable 失败，而不是继续增加验收前置特判。
+
+---
+
+<a id="e2026-08-22-001"></a>
+## E2026-08-22-001：v0.8.25 Real Model Acceptance Preflight
+
+- **完成时间**：2026-08-22
+- **状态**：✅ stable
+- **类型**：reliability
+- **影响范围**：
+  - `src/agent_runtime/acceptance.py`
+  - `tests/test_acceptance.py`
+  - `src/agent_runtime/version.py`
+  - `pyproject.toml`
+  - `scripts/verify_distribution.py`
+  - `README.md`
+  - `src/agent_runtime/lab/static/index.html`
+  - `tests/test_api.py`
+  - `tests/test_incident.py`
+  - `tests/test_lab_api.py`
+  - `tests/test_observability.py`
+  - `docs/REAL_MODEL_EVALS.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CURRENT.md`
+  - `docs/CHANGELOG.md`
+  - `docs/ROADMAP.md`
+- **关联 commit**：`pending`
+- **关联 ADR**：[ADR-0046](./adr/0046-acceptance-scope-integrity.md)
+
+### 变更摘要
+
+将真实模型验收的配置失败前移为明确的 preflight 错误。当前配置使用 OpenAI-compatible Provider 但缺少 API Key 环境变量时，Runner 不再创建隔离验收目录后逐个 Case 产生噪声失败，而是在执行前立即终止并提示所需环境变量名称。
+
+### 系统架构
+
+- API Key 检查位于 `RealModelAcceptanceRunner.run()` 的报告目录创建和 Case 选择执行之前。
+- 该检查只读取环境变量是否存在，不读取或记录 Key 值。
+- 配置前置失败不会启动 Runtime、创建 SQLite/Artifact 目录或调用 Model Provider。
+- 已有报告比较器和运行时失败处理保持不变；本变更只收紧验收入口生命周期。
+
+### 实现方式
+
+- 对 `openai-compatible` Provider 检查 `RuntimeSettings.api_key_env` 对应环境变量。
+- 缺失时抛出 `AcceptanceSuiteError`，错误消息只包含环境变量名称和配置提示。
+- 新增回归测试验证 fail-fast 行为，并确认没有创建 `state/evals` 目录。
+- 将版本、CLI/HTTP/诊断/学习控制台展示和发布 Wheel smoke 更新为 v0.8.25。
+
+### 当前功能
+
+配置正确时，真实模型验收流程不变：
+
+```powershell
+$env:DEEPSEEK_API_KEY = "<your-key>"
+agent-runtime eval run --suite local-real-model
+```
+
+配置缺失时，命令会在创建验收产物前明确提示 `DEEPSEEK_API_KEY`（或当前配置的 `api_key_env`），不会产生无意义 Case 报告。
+
+### 已知限制
+
+- Preflight 只判断环境变量是否存在，不验证 Key 是否有效；无效 Key 仍会在 Provider 请求阶段按 HTTP/协议错误处理。
+- 不读取、不打印、不持久化 Key 值；真实模型调用仍可能产生费用。
+- 真实模型基线仍需在用户配置 API Key 后实际运行，不能由离线测试替代。
+
+### 测试与验收
+
+- 新增缺少 API Key 时 fail-fast 的回归测试，确认不创建验收目录。
+- 新增 CLI 无副作用回归测试；完整 Python 3.13 门禁 `372 passed`，总体 coverage `85.13%`，Core line/branch coverage `91.85% / 81.04%`，Mypy strict、Ruff、文档检查、diff 检查和 v0.8.26 Wheel 干净安装 smoke 均通过；首次 Wheel smoke 的服务健康检查曾出现瞬时失败，使用全新隔离环境重跑后通过。
+
+### 后续计划
+
+配置 `DEEPSEEK_API_KEY` 后重新运行同范围真实模型基线；若出现失败，只根据 durable Run/Event/ToolExecution 事实建立下一条最小修复记录。
+
+---
+
 <a id="e2026-08-21-004"></a>
 ## E2026-08-21-004：v0.8.24 Acceptance Comparator Error Containment
 

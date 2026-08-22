@@ -202,6 +202,32 @@ async def test_replace_text_is_exact_atomic_and_reports_hashes(workspace: Path) 
 
 
 @pytest.mark.asyncio
+async def test_write_text_file_reports_before_after_hashes_and_noop(workspace: Path) -> None:
+    target = workspace / "sample.txt"
+    target.write_text("same", encoding="utf-8")
+    tools = ToolRegistry()
+    register_builtin_tools(tools)
+    try:
+        unchanged = await tools.invoke(
+            "write_text_file", {"path": "sample.txt", "content": "same"}, context(workspace)
+        )
+        created = await tools.invoke(
+            "write_text_file", {"path": "created.txt", "content": "new"}, context(workspace)
+        )
+    finally:
+        await tools.aclose()
+
+    assert unchanged.data is not None
+    assert unchanged.data["changed"] is False
+    assert unchanged.data["created"] is False
+    assert unchanged.data["before_sha256"] == unchanged.data["after_sha256"]
+    assert created.data is not None
+    assert created.data["changed"] is True
+    assert created.data["created"] is True
+    assert created.data["before_sha256"] is None
+
+
+@pytest.mark.asyncio
 async def test_replace_text_rejects_zero_or_ambiguous_matches_without_writing(
     workspace: Path,
 ) -> None:

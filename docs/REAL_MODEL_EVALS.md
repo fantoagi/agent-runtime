@@ -1,6 +1,6 @@
 # 真实模型稳定性验收
 
-v0.8.19 增加 `local-real-model` 验收套件；v0.8.20 根据首轮完整真实基线收紧新建文件验证证据，用固定、隔离、可重复的任务判断真实模型与 Runtime 组合是否稳定。它不是模型能力排行榜，也不会把当前项目 Workspace 复制进验收报告。
+v0.8.19 增加 `local-real-model` 验收套件；v0.8.20 根据首轮完整真实基线收紧新建文件验证证据，用固定、隔离、可重复的任务判断真实模型与 Runtime 组合是否稳定。它不是模型能力排行榜，也不会把当前项目 Workspace 复制进验收报告。 在真正执行前，Runner 会先检查 OpenAI-compatible Provider 配置的 API Key 环境变量；变量缺失时立即失败并提示变量名，不创建报告目录、不启动 Runtime、不发送模型请求，也不会读取或输出 Key 值。CLI 入口还会在该检查之前不创建日志目录、不获取 Owner Lock；SDK 入口保留同样的防护。
 
 ## 为什么使用隔离 Workspace
 
@@ -113,6 +113,41 @@ failed assertions: 0
 这说明固定断言全部通过，但不等于证据模型没有缺口。进一步检查每个隔离 Case 的 durable Run/Event/ToolExecution 后发现：`approval-lifecycle` 创建的 `RESULT.txt` 是 untracked 文件，默认 `git diff` 返回 no tracked differences；旧逻辑只看是否调用过 `git_diff`，因此可能在没有 `git_status` 的情况下误标 `verified`。v0.8.20 通过 `write_text_file.created`、Completion Evidence 和 Acceptance Metrics 修复该问题，并给 pytest Fixture 增加 `.gitignore`，排除 `__pycache__`/`.pytest_cache` 噪声。
 
 该修复来自真实 durable 事实，不是针对模型名称、答案文本或单次随机输出的特判。 v0.8.21 延续该原则：验收指标只把最后一次成功写入之后的 diff/status/validation 视为修改后的证据。v0.8.23 将 Case/Repeat selection 写入报告，避免不同范围的报告被误判为完整通过。
+## 2026-08-22 v0.8 失败驱动复测
+
+使用同一 `local-real-model` Suite、同一 5 个 Case 和 `repeat=3` 执行真实模型验收。首轮结果为 `12/15`，3 次失败全部集中在 `small-verified-edit`。通过对应隔离 Case 的 SQLite/Event/ToolExecution 证据定位到两类环境与协议问题：
+
+- SSE 非 2xx 响应在读取前访问 `response.text`，导致 `ResponseNotRead` 遮蔽原始 Provider HTTP 错误。
+- Acceptance 的 `run_process` 解析到外部全局 Python，隔离环境中没有 pytest，导致修改后的验证命令失败。
+
+完成最小修复并增加回归测试后，同范围复测结果：
+
+```text
+runtime_version: 0.8.26
+total_attempts: 15
+passed_attempts: 15
+failed_attempts: 0
+pass_rate: 1.0
+```
+
+修复后的 15 次执行均满足：
+
+```text
+protocol_violations: 0
+duplicate_tool_calls: 0
+unknown_tool_calls: 0
+small-verified-edit verification_status: verified
+approval lifecycle: closed
+```
+
+脱敏报告保存在本机：
+
+```text
+D:\AICoding\Agent\.agent-runtime\evals\v0.8-candidate-report.json
+```
+
+该结果证明 v0.8 当前固定验收链路已通过一次真实模型回归，但仍不等于所有模型、所有 Workspace 或长期运行都没有问题。
+
 ## 建议的收敛流程
 
 ```text

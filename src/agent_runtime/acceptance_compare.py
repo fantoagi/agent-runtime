@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .acceptance import AcceptanceSuiteError
+from .acceptance import AcceptanceManifest, AcceptanceSuiteError
 
 
 class AcceptanceComparisonError(AcceptanceSuiteError):
@@ -45,6 +45,7 @@ class AcceptanceComparison:
     suite_name: str | None
     regressions: tuple[AcceptanceRegression, ...]
     warnings: tuple[str, ...]
+    manifest_differences: Mapping[str, Mapping[str, Any]]
 
     @property
     def passed(self) -> bool:
@@ -64,6 +65,9 @@ class AcceptanceComparison:
             "warning_count": len(self.warnings),
             "regressions": [item.to_dict() for item in self.regressions],
             "warnings": list(self.warnings),
+            "manifest_differences": {
+                key: dict(value) for key, value in self.manifest_differences.items()
+            },
         }
 
 
@@ -88,6 +92,9 @@ def compare_acceptance_reports(
     candidate_results = _index_results(candidate, "candidate")
     baseline_scope, baseline_scope_error = _report_scope(baseline, baseline_results)
     candidate_scope, candidate_scope_error = _report_scope(candidate, candidate_results)
+    baseline_manifest = AcceptanceManifest.from_report_payload(baseline)
+    candidate_manifest = AcceptanceManifest.from_report_payload(candidate)
+    manifest_differences = _manifest_differences(baseline_manifest, candidate_manifest)
     regressions: list[AcceptanceRegression] = []
     warnings: list[str] = []
 
@@ -280,6 +287,7 @@ def compare_acceptance_reports(
         suite_name=_optional_string(candidate.get("suite_name")),
         regressions=tuple(regressions),
         warnings=tuple(warnings),
+        manifest_differences=manifest_differences,
     )
 
 
@@ -424,6 +432,36 @@ def _scope_comparison_payload(
     payload = dict(scope)
     payload["keys"] = _sorted_key_strings(set(results))
     return payload
+
+
+def _manifest_differences(
+    baseline: AcceptanceManifest,
+    candidate: AcceptanceManifest,
+) -> dict[str, Mapping[str, Any]]:
+    differences: dict[str, Mapping[str, Any]] = {}
+    for field in (
+        "runtime_version",
+        "git_commit",
+        "python_version",
+        "platform",
+        "provider",
+        "model",
+        "suite",
+        "cases",
+        "repeat",
+    ):
+        baseline_value = getattr(baseline, field)
+        candidate_value = getattr(candidate, field)
+        if baseline_value == candidate_value:
+            continue
+        if field == "cases":
+            baseline_value = list(baseline_value)
+            candidate_value = list(candidate_value)
+        differences[field] = {
+            "baseline": baseline_value,
+            "candidate": candidate_value,
+        }
+    return differences
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:

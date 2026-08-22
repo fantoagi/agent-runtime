@@ -10,6 +10,7 @@ from typing import Any
 from .acceptance import (
     AcceptanceSuiteError,
     RealModelAcceptanceRunner,
+    ensure_real_model_acceptance_ready,
     load_acceptance_suite,
 )
 from .acceptance_compare import compare_acceptance_reports
@@ -380,6 +381,7 @@ async def _chat_local(arguments: argparse.Namespace) -> int:
 
 async def _eval_local(arguments: argparse.Namespace) -> int:
     settings = _local_settings(arguments)
+    ensure_real_model_acceptance_ready(settings)
     configure_structured_logging(
         level=settings.log_level,
         file_path=settings.log_file,

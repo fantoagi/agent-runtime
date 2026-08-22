@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import os
@@ -624,6 +625,11 @@ def _write_text_file(
     context.raise_if_cancelled()
     path = confined_path(context.workspace_path, arguments["path"])
     created = not path.exists()
+    before_sha256 = (
+        hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+    )
+    after_sha256 = hashlib.sha256(arguments["content"].encode("utf-8")).hexdigest()
+    changed = created or before_sha256 != after_sha256
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
@@ -639,4 +645,11 @@ def _write_text_file(
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
-    return {"path": str(path), "status": "written", "created": created}
+    return {
+        "path": str(path),
+        "status": "written",
+        "created": created,
+        "changed": changed,
+        "before_sha256": before_sha256,
+        "after_sha256": after_sha256,
+    }

@@ -26,6 +26,11 @@ ADR 用于记录会长期约束 Agent Runtime 的关键设计决策。ADR 一旦
 
 | ADR | 状态 | 日期 | 主题 | 关联变更 |
 | --- | --- | --- | --- | --- |
+| [ADR-0051](./0051-release-candidate-verification.md) | Accepted | 2026-08-22 | 本地 Release Candidate 发布验证与版本一致性 | E2026-08-22-007 |
+| [ADR-0050](./0050-workspace-evidence-boundary.md) | Accepted | 2026-08-22 | Workspace 修改归因与验证证据快照边界 | E2026-08-22-006 |
+| [ADR-0049](./0049-interactive-cli-session-recovery.md) | Accepted | 2026-08-22 | Interactive CLI Session 续接、事件序列去重与 Ctrl+C 恢复 | E2026-08-22-005 |
+| [ADR-0048](./0048-acceptance-manifest.md) | Accepted | 2026-08-22 | Acceptance 报告非敏感运行 Manifest | E2026-08-22-004 |
+| [ADR-0047](./0047-real-model-failure-driven-hardening.md) | Accepted | 2026-08-22 | 真实模型失败驱动的 Provider 与 Acceptance 收口 | E2026-08-22-003 |
 | [ADR-0046](./0046-acceptance-scope-integrity.md) | Accepted | 2026-08-21 | Acceptance Report 显式范围与严格比较 | E2026-08-21-003 |
 | [ADR-0045](./0045-acceptance-regression-gate.md) | Accepted | 2026-08-21 | 脱敏 Acceptance Report 的离线回归门禁 | E2026-08-21-002 |
 | [ADR-0044](./0044-post-change-verification-boundary.md) | Accepted | 2026-08-21 | 修改后的 diff/status/validation 证据时间边界 | E2026-08-21-001 |

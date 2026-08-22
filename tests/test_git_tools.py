@@ -63,6 +63,37 @@ async def test_git_status_uses_read_only_bounded_command(workspace: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_git_status_classifies_workspace_entries(workspace: Path) -> None:
+    sandbox = FakeGitSandbox(
+        [
+            result(
+                "## main\n"
+                " M tracked.py\n"
+                "?? created.txt\n"
+                " D deleted.py\n"
+                "R  old.py -> renamed.py\n"
+            )
+        ]
+    )
+    tools = ToolRegistry()
+    register_git_tools(tools, sandbox)
+    try:
+        status = await tools.invoke("git_status", {}, tool_context(workspace))
+    finally:
+        await tools.aclose()
+
+    assert status.data is not None
+    assert status.data["workspace_dirty"] is True
+    assert [(item["kind"], item["path"]) for item in status.data["entries"]] == [
+        ("modified", "tracked.py"),
+        ("untracked", "created.txt"),
+        ("deleted", "deleted.py"),
+        ("renamed", "renamed.py"),
+    ]
+    assert status.data["entries"][-1]["original_path"] == "old.py"
+
+
+@pytest.mark.asyncio
 async def test_git_status_treats_branch_header_only_as_clean(workspace: Path) -> None:
     sandbox = FakeGitSandbox([result("## main\n")])
     tools = ToolRegistry()

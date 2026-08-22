@@ -1,8 +1,8 @@
 # Agent Runtime 演进路线图
 
-- **最近更新**：2026-08-21
-- **当前版本**：v0.8.24
-- **当前阶段**：v0.8.24 Acceptance Comparator Error Containment 已完成；下一阶段用同范围真实基线复测，再针对可复现失败做一次有界修复与重新验证
+- **最近更新**：2026-08-22
+- **当前版本**：v0.8.30
+- **当前阶段**：v0.8.30 Release Candidate 本地发布验证已完成；v0.8 保持功能冻结，下一步只处理真实运行失败和发布质量问题
 - **路线状态**：Living Document
 
 > 本文件记录未来演进方向。已经完成的事实以 [CURRENT.md](./CURRENT.md) 为准，完成时间线以 [CHANGELOG.md](./CHANGELOG.md) 为准，当前实现以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准。
@@ -69,6 +69,12 @@
 | v0.8.22 | ✅ completed | Acceptance Report Regression Gate | [E2026-08-21-002](./CHANGELOG.md#e2026-08-21-002) |
 | v0.8.23 | ✅ completed | Acceptance Scope Integrity | [E2026-08-21-003](./CHANGELOG.md#e2026-08-21-003) |
 | v0.8.24 | ✅ completed | Acceptance Comparator Error Containment | [E2026-08-21-004](./CHANGELOG.md#e2026-08-21-004) |
+| v0.8.25 | ✅ completed | Real Model Acceptance Preflight | [E2026-08-22-001](./CHANGELOG.md#e2026-08-22-001) |
+| v0.8.26 | ✅ completed | Acceptance Preflight、真实模型失败驱动收口 | [E2026-08-22-003](./CHANGELOG.md#e2026-08-22-003) |
+| v0.8.27 | ✅ completed | 真实模型 Acceptance Manifest 与可重复比较 | [E2026-08-22-004](./CHANGELOG.md#e2026-08-22-004) |
+| v0.8.28 | ✅ completed | Interactive CLI durable Event sequence 去重与重复输出稳定性 | [E2026-08-22-005](./CHANGELOG.md#e2026-08-22-005) |
+| v0.8.29 | ✅ completed | Workspace 修改与验证证据闭环 | [E2026-08-22-006](./CHANGELOG.md#e2026-08-22-006) |
+| v0.8.30 | ✅ completed | Release Candidate 本地发布验证与版本一致性 | [E2026-08-22-007](./CHANGELOG.md#e2026-08-22-007) |
 | v0.9 | ⏸ deferred | 分布式 Worker、Queue 与 Lease | — |
 | v0.10 | ⏸ deferred | 多租户、权限、预算和生产治理 | — |
 | v1.0 | ⏸ deferred | 稳定 Runtime Contract 与生产发布 | — |
@@ -289,6 +295,12 @@
 - v0.8.22：增加离线 Acceptance Report compare；以前通过的 Case 失败、verified/协议/UNKNOWN 证据退化会成为回归，模型和版本变化只产生 warning。
 - v0.8.23：Acceptance Report 持久化 Case/Repeat 选择范围；严格 compare 要求 Baseline/Candidate 的 Case/Attempt 集合一致，`--case` 才能显式执行 partial compare，避免范围不同造成假通过。
 - v0.8.24：修复 partial compare 遇到非法 selection 时的未处理 KeyError，所有报告范围格式问题统一返回结构化 `incompatible`。
+- v0.8.25：真实模型 Acceptance 缺少 API Key 时在创建验收产物前 fail-fast。
+- v0.8.26：将 Acceptance API Key 检查前移到 CLI 日志和 Owner Lock 之前，配置失败不再产生本地 Runtime 副作用。
+- v0.8.27：Acceptance 报告增加非敏感 Manifest，旧报告可兼容读取，compare 返回环境差异摘要但不改变回归门禁。
+- v0.8.28：Interactive CLI 在既有 Session、continue/resume、Ctrl+C 和 print 行为之上补充 durable Event sequence 去重回归；不新增业务工具或编排能力。
+- v0.8.29：强化既有 Workspace 写入、Git status/diff 和 Completion Evidence 的事实闭环；不新增业务工具，不自动 stage/commit，也不把用户已有 dirty 文件归因给本轮 Agent。
+- v0.8.30：在不增加 Agent 业务能力的前提下，固化源码/Wheel 干净环境安装、版本一致性、CLI/SDK/FastAPI/SSE/备份/诊断 smoke 和 RC checklist。
 - FastAPI 默认 `app` 惰性构造，import Adapter 不再产生隐藏 Runtime 或 SQLite 副作用。
 - Wheel 验证覆盖本地初始化、状态、服务健康、重复 Owner 拒绝和重启。
 

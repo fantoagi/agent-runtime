@@ -171,7 +171,7 @@ class OpenAICompatibleProvider:
             raise ProviderTransportError(f"Model API request timed out: {error}") from error
         except httpx.TransportError as error:
             raise ProviderTransportError(f"Model API request failed: {error}") from error
-        self._raise_for_status(response)
+        await self._raise_for_status(response)
         try:
             payload = response.json()
         except json.JSONDecodeError as error:
@@ -192,7 +192,7 @@ class OpenAICompatibleProvider:
                 json=body,
                 headers=self._headers(stream=True),
             ) as response:
-                self._raise_for_status(response)
+                await self._raise_for_status(response)
                 data_lines: list[str] = []
                 event_bytes = 0
                 async for line in response.aiter_lines():
@@ -290,11 +290,12 @@ class OpenAICompatibleProvider:
         }
 
     @staticmethod
-    def _raise_for_status(response: httpx.Response) -> None:
+    async def _raise_for_status(response: httpx.Response) -> None:
         if response.is_success:
             return
         status_code = response.status_code
         retryable = status_code in {408, 429} or 500 <= status_code <= 599
+        await response.aread()
         detail = response.text[:2000]
         retry_after = _parse_retry_after(response.headers.get("Retry-After"))
         raise ProviderHTTPError(

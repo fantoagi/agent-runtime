@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import platform
+import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -11,6 +14,7 @@ import agent_runtime.acceptance as acceptance
 from agent_runtime.acceptance import (
     AcceptanceCase,
     AcceptanceLimits,
+    AcceptanceManifest,
     AcceptanceSuite,
     AcceptanceSuiteError,
     RealModelAcceptanceRunner,
@@ -163,6 +167,106 @@ async def test_runner_uses_isolated_workspace_and_redacted_report(tmp_path: Path
     assert result.final_answer_sha256 is not None
     assert result.metrics.event_count > 0
     assert result.metrics.model_requests == 1
+    assert report.manifest is not None
+    assert report.manifest.runtime_version == acceptance.__version__
+    assert report.manifest.python_version == platform.python_version()
+    assert report.manifest.platform
+    assert report.manifest.provider == "mock"
+    assert report.manifest.model == "acceptance-model"
+    assert report.manifest.suite == "test-suite"
+    assert report.manifest.cases == ("explain",)
+    assert report.manifest.repeat == 1
+    assert report.manifest.started_at == report.started_at
+    assert report.manifest.finished_at == report.completed_at
+    assert "manifest" in json.loads(payload)
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_current_python_for_isolated_process_tools(tmp_path: Path) -> None:
+    settings = replace(make_settings(tmp_path), allowed_executables=("python", "git"))
+    suite = AcceptanceSuite(
+        name="test-suite",
+        version=1,
+        description="test",
+        source="test",
+        checksum="f" * 64,
+        cases=(
+            AcceptanceCase(
+                name="explain",
+                category="explanation",
+                description="explain",
+                prompt="explain",
+                files={"README.md": "fixture"},
+                initialize_git=False,
+            ),
+        ),
+    )
+    captured: list[LocalRuntimeSettings] = []
+
+    def factory(case_settings: LocalRuntimeSettings) -> Runtime:
+        captured.append(case_settings)
+        return make_runtime(case_settings)
+
+    await RealModelAcceptanceRunner(settings, runtime_factory=factory).run(suite)
+
+    assert captured[0].allowed_executables[0] == str(Path(sys.executable).resolve())
+    assert "python" not in captured[0].allowed_executables
+
+
+def test_manifest_reading_legacy_report_is_backward_compatible() -> None:
+    manifest = AcceptanceManifest.from_report_payload(
+        {
+            "runtime_version": "0.8.26",
+            "provider": "mock",
+            "model": "legacy-model",
+            "suite_name": "legacy-suite",
+            "started_at": "2026-08-22T00:00:00+00:00",
+            "completed_at": "2026-08-22T00:00:01+00:00",
+            "selection": {"case_names": ["case-a"], "repeat": 2},
+        }
+    )
+
+    assert manifest.runtime_version == "0.8.26"
+    assert manifest.git_commit is None
+    assert manifest.python_version == "unknown"
+    assert manifest.platform == "unknown"
+    assert manifest.provider == "mock"
+    assert manifest.model == "legacy-model"
+    assert manifest.suite == "legacy-suite"
+    assert manifest.cases == ("case-a",)
+    assert manifest.repeat == 2
+    assert manifest.finished_at == "2026-08-22T00:00:01+00:00"
+
+
+@pytest.mark.asyncio
+async def test_manifest_does_not_persist_api_key_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = make_settings(tmp_path)
+    monkeypatch.setenv(settings.api_key_env, "manifest-secret-value")
+    suite = AcceptanceSuite(
+        name="manifest-suite",
+        version=1,
+        description="manifest",
+        source="test",
+        checksum="c" * 64,
+        cases=(
+            AcceptanceCase(
+                name="case-a",
+                category="explanation",
+                description="manifest",
+                prompt="safe prompt",
+                files={"README.md": "safe"},
+                initialize_git=False,
+            ),
+        ),
+    )
+
+    report = await RealModelAcceptanceRunner(settings, runtime_factory=make_runtime).run(suite)
+    payload = Path(report.artifact_path or "").read_text(encoding="utf-8")
+
+    assert "manifest-secret-value" not in payload
+    assert "api_key" not in payload.lower()
+    assert report.manifest is not None
+    assert report.manifest.git_commit is None
 
 
 @pytest.mark.asyncio
@@ -440,6 +544,23 @@ async def test_runner_supports_selected_case_and_repeat(tmp_path: Path) -> None:
         "expected_attempts": 2,
         "actual_attempts": 2,
     }
+
+
+@pytest.mark.asyncio
+async def test_real_model_runner_fails_fast_without_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = replace(
+        make_settings(tmp_path),
+        provider="openai-compatible",
+        api_key_env="MISSING_ACCEPTANCE_API_KEY",
+    )
+    monkeypatch.delenv(settings.api_key_env, raising=False)
+    suite = load_acceptance_suite("local-real-model")
+    runner = RealModelAcceptanceRunner(settings, runtime_factory=make_runtime)
+
+    with pytest.raises(AcceptanceSuiteError, match="MISSING_ACCEPTANCE_API_KEY"):
+        await runner.run(suite, case_names=[suite.cases[0].name])
+
+    assert not (settings.state_dir / "evals").exists()
 
 
 def test_initialize_git_fixture_success_and_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

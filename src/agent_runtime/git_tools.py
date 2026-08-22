@@ -74,11 +74,14 @@ def register_git_tools(
         _require_git_success("git_status", result.exit_code, result.stderr)
         raw = result.stdout.rstrip()
         changed_lines = [line for line in raw.splitlines() if not line.startswith("##")]
+        entries = _parse_status_entries(changed_lines)
         output = raw or "Working tree clean."
         return ToolResult(
             content=output,
             data={
                 "status": "changes" if changed_lines else "clean",
+                "workspace_dirty": bool(entries),
+                "entries": entries,
                 "include_untracked": include_untracked,
                 "output": output,
                 "exit_code": result.exit_code,
@@ -129,6 +132,7 @@ def register_git_tools(
                 "context_lines": context_lines,
                 "truncated": truncated,
                 "characters": len(raw),
+                "has_changes": bool(raw),
                 "exit_code": result.exit_code,
             },
         )
@@ -136,6 +140,37 @@ def register_git_tools(
     registry.register(definitions[0], git_status, sandboxed=True)
     registry.register(definitions[1], git_diff, sandboxed=True)
     return definitions
+
+
+def _parse_status_entries(lines: list[str]) -> list[dict[str, str | None]]:
+    entries: list[dict[str, str | None]] = []
+    for line in lines:
+        if len(line) < 3:
+            continue
+        index_status = line[0]
+        worktree_status = line[1]
+        path = line[3:]
+        original_path: str | None = None
+        if index_status == "?" and worktree_status == "?":
+            kind = "untracked"
+        elif "R" in {index_status, worktree_status}:
+            kind = "renamed"
+            if " -> " in path:
+                original_path, path = path.split(" -> ", 1)
+        elif "D" in {index_status, worktree_status}:
+            kind = "deleted"
+        else:
+            kind = "modified"
+        entries.append(
+            {
+                "kind": kind,
+                "path": path,
+                "original_path": original_path,
+                "index_status": index_status,
+                "worktree_status": worktree_status,
+            }
+        )
+    return entries
 
 
 def _git_executable(sandbox: SandboxExecutor) -> str | None:

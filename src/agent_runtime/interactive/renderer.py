@@ -67,6 +67,7 @@ class EventRenderer:
         self._failed_tool_names: set[str] = set()
         self._recovered_tool_names: set[str] = set()
         self._saw_content = False
+        self._last_event_sequence = 0
 
     @property
     def saw_content(self) -> bool:
@@ -82,8 +83,12 @@ class EventRenderer:
         self._failed_tool_names.clear()
         self._recovered_tool_names.clear()
         self._saw_content = False
+        self._last_event_sequence = 0
 
     def render(self, event: RuntimeEvent) -> None:
+        if event.sequence <= self._last_event_sequence:
+            return
+        self._last_event_sequence = event.sequence
         event_type = event.type
         payload = event.payload
         if event_type == "model.delta":

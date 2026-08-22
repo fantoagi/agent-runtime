@@ -107,6 +107,41 @@ async def test_interactive_print_mode_runs_real_runtime_path(workspace: Path) ->
     assert any(event.type == "session.history.loaded" for event in events)
 
 
+def test_event_renderer_ignores_duplicate_durable_event_sequences() -> None:
+    output = StringIO()
+    console = Console(file=output, force_terminal=False, color_system=None, width=120)
+    renderer = EventRenderer(console)
+    renderer.begin_turn()
+    renderer.render(
+        RuntimeEvent(
+            "e1",
+            "run",
+            1,
+            "model.delta",
+            utc_now(),
+            {"content": "single response"},
+        )
+    )
+    renderer.render(
+        RuntimeEvent(
+            "e1-replayed",
+            "run",
+            1,
+            "model.delta",
+            utc_now(),
+            {"content": "single response"},
+        )
+    )
+
+    run = AgentRun.create("local", "task")
+    run.status = RunStatus.COMPLETED
+    run.result = "single response"
+    renderer.finish(run)
+
+    assert output.getvalue().count("single response") == 1
+
+
+
 @pytest.mark.asyncio
 async def test_interactive_commands_create_and_resume_sessions(workspace: Path) -> None:
     settings = make_settings(workspace)

@@ -219,6 +219,40 @@ def test_rotating_structured_log_file(workspace: Path) -> None:
     logger.handlers.clear()
 
 
+def test_cli_eval_preflight_has_no_lock_or_log_side_effect(
+    workspace: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = write_default_local_config(workspace / "agent-runtime.toml", workspace=workspace)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        .replace('provider = "mock"', 'provider = "openai-compatible"')
+        .replace('api_key_env = "OPENAI_API_KEY"', 'api_key_env = "MISSING_ACCEPTANCE_API_KEY"'),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("MISSING_ACCEPTANCE_API_KEY", raising=False)
+
+    parser = build_parser()
+    arguments = parser.parse_args(
+        [
+            "--workspace",
+            str(workspace),
+            "--config",
+            str(config_path),
+            "eval",
+            "run",
+            "--case",
+            "explain-project",
+        ]
+    )
+
+    assert asyncio.run(async_main(arguments)) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["code"] == "AcceptanceSuiteError"
+    assert "MISSING_ACCEPTANCE_API_KEY" in payload["detail"]
+    assert not (workspace / ".agent-runtime").exists()
+    assert not (workspace / "logs").exists()
+
+
 def test_cli_init_and_status(workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
     parser = build_parser()
     init_args = parser.parse_args(["--workspace", str(workspace), "init"])

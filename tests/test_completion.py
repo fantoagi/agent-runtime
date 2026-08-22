@@ -303,6 +303,101 @@ def test_completion_policy_requires_git_status_for_new_untracked_file() -> None:
     assert verified.followup_message is None
 
 
+def test_completion_policy_persists_workspace_snapshots_without_attributing_old_dirty_files() -> None:
+    policy = CodingCompletionPolicy(
+        {"write_text_file", "git_diff", "git_status", "run_process"}
+    )
+    baseline = _execution(
+        "git_status", {}, result_data={
+            "entries": [
+                {"kind": "modified", "path": "user.py", "index_status": " ", "worktree_status": "M"}
+            ]
+        }, position=0
+    )
+    write = _execution(
+        "write_text_file",
+        {"path": "created.py", "content": "answer = 1"},
+        result_data={
+            "path": "created.py",
+            "created": True,
+            "changed": True,
+            "before_sha256": None,
+            "after_sha256": "after",
+        },
+        position=1,
+    )
+    diff = _execution("git_diff", {}, result_data={"exit_code": 0, "has_changes": False}, position=2)
+    after = _execution(
+        "git_status", {}, result_data={
+            "entries": [
+                {"kind": "modified", "path": "user.py", "index_status": " ", "worktree_status": "M"},
+                {"kind": "untracked", "path": "created.py", "index_status": "?", "worktree_status": "?"},
+                {"kind": "deleted", "path": "removed.py", "index_status": " ", "worktree_status": "D"},
+                {"kind": "renamed", "path": "new.py", "original_path": "old.py", "index_status": "R", "worktree_status": " "},
+            ]
+        }, position=3
+    )
+    validation = _execution(
+        "run_process",
+        {"argv": ["python", "-m", "pytest"]},
+        result_data={"exit_code": 0},
+        position=4,
+    )
+
+    decision = policy.assess(
+        [baseline, write, diff, after, validation],
+        verification_requested=False,
+    )
+
+    assert decision.evidence.status == "verified"
+    assert decision.evidence.write_changed is True
+    assert decision.evidence.workspace_baseline_captured is True
+    assert decision.evidence.dirty_workspace_before_write is True
+    assert [item.path for item in decision.evidence.workspace_before] == ["user.py"]
+    assert [item.path for item in decision.evidence.workspace_after] == [
+        "user.py", "created.py", "removed.py", "new.py"
+    ]
+    assert decision.evidence.tracked_diff_present is False
+    assert decision.evidence.untracked_created_files == ("created.py",)
+    assert decision.evidence.deleted_files == ("removed.py",)
+    assert decision.evidence.renamed_files == (("old.py", "new.py"),)
+    assert decision.evidence.changed_files == ("created.py",)
+
+
+def test_completion_policy_rejects_successful_validation_when_write_was_noop() -> None:
+    policy = CodingCompletionPolicy({"write_text_file", "git_diff", "run_process"})
+    decision = policy.assess(
+        [
+            _execution(
+                "write_text_file",
+                {"path": "same.py", "content": "answer = 1"},
+                result_data={
+                    "path": "same.py",
+                    "changed": False,
+                    "before_sha256": "same",
+                    "after_sha256": "same",
+                },
+            ),
+            _execution("git_diff", {}, result_data={"exit_code": 0, "has_changes": False}, position=1),
+            _execution(
+                "run_process",
+                {"argv": ["python", "-m", "pytest"]},
+                result_data={"exit_code": 0},
+                position=2,
+            ),
+        ],
+        verification_requested=False,
+    )
+
+    assert decision.evidence.status == "unverified"
+    assert decision.evidence.write_changed is False
+    assert decision.evidence.changed_files == ()
+    assert decision.evidence.unmet_requirements == (
+        "no workspace file changed by a completed write Tool",
+    )
+    assert decision.followup_message is not None
+
+
 def test_completion_policy_reports_failed_validation_and_patch_files() -> None:
     policy = CodingCompletionPolicy({"apply_patch", "git_diff", "run_process"})
     decision = policy.assess(
